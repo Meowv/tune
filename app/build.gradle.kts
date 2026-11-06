@@ -35,3 +35,7 @@ android {
         xmlReport = true
     }
 }
+
+dependencies {
+    implementation(libs.core.splashscreen)
+}

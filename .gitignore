@@ -24,3 +24,5 @@ secrets.properties
 # Local artifacts and diagnostics
 /artifacts/
 api28-evidence/
+
+/docs
