@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="screen_padding">16dp</dimen>
+    <dimen name="header_height">96dp</dimen>
+    <dimen name="logo_size">80dp</dimen>
+    <dimen name="brand_size">24sp</dimen>
+    <dimen name="tagline_size">18sp</dimen>
+    <dimen name="navigation_width">160dp</dimen>
+    <dimen name="navigation_item_height">72dp</dimen>
+    <dimen name="content_gap">24dp</dimen>
+    <dimen name="card_padding">32dp</dimen>
+    <dimen name="cover_size">192dp</dimen>
+    <dimen name="title_size">32sp</dimen>
+    <dimen name="artist_size">20sp</dimen>
+    <dimen name="controls_height">96dp</dimen>
+    <dimen name="play_button_size">88dp</dimen>
+    <dimen name="settings_row_height">60dp</dimen>
+    <dimen name="settings_card_padding_vertical">8dp</dimen>
+</resources>

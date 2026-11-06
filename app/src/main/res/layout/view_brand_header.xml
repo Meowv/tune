@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="@dimen/header_height"
+    android:background="@drawable/bg_header">
+
+    <ImageView
+        android:layout_width="500dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="end"
+        android:src="@drawable/twilight_road"
+        android:scaleType="centerCrop"
+        android:alpha="0.75"
+        android:importantForAccessibility="no" />
+
+    <View
+        android:layout_width="500dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="end"
+        android:background="@drawable/bg_header_shade"
+        android:importantForAccessibility="no" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="16dp">
+
+        <ImageView
+            android:layout_width="@dimen/logo_size"
+            android:layout_height="@dimen/logo_size"
+            android:src="@drawable/ic_brand"
+            android:contentDescription="@string/app_name" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="16dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/app_name"
+                android:textSize="@dimen/brand_size"
+                android:textColor="@color/text_primary"
+                android:id="@+id/brand_name"
+                android:fontFamily="sans-serif-medium"
+                android:accessibilityHeading="true" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/brand_separator"
+                android:textSize="@dimen/brand_size"
+                android:textColor="@color/text_primary"
+                android:layout_marginHorizontal="5dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/app_name_en"
+                android:textSize="@dimen/brand_size"
+                android:textColor="@color/text_primary"
+                android:id="@+id/brand_name_en"
+                android:fontFamily="sans-serif-medium" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:text="@string/brand_tagline"
+                android:textSize="@dimen/tagline_size"
+                android:textColor="@color/text_primary"
+                android:id="@+id/brand_tagline"
+                android:layout_weight="1"
+                android:layout_marginStart="16dp"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+        </LinearLayout>
+
+        <TextClock
+            android:layout_width="72dp"
+            android:layout_height="wrap_content"
+            android:format24Hour="HH:mm"
+            android:format12Hour="HH:mm"
+            android:textSize="22sp"
+            android:textColor="@color/text_primary"
+            android:gravity="end" />
+
+    </LinearLayout>
+
+</FrameLayout>
