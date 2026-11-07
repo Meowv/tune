@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.meowv.tune.domain.DirectoryCacheState
 import com.meowv.tune.domain.PlayerController
+import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.domain.RadioRepository
 import com.meowv.tune.domain.RadioQueue
 import com.meowv.tune.domain.RadioScope
@@ -31,7 +32,7 @@ data class CountryOptions(
 
 class RadioViewModel(
     private val repository: RadioRepository,
-    player: PlayerController,
+    private val player: PlayerController,
     private val countryResolver: CountryResolver,
     scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
     private val cache: DirectoryCache? = null,
@@ -78,6 +79,9 @@ class RadioViewModel(
         load?.cancel()
         if (directory.value.scope != scope) {
             queue?.clearScope()
+            viewModelScope.launch {
+                runCatching { player.dispatch(PlayerCommand.CancelPending) }
+            }
             resolved = null
             page = StationPage()
             directory.value = RadioUiState(scope = scope)

@@ -16,6 +16,7 @@ import com.meowv.tune.radio.DirectoryValue
 import com.meowv.tune.radio.DirectoryCache
 import com.meowv.tune.settings.DataStoreSettingsRepository
 import com.meowv.tune.playback.PlaybackIntent
+import com.meowv.tune.playback.PlaybackRetryPolicy
 import com.meowv.tune.playback.ResolvedRadioStream
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.delay
@@ -44,6 +45,11 @@ class TuneTestRunner : AndroidJUnitRunner() {
 class TuneTestApplication : TuneApplication() {
     internal val mockNetwork = MutableStateFlow(NetworkState(NetworkType.WIFI, metered = false))
     override val networkState: StateFlow<NetworkState> get() = mockNetwork
+    override val playbackRetryPolicy = PlaybackRetryPolicy(
+        maxSameStationRetries = 2,
+        maxAlternateStations = 3,
+        backoffMillis = listOf(20L, 40L)
+    )
 
     override val mediaHttp by lazy {
         OkHttpClient.Builder().addInterceptor { chain ->
@@ -61,9 +67,14 @@ class TuneTestApplication : TuneApplication() {
     }
 
     override suspend fun resolveStream(intent: PlaybackIntent): ResolvedRadioStream {
+        resolveCalls.computeIfAbsent(intent.station.uuid) { AtomicInteger() }.incrementAndGet()
         resolutionStarts[intent.station.uuid]?.complete(Unit)
         latePlaybackDelays[intent.station.uuid]?.let { withContext(NonCancellable) { delay(it) } }
         playbackDelays[intent.station.uuid]?.let { delay(it) }
+        val failures = resolveFailures[intent.station.uuid]
+        if (failures != null && failures.getAndUpdate { if (it > 0) it - 1 else 0 } > 0) {
+            throw TuneFailure(TuneError.TIMEOUT)
+        }
         val file = when (intent.station.uuid) {
             UUID(0, 21) -> "radio.mp3"
             UUID(0, 22) -> "radio.aac"
@@ -83,6 +94,8 @@ class TuneTestApplication : TuneApplication() {
     internal val playbackDelays = ConcurrentHashMap<UUID, Long>()
     internal val latePlaybackDelays = ConcurrentHashMap<UUID, Long>()
     internal val resolutionStarts = ConcurrentHashMap<UUID, CompletableDeferred<Unit>>()
+    internal val resolveCalls = ConcurrentHashMap<UUID, AtomicInteger>()
+    internal val resolveFailures = ConcurrentHashMap<UUID, AtomicInteger>()
     @Volatile internal var failQueries = false
     private val directory = listOf(RadioCountry(country, 36))
     private val stations = (1L..36L).map { Station(UUID(0, it), "Test station $it", country) }

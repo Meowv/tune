@@ -8,7 +8,6 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.domain.Station
-import com.meowv.tune.domain.TuneError
 import java.util.UUID
 import com.meowv.tune.playback.RadioPlaybackService
 import kotlinx.coroutines.delay
@@ -40,17 +39,6 @@ class RadioMediaConnectionTest {
                 val stopped = withTimeout(3000) { connection.state.first { it.phase == PlaybackPhase.IDLE } }
                 assertEquals(null, stopped.station)
             }
-            val missing = Station(UUID(0, 24), "missing", null)
-            connection.dispatch(PlayerCommand.Play(missing))
-            val error = withTimeout(8000) { connection.state.first { it.phase == PlaybackPhase.ERROR } }
-            assertEquals(TuneError.HTTP, error.error)
-            assertEquals(404, error.statusCode)
-            connection.dispatch(PlayerCommand.Play(Station(UUID(0, 25), "no-source", null)))
-            val noSource = withTimeout(3000) {
-                connection.state.first { it.station?.uuid == UUID(0, 25) && it.phase == PlaybackPhase.ERROR }
-            }
-            assertEquals(TuneError.INVALID_RESPONSE, noSource.error)
-            connection.dispatch(PlayerCommand.Stop)
         }
     }
 

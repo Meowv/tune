@@ -306,6 +306,15 @@ private fun playbackLabel(state: PlayerUiState): String = when (state.error) {
     TuneError.NETWORK_OFFLINE -> stringResource(R.string.playback_offline)
     TuneError.WIFI_ONLY -> stringResource(R.string.playback_wifi_only)
     TuneError.MOBILE_CONFIRMATION -> stringResource(R.string.playback_mobile_confirmation)
+    TuneError.AUDIO_FOCUS_LOST -> stringResource(R.string.playback_focus_lost)
+    TuneError.AUDIO_DISCONNECTED -> stringResource(R.string.playback_disconnected)
+    TuneError.HTTP, TuneError.SERVER -> state.statusCode?.let { stringResource(R.string.playback_http, it) }
+        ?: stringResource(R.string.playback_unavailable)
+    TuneError.TIMEOUT -> stringResource(R.string.playback_timeout)
+    TuneError.TLS -> stringResource(R.string.playback_tls)
+    TuneError.INVALID_RESPONSE -> stringResource(R.string.playback_no_source)
+    TuneError.CONNECTION -> stringResource(R.string.playback_connection)
+    TuneError.UNSUPPORTED_MEDIA -> stringResource(R.string.playback_format)
     else -> when (state.phase) {
         PlaybackPhase.IDLE -> stringResource(R.string.player_idle)
         PlaybackPhase.RESOLVING -> stringResource(R.string.playback_resolving)
@@ -314,13 +323,6 @@ private fun playbackLabel(state: PlayerUiState): String = when (state.error) {
         PlaybackPhase.PLAYING -> stringResource(R.string.playback_live)
         PlaybackPhase.PAUSED -> stringResource(R.string.playback_paused)
         PlaybackPhase.ERROR -> when (state.error) {
-            TuneError.HTTP, TuneError.SERVER -> state.statusCode?.let { stringResource(R.string.playback_http, it) }
-                ?: stringResource(R.string.playback_unavailable)
-            TuneError.TIMEOUT -> stringResource(R.string.playback_timeout)
-            TuneError.TLS -> stringResource(R.string.playback_tls)
-            TuneError.INVALID_RESPONSE -> stringResource(R.string.playback_no_source)
-            TuneError.CONNECTION -> stringResource(R.string.playback_connection)
-            TuneError.UNSUPPORTED_MEDIA -> stringResource(R.string.playback_format)
             else -> stringResource(R.string.playback_unavailable)
         }
     }

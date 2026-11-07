@@ -28,13 +28,15 @@ class RadioPlaybackService : MediaSessionService() {
         val audio = AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build()
         val player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSources))
-            .setAudioAttributes(audio, true)
+            .setAudioAttributes(audio, false)
             .build()
         app.playerController.engine = RadioPlayback(
+            this,
             player,
             app.radioQueue,
             app.userSettings,
             app.networkState,
+            app.playbackRetryPolicy,
             app::resolveStream,
             app.playerController::publish
         )

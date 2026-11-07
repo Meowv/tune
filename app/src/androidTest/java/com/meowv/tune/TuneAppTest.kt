@@ -33,6 +33,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
 import com.meowv.tune.domain.PlaybackPhase
 
 @OptIn(ExperimentalTestApi::class)
@@ -184,6 +185,32 @@ class TuneAppTest {
         Thread.sleep(500)
         assertEquals(PlaybackPhase.PAUSED, app.playerController.state.value.phase)
         runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
+    }
+
+    @Test
+    fun exhaustedRecoveryExposesWorkingRetryControl() {
+        val stations = (1L..4L).map { UUID(0, it) }
+        try {
+            stations.forEach { uuid -> app.resolveFailures[uuid] = AtomicInteger(20) }
+            val first = "station_${UUID(0, 1)}"
+            compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(first))
+            compose.onNodeWithTag(first).performClick()
+            compose.waitUntil(10_000) {
+                app.playerController.state.value.phase == PlaybackPhase.ERROR
+            }
+            compose.onNodeWithTag("player_pause").assertIsEnabled()
+                .assertContentDescriptionEquals("重试")
+
+            app.resolveFailures.clear()
+            compose.onNodeWithTag("player_pause").performClick()
+            compose.waitUntil(8000) {
+                app.playerController.state.value.phase == PlaybackPhase.PLAYING &&
+                    app.playerController.state.value.station?.uuid == UUID(0, 4)
+            }
+        } finally {
+            app.resolveFailures.clear()
+            runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
+        }
     }
 
     @Test

@@ -19,6 +19,7 @@ import com.meowv.tune.domain.RadioRepository
 import com.meowv.tune.domain.SettingsRepository
 import com.meowv.tune.playback.MediaProbe
 import com.meowv.tune.playback.PlaybackIntent
+import com.meowv.tune.playback.PlaybackRetryPolicy
 import com.meowv.tune.playback.MediaUrlPolicy
 import com.meowv.tune.playback.NetworkMonitor
 import com.meowv.tune.playback.RadioMediaConnection
@@ -46,6 +47,7 @@ open class TuneApplication : Application(), SingletonImageLoader.Factory {
     internal open val userSettings: SettingsRepository by lazy { settingsRepository(this) }
     private val networkMonitor by lazy { NetworkMonitor(this) }
     internal open val networkState: StateFlow<NetworkState> get() = networkMonitor.state
+    internal open val playbackRetryPolicy: PlaybackRetryPolicy get() = PlaybackRetryPolicy()
     private val remoteCountries by lazy { RadioBrowserCountries(radioBrowser) }
     val countryDirectory = CountryDirectory { loadCountries().value }
 

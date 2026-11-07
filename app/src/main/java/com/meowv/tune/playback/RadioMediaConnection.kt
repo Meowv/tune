@@ -85,6 +85,7 @@ internal class RadioMediaConnection(context: Context) : PlayerController {
             PlayerCommand.Previous -> requireEngine().previous()
             PlayerCommand.AllowMeteredRetry -> requireEngine().allowMeteredRetry()
             PlayerCommand.DismissNetworkPrompt -> requireEngine().dismissNetworkPrompt()
+            PlayerCommand.CancelPending -> requireEngine().cancelPending()
             PlayerCommand.Stop -> requireEngine().stop()
         }
     }
