@@ -226,13 +226,19 @@ private fun GlobalMiniPlayer(isCar: Boolean, playback: StateFlow<PlayerUiState>,
                     Row(verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(if (isCar) 18.dp else 0.dp)) {
                         PreviewControl(R.drawable.ic_radio_previous, stringResource(R.string.player_previous),
-                            if (isCar) 56.dp else 48.dp, 0.dp, if (isCar) 64.dp else 34.dp, tag = "player_previous")
+                            if (isCar) 56.dp else 48.dp, 0.dp, if (isCar) 64.dp else 34.dp, tag = "player_previous",
+                            onClick = if (connected && active && state.canPrevious) {
+                                ({ onPlayback(PlayerCommand.Previous) })
+                            } else null)
                         PreviewControl(if (pausing) R.drawable.ic_radio_pause else R.drawable.ic_radio_play,
                             stringResource(if (pausing) R.string.action_pause else if (phase == PlaybackPhase.ERROR) R.string.directory_retry else R.string.action_play),
                             if (isCar) 72.dp else 48.dp, if (isCar) 72.dp else 44.dp,
                             if (isCar) 44.dp else 28.dp, background = TuneColors.Primary, tint = TuneColors.Background, tag = "player_pause", onClick = if (canToggle) ({ onPlayback(PlayerCommand.TogglePause) }) else null)
                         PreviewControl(R.drawable.ic_radio_next, stringResource(R.string.player_next),
-                            if (isCar) 56.dp else 48.dp, 0.dp, if (isCar) 64.dp else 34.dp, tag = "player_next")
+                            if (isCar) 56.dp else 48.dp, 0.dp, if (isCar) 64.dp else 34.dp, tag = "player_next",
+                            onClick = if (connected && active && state.canNext) {
+                                ({ onPlayback(PlayerCommand.Next) })
+                            } else null)
                         if (active && connected) PreviewControl(R.drawable.ic_ui_close, stringResource(R.string.action_stop),
                             if (isCar) 56.dp else 48.dp, 0.dp, 24.dp, tag = "player_stop",
                             onClick = { onPlayback(PlayerCommand.Stop) })

@@ -30,7 +30,12 @@ class RadioPlaybackService : MediaSessionService() {
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSources))
             .setAudioAttributes(audio, true)
             .build()
-        app.playerController.engine = RadioPlayback(player, app::resolveStream, app.playerController::publish)
+        app.playerController.engine = RadioPlayback(
+            player,
+            app.radioQueue,
+            app::resolveStream,
+            app.playerController::publish
+        )
         val activity = PendingIntent.getActivity(this, 0,
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)

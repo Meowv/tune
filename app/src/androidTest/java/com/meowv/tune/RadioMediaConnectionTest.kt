@@ -27,10 +27,11 @@ class RadioMediaConnectionTest {
         val connection = app.playerController
         ActivityScenario.launch(MainActivity::class.java).use {
             withTimeout(5000) { connection.connected.first { it } }
-            for (file in listOf("radio.mp3", "radio.aac", "radio.m3u8")) {
-                val station = Station(UUID.randomUUID(), file, null)
+            withTimeout(5000) { app.radioQueue.activeScope.first { it != null } }
+            for ((ordinal, file) in listOf(21L to "radio.mp3", 22L to "radio.aac", 23L to "radio.m3u8")) {
+                val station = Station(UUID(0, ordinal), file, null)
                 connection.dispatch(PlayerCommand.Play(station))
-                withTimeout(8000) { connection.state.first { it.station == station && it.phase == PlaybackPhase.PLAYING } }
+                withTimeout(8000) { connection.state.first { it.station?.uuid == station.uuid && it.phase == PlaybackPhase.PLAYING } }
                 connection.dispatch(PlayerCommand.TogglePause)
                 withTimeout(3000) { connection.state.first { it.phase == PlaybackPhase.PAUSED } }
                 connection.dispatch(PlayerCommand.TogglePause)
@@ -39,12 +40,12 @@ class RadioMediaConnectionTest {
                 val stopped = withTimeout(3000) { connection.state.first { it.phase == PlaybackPhase.IDLE } }
                 assertEquals(null, stopped.station)
             }
-            val missing = Station(UUID.randomUUID(), "missing", null)
+            val missing = Station(UUID(0, 24), "missing", null)
             connection.dispatch(PlayerCommand.Play(missing))
             val error = withTimeout(8000) { connection.state.first { it.phase == PlaybackPhase.ERROR } }
             assertEquals(TuneError.HTTP, error.error)
             assertEquals(404, error.statusCode)
-            connection.dispatch(PlayerCommand.Play(Station(UUID.randomUUID(), "no-source", null)))
+            connection.dispatch(PlayerCommand.Play(Station(UUID(0, 25), "no-source", null)))
             val noSource = withTimeout(3000) { connection.state.first { it.phase == PlaybackPhase.ERROR } }
             assertEquals(TuneError.INVALID_RESPONSE, noSource.error)
             connection.dispatch(PlayerCommand.Stop)

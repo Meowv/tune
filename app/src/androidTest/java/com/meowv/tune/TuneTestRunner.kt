@@ -16,12 +16,17 @@ import com.meowv.tune.settings.DataStoreSettingsRepository
 import com.meowv.tune.playback.PlaybackIntent
 import com.meowv.tune.playback.ResolvedRadioStream
 import androidx.test.platform.app.InstrumentationRegistry
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 private val Context.testDirectory by preferencesDataStore("test_radio_directory")
@@ -49,7 +54,17 @@ class TuneTestApplication : TuneApplication() {
     }
 
     override suspend fun resolveStream(intent: PlaybackIntent): ResolvedRadioStream {
-        val file = if (intent.station.name.startsWith("Test station ")) "radio.mp3" else intent.station.name
+        resolutionStarts[intent.station.uuid]?.complete(Unit)
+        latePlaybackDelays[intent.station.uuid]?.let { withContext(NonCancellable) { delay(it) } }
+        playbackDelays[intent.station.uuid]?.let { delay(it) }
+        val file = when (intent.station.uuid) {
+            UUID(0, 21) -> "radio.mp3"
+            UUID(0, 22) -> "radio.aac"
+            UUID(0, 23) -> "radio.m3u8"
+            UUID(0, 24) -> "missing"
+            UUID(0, 25) -> "no-source"
+            else -> if (intent.station.name.startsWith("Test station ")) "radio.mp3" else intent.station.name
+        }
         if (file == "no-source") throw TuneFailure(TuneError.INVALID_RESPONSE)
         return ResolvedRadioStream("https://test.example/$file".toHttpUrl(), file == "radio.m3u8")
     }
@@ -58,6 +73,9 @@ class TuneTestApplication : TuneApplication() {
     override val userSettings by lazy { DataStoreSettingsRepository(testSettings) }
     internal val country = requireNotNull(CountryCode.parse("JP"))
     internal val queries = AtomicInteger()
+    internal val playbackDelays = ConcurrentHashMap<UUID, Long>()
+    internal val latePlaybackDelays = ConcurrentHashMap<UUID, Long>()
+    internal val resolutionStarts = ConcurrentHashMap<UUID, CompletableDeferred<Unit>>()
     @Volatile internal var failQueries = false
     private val directory = listOf(RadioCountry(country, 36))
     private val stations = (1L..36L).map { Station(UUID(0, it), "Test station $it", country) }

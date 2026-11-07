@@ -156,6 +156,8 @@ private fun ScopeSelector(name: String, wide: Boolean, modifier: Modifier, onCli
 private fun StationRow(station: Station, isCar: Boolean, onPlay: ((Station) -> Unit)?) {
     val title = station.name.ifBlank { stringResource(R.string.station_unnamed) }
     Surface(
+        onClick = { onPlay?.invoke(station) },
+        enabled = onPlay != null,
         color = TuneColors.Surface,
         shape = TuneShapes.Station,
         modifier = Modifier.fillMaxWidth().testTag("station_${station.uuid}")

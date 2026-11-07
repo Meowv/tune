@@ -52,10 +52,24 @@ class TuneAppTest {
     @Test
     fun stationPlayButtonControlsTheLivePlayer() {
         val first = "station_${UUID(0, 1)}"
+        val second = "station_${UUID(0, 2)}"
         compose.waitUntil(5000) { app.playerController.connected.value }
         compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(first))
-        compose.onNode(hasAnyAncestor(hasTestTag(first)) and hasContentDescription("播放")).performClick()
+        compose.onNodeWithTag(first).performClick()
         compose.waitUntil(8000) { app.playerController.state.value.phase == PlaybackPhase.PLAYING }
+        compose.onNodeWithTag("player_previous").assertIsNotEnabled()
+        compose.onNodeWithTag("player_next").assertIsEnabled().performClick()
+        compose.waitUntil(8000) {
+            app.playerController.state.value.station?.uuid == UUID(0, 2) &&
+                app.playerController.state.value.phase == PlaybackPhase.PLAYING
+        }
+        compose.onNodeWithTag("player_previous").assertIsEnabled().performClick()
+        compose.waitUntil(8000) {
+            app.playerController.state.value.station?.uuid == UUID(0, 1) &&
+                app.playerController.state.value.phase == PlaybackPhase.PLAYING
+        }
+        compose.onNodeWithTag("player_previous").assertIsNotEnabled()
+        compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(second))
         compose.onNodeWithTag("player_pause").performClick()
         compose.waitUntil(3000) { app.playerController.state.value.phase == PlaybackPhase.PAUSED }
         compose.onNodeWithTag("player_pause").performClick()

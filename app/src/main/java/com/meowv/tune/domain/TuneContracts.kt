@@ -13,6 +13,8 @@ class QueueSelection internal constructor(val station: Station)
 
 interface RadioQueue {
     val canPrevious: StateFlow<Boolean>
+    val canNext: StateFlow<Boolean>
+    val activeScope: StateFlow<ResolvedRadioScope?>
 
     fun updateDirectory(scope: ResolvedRadioScope, page: StationPage)
     fun clearScope()

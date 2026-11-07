@@ -77,12 +77,12 @@ internal class RadioMediaConnection(context: Context) : PlayerController {
     }
 
     override suspend fun dispatch(command: PlayerCommand) = withContext(Dispatchers.Main.immediate) {
-        val media = controller ?: throw TuneFailure(TuneError.PLAYBACK)
+        controller ?: throw TuneFailure(TuneError.PLAYBACK)
         when (command) {
             is PlayerCommand.Play -> requireEngine().play(command.station)
             PlayerCommand.TogglePause -> requireEngine().toggle()
-            PlayerCommand.Next -> if (media.hasNextMediaItem()) media.seekToNextMediaItem() else Unit
-            PlayerCommand.Previous -> if (media.hasPreviousMediaItem()) media.seekToPreviousMediaItem() else Unit
+            PlayerCommand.Next -> requireEngine().next()
+            PlayerCommand.Previous -> requireEngine().previous()
             PlayerCommand.Stop -> requireEngine().stop()
         }
     }

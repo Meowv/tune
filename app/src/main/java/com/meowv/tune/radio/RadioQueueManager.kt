@@ -18,12 +18,18 @@ class RadioQueueManager(private val repository: RadioRepository) : RadioQueue {
     private val stateLock = Any()
     private var session: Session? = null
     private val previousAvailable = MutableStateFlow(false)
+    private val nextAvailable = MutableStateFlow(false)
+    private val currentScope = MutableStateFlow<ResolvedRadioScope?>(null)
     override val canPrevious = previousAvailable.asStateFlow()
+    override val canNext = nextAvailable.asStateFlow()
+    override val activeScope = currentScope.asStateFlow()
 
     override fun clearScope() {
         synchronized(stateLock) {
             session = null
             previousAvailable.value = false
+            nextAvailable.value = false
+            currentScope.value = null
         }
     }
 
@@ -32,6 +38,7 @@ class RadioQueueManager(private val repository: RadioRepository) : RadioQueue {
             val active = session?.takeIf { it.scope == scope } ?: Session(scope).also {
                 session = it
                 previousAvailable.value = false
+                currentScope.value = scope
             }
             val filtered = StationPage(
                 page.stations.filter { scope.country == null || it.countryCode == scope.country }.distinctBy { it.uuid },
@@ -41,6 +48,7 @@ class RadioQueueManager(private val repository: RadioRepository) : RadioQueue {
                 active.page = filtered
                 if (scope.country == null) active.preview = filtered.stations
             }
+            nextAvailable.value = active.page.stations.isNotEmpty()
         }
     }
 
