@@ -5,6 +5,7 @@ import com.meowv.tune.domain.TuneFailure
 import java.net.InetAddress
 import java.net.Proxy
 import java.net.UnknownHostException
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.*
 import okhttp3.Dns
@@ -18,6 +19,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RadioBrowserClientTest {
+    @Test fun playbackClickUsesHttpsAndDoesNotFailOverAfterAnAmbiguousFailure() = runBlocking {
+        pair { first, second, http, a, b ->
+            first.enqueue(MockResponse().setResponseCode(503))
+            val id = UUID.randomUUID()
+            val client = browser(http, MemoryMirrorStore(), listOf(a, b))
+            assertEquals(TuneError.SERVER, captureFailure { client.recordPlaybackClick(id) }.kind)
+            val request = first.takeRequest(1, TimeUnit.SECONDS)!!
+            assertEquals("/json/url/$id", request.path)
+            assertNotNull(request.handshake)
+            assertEquals(0, second.requestCount)
+        }
+    }
     @Test fun failoverUsesHttpsAndRemembersHealthyNode() = runBlocking {
         pair { first, second, http, a, b ->
             first.enqueue(MockResponse().setResponseCode(503))

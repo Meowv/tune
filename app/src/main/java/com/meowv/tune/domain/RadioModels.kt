@@ -5,6 +5,8 @@ import java.util.UUID
 
 @JvmInline
 value class CountryCode private constructor(val value: String) {
+    fun displayName(locale: Locale): String = Locale("", value).getDisplayCountry(locale).ifBlank { value }
+
     companion object {
         private val validCodes = Locale.getISOCountries().toSet()
 
@@ -72,8 +74,7 @@ data class RadioCountry(val code: CountryCode, val stationCount: Int) {
         require(stationCount > 0)
     }
 
-    fun displayName(locale: Locale): String =
-        Locale("", code.value).getDisplayCountry(locale).ifBlank { code.value }
+    fun displayName(locale: Locale): String = code.displayName(locale)
 }
 
 // AUTO 的有效国家与偏好分开，供缓存、分页和队列共同识别范围。

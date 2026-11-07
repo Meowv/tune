@@ -17,12 +17,12 @@ import kotlinx.coroutines.launch
 class SettingsViewModel(private val repository: SettingsRepository) : ViewModel() {
     private val error = MutableStateFlow(false)
     val storageError = error.asStateFlow()
-    val settings = repository.settings.onEach { error.value = false }.retryWhen { cause, _ ->
+    val settings = repository.settings.onEach<TuneSettings?> { error.value = false }.retryWhen { cause, _ ->
         if (cause !is IOException) return@retryWhen false
         error.value = true
         delay(2000)
         true
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, TuneSettings())
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     fun update(transform: (TuneSettings) -> TuneSettings) {
         viewModelScope.launch {

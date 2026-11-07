@@ -4,6 +4,7 @@ import com.meowv.tune.domain.TuneError
 import com.meowv.tune.domain.TuneFailure
 import java.io.IOException
 import java.io.InterruptedIOException
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLException
 import kotlin.coroutines.resume
@@ -23,6 +24,12 @@ class RadioBrowserClient internal constructor(
     private val transport: DirectoryHttp,
     private val mirrors: MirrorDirectory
 ) {
+    // 计数请求可能已送达镜像，网络失败后由调用方使用目录元数据兜底。
+    internal suspend fun recordPlaybackClick(uuid: UUID): String {
+        val host = mirrors.candidates().firstOrNull() ?: throw TuneFailure(TuneError.CONNECTION)
+        return transport.get(host, "/json/url/$uuid", timeoutMillis = 3000)
+    }
+
     suspend fun get(endpoint: String, query: Map<String, String> = emptyMap()): String {
         require(endpoint.matches(ENDPOINT)) { "Expected a Radio Browser JSON endpoint" }
         var lastFailure: TuneFailure? = null

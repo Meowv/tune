@@ -15,7 +15,7 @@ android {
         targetSdk = 35
         versionCode = 4
         versionName = "0.4.0-p3"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = "com.meowv.tune.TuneTestRunner"
     }
 
     buildFeatures {
@@ -53,6 +53,11 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.serialization.json)
     implementation(libs.dnsjava)
+    implementation(libs.coil.compose)
+    implementation(libs.coil.network)
+    implementation(libs.media3.session)
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.okhttp)
 
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)

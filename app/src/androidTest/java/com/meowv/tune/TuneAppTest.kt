@@ -19,25 +19,33 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.junit.Assert.*
 import org.junit.Before
 import com.meowv.tune.domain.TuneSettings
-import com.meowv.tune.settings.settingsRepository
+import com.meowv.tune.domain.RadioScope
+import com.meowv.tune.domain.ScopeMode
+import com.meowv.tune.domain.CountryCode
+import com.meowv.tune.settings.SettingsViewModel
+import com.meowv.tune.radio.RadioViewModel
+import androidx.lifecycle.ViewModelProvider
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.util.UUID
 
 @OptIn(ExperimentalTestApi::class)
 @RunWith(AndroidJUnit4::class)
 class TuneAppTest {
     @get:Rule
     val compose = createAndroidComposeRule<MainActivity>()
+    private val app get() = compose.activity.application as TuneTestApplication
 
     @Before
-    fun resetPreviewSettings() {
-        runBlocking { settingsRepository(compose.activity).update { TuneSettings() } }
-        compose.waitUntil(5000) {
-            compose.onAllNodesWithContentDescription("收听范围，中国，切换地区")
-                .fetchSemanticsNodes().isNotEmpty()
+    fun resetDirectoryState() {
+        runBlocking {
+            app.userSettings.update { TuneSettings(scope = RadioScope(ScopeMode.GLOBAL)) }
         }
+        compose.onNodeWithTag("station_list").performScrollToIndex(0)
+        awaitScope("收听范围，不限区域，切换地区")
     }
 
     @Test
@@ -68,25 +76,20 @@ class TuneAppTest {
 
     @Test
     fun selectedScopeAndPageSurviveActivityRecreation() {
+        val label = countryScopeLabel()
         openScopePicker()
         compose.onNodeWithTag("scope_picker").assertIsDisplayed()
-        compose.onNodeWithTag("scope_options").performScrollToNode(hasTestTag("scope_Japan"))
-        compose.onNodeWithTag("scope_Japan").performClick()
-        compose.waitUntil(5000) {
-            compose.onAllNodesWithContentDescription("收听范围，日本，切换地区")
-                .fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithTag("scope_selector").assertContentDescriptionEquals("收听范围，日本，切换地区")
+        compose.onNodeWithTag("scope_options").performScrollToNode(hasTestTag("scope_JP"))
+        compose.onNodeWithTag("scope_JP").performClick()
+        awaitScope(label)
+        compose.onNodeWithTag("scope_selector").assertContentDescriptionEquals(label)
         selectPage("nav_music")
         compose.activityRule.scenario.recreate()
         compose.onNodeWithTag("nav_music").assertIsSelected()
         compose.onNodeWithTag("page_music").assertIsDisplayed()
         selectPage("nav_radio")
-        compose.waitUntil(5000) {
-            compose.onAllNodesWithContentDescription("收听范围，日本，切换地区")
-                .fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithTag("scope_selector").assertContentDescriptionEquals("收听范围，日本，切换地区")
+        awaitScope(label)
+        compose.onNodeWithTag("scope_selector").assertContentDescriptionEquals(label)
         compose.onNodeWithTag("global_player").assertIsDisplayed()
     }
 
@@ -95,7 +98,7 @@ class TuneAppTest {
         openScopePicker()
         compose.activityRule.scenario.recreate()
         compose.onNodeWithTag("scope_picker").assertIsDisplayed()
-        compose.onNodeWithTag("scope_Auto").assertIsSelected()
+        compose.onNodeWithTag("scope_Global").assertIsSelected()
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton))
         compose.onNodeWithTag("scope_close").performClick()
         compose.onNodeWithTag("scope_picker").assertDoesNotExist()
@@ -153,13 +156,69 @@ class TuneAppTest {
 
     @Test
     fun stationScrollPositionSurvivesNavigationAndRecreation() {
+        val tag = "station_${UUID(0, 6)}"
+        compose.waitUntil(5000) { compose.onAllNodesWithText("Test station 1").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("station_list").performScrollToIndex(6)
-        compose.onNodeWithTag("station_QK").assertIsDisplayed()
+        compose.onNodeWithTag(tag).assertIsDisplayed()
+        val queries = app.queries.get()
         selectPage("nav_music")
         selectPage("nav_radio")
-        compose.onNodeWithTag("station_QK").assertIsDisplayed()
+        compose.onNodeWithTag(tag).assertIsDisplayed()
         compose.activityRule.scenario.recreate()
-        compose.onNodeWithTag("station_QK").assertIsDisplayed()
+        compose.onNodeWithTag(tag).assertIsDisplayed()
+        assertEquals(queries, app.queries.get())
+    }
+
+    @Test
+    fun countryListLoadsNextPageAtEnd() {
+        runBlocking { app.userSettings.update { it.copy(scope = RadioScope(ScopeMode.COUNTRY, app.country)) } }
+        val label = countryScopeLabel()
+        awaitScope(label)
+        compose.onNodeWithTag("directory_refresh").performClick()
+        compose.waitUntil(5000) {
+            var firstPageReady = false
+            compose.activityRule.scenario.onActivity { activity ->
+                val radio = ViewModelProvider(activity)[RadioViewModel::class].radioState.value
+                firstPageReady = !radio.isLoading && radio.cacheState == null && radio.stations.size == 30 && radio.hasMore
+            }
+            firstPageReady
+        }
+        val queries = app.queries.get()
+        compose.onNodeWithTag("station_list").performScrollToIndex(30)
+        compose.waitUntil(5000) { app.queries.get() > queries }
+        compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag("station_${UUID(0, 36)}"))
+        compose.onNodeWithTag("station_${UUID(0, 36)}").assertIsDisplayed()
+        assertEquals(queries + 1, app.queries.get())
+    }
+
+    @Test
+    fun failedRefreshKeepsCachedRowsAndCanRetry() {
+        compose.waitUntil(5000) { compose.onAllNodesWithText("Test station 1").fetchSemanticsNodes().isNotEmpty() }
+        app.failQueries = true
+        try {
+            compose.onNodeWithTag("directory_refresh").performClick()
+            compose.waitUntil(5000) { compose.onAllNodesWithText("加载失败").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("station_list").performScrollToNode(hasText("缓存"))
+            compose.onNodeWithText("缓存").assertIsDisplayed()
+            compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag("station_${UUID(0, 1)}"))
+            compose.onNodeWithTag("station_${UUID(0, 1)}").assertIsDisplayed()
+        } finally {
+            app.failQueries = false
+        }
+        compose.onNodeWithTag("station_list").performScrollToNode(hasText("重试"))
+        compose.onNodeWithText("重试").performClick()
+        compose.waitUntil(5000) { compose.onAllNodesWithText("加载失败").fetchSemanticsNodes().isEmpty() }
+    }
+
+    @Test
+    fun emptyCountryDoesNotShowGlobalOrDemoRows() {
+        val country = requireNotNull(CountryCode.parse("US"))
+        runBlocking { app.userSettings.update { it.copy(scope = RadioScope(ScopeMode.COUNTRY, country)) } }
+        val activity = compose.activity
+        awaitScope(activity.getString(R.string.scope_picker_description, country.displayName(activity.resources.configuration.locales[0])))
+        compose.waitUntil(5000) { compose.onAllNodesWithText("暂无可用电台").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("暂无可用电台").assertIsDisplayed()
+        compose.onNodeWithText("Test station 1").assertDoesNotExist()
     }
 
     @Test
@@ -197,17 +256,17 @@ class TuneAppTest {
             val nav = interactiveParent(findDescription(root, "电台") ?: error("Radio accessibility label missing"))
             assertTrue("Selected tab must expose platform selection: $nav", nav.isSelected)
             assertTrue(nav.isFocusable)
-            val scopeLabel = findDescription(root, "收听范围，中国，切换地区") ?: error("Scope accessibility label missing")
+            val scopeLabel = findDescription(root, "收听范围，不限区域，切换地区") ?: error("Scope accessibility label missing")
             val scope = interactiveParent(scopeLabel)
             assertTrue(scope.isClickable)
             scopeLabel.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
             assertTrue(scopeLabel.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS))
             compose.waitUntil(5000) {
-                currentRoot()?.let { findDescription(it, "收听范围，中国，切换地区") }?.isAccessibilityFocused == true
+                currentRoot()?.let { findDescription(it, "收听范围，不限区域，切换地区") }?.isAccessibilityFocused == true
             }
             assertTrue(scope.performAction(AccessibilityNodeInfo.ACTION_CLICK))
             compose.onNodeWithTag("scope_picker").assertIsDisplayed()
-            compose.onNodeWithTag("scope_Auto").assertIsSelected()
+            compose.onNodeWithTag("scope_Global").assertIsSelected()
             compose.onNodeWithTag("scope_close").assertContentDescriptionEquals("关闭")
         } finally {
             info.flags = previousFlags
@@ -218,6 +277,31 @@ class TuneAppTest {
 
     private fun openScopePicker() {
         compose.onNodeWithTag("scope_selector").performScrollTo().performClick()
+    }
+
+    private fun countryScopeLabel(): String {
+        val activity = compose.activity
+        return activity.getString(R.string.scope_picker_description, app.country.displayName(activity.resources.configuration.locales[0]))
+    }
+
+    private fun awaitScope(label: String) {
+        try {
+            compose.waitUntil(5000) {
+                compose.onAllNodesWithContentDescription(label).fetchSemanticsNodes().isNotEmpty()
+            }
+        } catch (error: ComposeTimeoutException) {
+            val scope = runBlocking { app.userSettings.settings.first().scope }
+            val selector = compose.onAllNodesWithTag("scope_selector").fetchSemanticsNodes()
+                .map { it.config.getOrElse(SemanticsProperties.ContentDescription) { emptyList() } }
+            var models = ""
+            compose.activityRule.scenario.onActivity { activity ->
+                val provider = ViewModelProvider(activity)
+                val settings = provider[SettingsViewModel::class].settings.value
+                val radio = provider[RadioViewModel::class].radioState.value
+                models = "settings=${settings?.scope}, radio=${radio.scope}/${radio.isLoading}/${radio.error}"
+            }
+            throw AssertionError("Expected $label, selector=$selector, saved=$scope, $models", error)
+        }
     }
 
     private fun selectPage(tag: String) {

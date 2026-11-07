@@ -16,6 +16,15 @@ import com.meowv.tune.radio.RadioBrowserRepository
 import com.meowv.tune.radio.RadioQueueManager
 import com.meowv.tune.domain.RadioQueue
 import com.meowv.tune.domain.RadioRepository
+import com.meowv.tune.domain.SettingsRepository
+import com.meowv.tune.playback.MediaProbe
+import com.meowv.tune.playback.MediaUrlPolicy
+import com.meowv.tune.playback.RadioMediaConnection
+import com.meowv.tune.playback.RadioStreamResolver
+import coil3.ImageLoader
+import coil3.SingletonImageLoader
+import coil3.network.okhttp.OkHttpNetworkFetcherFactory
+import com.meowv.tune.settings.settingsRepository
 import kotlinx.coroutines.flow.first
 
 private val Context.mirrorPreferences by preferencesDataStore(
@@ -28,17 +37,26 @@ private val Context.directoryPreferences by preferencesDataStore(
 )
 private val LastMirror = stringPreferencesKey("last_good_host")
 
-class TuneApplication : Application() {
-    val directoryCache by lazy { DirectoryCache(directoryPreferences) }
+open class TuneApplication : Application(), SingletonImageLoader.Factory {
+    internal open val directoryCache by lazy { DirectoryCache(directoryPreferences) }
+    internal open val userSettings: SettingsRepository by lazy { settingsRepository(this) }
     private val remoteCountries by lazy { RadioBrowserCountries(radioBrowser) }
     val countryDirectory = CountryDirectory { loadCountries().value }
 
-    suspend fun loadCountries(force: Boolean = false) =
+    internal open suspend fun loadCountries(force: Boolean = false) =
         directoryCache.loadCountries(force, remoteCountries::countries)
 
-    val radioRepository: RadioRepository by lazy { RadioBrowserRepository(countryDirectory, radioBrowser) }
+    internal open val radioRepository: RadioRepository by lazy { RadioBrowserRepository(countryDirectory, radioBrowser) }
 
     val radioQueue: RadioQueue by lazy { RadioQueueManager(radioRepository) }
+
+    internal val mediaHttp by lazy { MediaUrlPolicy.client() }
+    internal val streamResolver by lazy { RadioStreamResolver(radioBrowser, MediaProbe(mediaHttp)) }
+    internal val playerController by lazy { RadioMediaConnection(this) }
+
+    override fun newImageLoader(context: Context): ImageLoader = ImageLoader.Builder(context)
+        .components { add(OkHttpNetworkFetcherFactory(MediaUrlPolicy.client(httpsOnly = true))) }
+        .build()
 
     val radioBrowser: RadioBrowserClient by lazy {
         val version = packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown"

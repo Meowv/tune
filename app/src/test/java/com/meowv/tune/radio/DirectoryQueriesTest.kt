@@ -151,4 +151,45 @@ class DirectoryQueriesTest {
         request.cancelAndJoin()
         assertTrue(cancelled.isCompleted)
     }
+
+    @Test fun returningToTheFirstCountryRejectsAnOlderResponseForThatSameCountry() = runBlocking {
+        withTimeout(5000) {
+            val oldRequestStarted = CompletableDeferred<Unit>()
+            val oldResponse = CompletableDeferred<Unit>()
+            var japanQueries = 0
+            val old = testStation(1)
+            val latest = testStation(2)
+            val repository = StubRadioRepository(countryPage = { country, _, _ ->
+                when {
+                    country == US -> StationPage(listOf(testStation(3, US)))
+                    ++japanQueries == 1 -> withContext(NonCancellable) {
+                        oldRequestStarted.complete(Unit)
+                        oldResponse.await()
+                        StationPage(listOf(old))
+                    }
+                    else -> StationPage(listOf(latest))
+                }
+            })
+            val lifetime = CoroutineScope(coroutineContext + SupervisorJob())
+            try {
+                val model = RadioViewModel(repository, idlePlayer, CountryResolver({ null }, { null }), lifetime)
+                val japan = RadioScope(ScopeMode.COUNTRY, JP)
+                model.setScope(japan)
+                oldRequestStarted.await()
+                val original = lifetime.coroutineContext.job.children.single()
+                model.setScope(RadioScope(ScopeMode.COUNTRY, US))
+                model.radioState.first { it.resolvedCountryCode == US }
+                model.setScope(japan)
+                model.radioState.first { latest in it.stations }
+                oldResponse.complete(Unit)
+                original.join()
+                model.setScope(japan)
+                assertEquals(listOf(latest), model.radioState.value.stations)
+                assertEquals(2, japanQueries)
+            } finally {
+                oldResponse.complete(Unit)
+                lifetime.cancel()
+            }
+        }
+    }
 }

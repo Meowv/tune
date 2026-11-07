@@ -19,10 +19,4 @@ class WindowLayoutTest {
         }
     }
 
-    @Test
-    fun demoStationKeysAreUniqueAndStable() {
-        assertEquals(6, DemoStations.size)
-        assertEquals(DemoStations.size, DemoStations.map { it.id }.distinct().size)
-        assertEquals("CN", DemoStations.first().id)
-    }
 }

@@ -30,25 +30,33 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.meowv.tune.R
+import com.meowv.tune.domain.RadioUiState
 import com.meowv.tune.domain.TuneSettings
+import com.meowv.tune.radio.CountryOptions
 import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.ui.theme.TuneSpacing
 import com.meowv.tune.ui.theme.TuneShapes
 import com.meowv.tune.ui.theme.TuneTextStyle
 import kotlin.math.min
+import kotlinx.coroutines.flow.StateFlow
 
 @Composable
 fun TuneApp(
     settings: TuneSettings,
     storageError: Boolean,
+    radio: StateFlow<RadioUiState>,
+    countries: CountryOptions,
+    onLoadCountries: (Boolean) -> Unit,
+    onRefreshRadio: () -> Unit,
+    onLoadMore: () -> Unit,
     onSettingsChange: ((TuneSettings) -> TuneSettings) -> Unit,
     onClearDirectoryCache: () -> Unit,
     onShellChanged: (Boolean) -> Unit,
     onFirstLayout: () -> Unit
 ) {
     var page by rememberSaveable { mutableStateOf(TunePage.Radio) }
-    val scope = DemoScope.entries.firstOrNull { it.scope == settings.scope } ?: DemoScope.Auto
     var showScopePicker by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(showScopePicker) { if (showScopePicker) onLoadCountries(false) }
     val pageStates = rememberSaveableStateHolder()
     Surface(color = TuneColors.Background) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -69,7 +77,7 @@ fun TuneApp(
                     Box(Modifier.weight(1f).fillMaxHeight()) {
                         pageStates.SaveableStateProvider(page) {
                             when (page) {
-                                TunePage.Radio -> RadioScreen(isCar, scope) { showScopePicker = true }
+                                TunePage.Radio -> RadioScreen(isCar, radio, onRefreshRadio, onLoadMore) { showScopePicker = true }
                                 TunePage.Music -> MusicScreen(isCar)
                                 TunePage.Settings -> SettingsScreen(isCar, settings, onSettingsChange, onClearDirectoryCache)
                             }
@@ -80,8 +88,8 @@ fun TuneApp(
                 if (!isCar) BottomNavigation(page) { page = it }
             }
             if (showScopePicker) {
-                ScopePicker(isCar, maxHeight, scope, onDismiss = { showScopePicker = false }) {
-                    val selected = it.scope
+                ScopePicker(isCar, maxHeight, settings.scope, countries, { onLoadCountries(true) },
+                    onDismiss = { showScopePicker = false }) { selected ->
                     onSettingsChange { current -> current.copy(scope = selected) }
                     showScopePicker = false
                 }
@@ -191,12 +199,11 @@ private fun GlobalMiniPlayer(isCar: Boolean) {
                 val info: @Composable (Modifier) -> Unit = { modifier ->
                     Row(modifier, verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(if (isCar) 17.dp else 8.dp)) {
-                        StationBadge(DemoStations.first(), if (isCar) 70.dp else 42.dp)
+                        StationBadge(null, if (isCar) 70.dp else 42.dp)
                         Column(Modifier.weight(1f).testTag("player_info"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(stringResource(R.string.station_city), color = TuneColors.Text,
+                            Text(stringResource(R.string.player_idle), color = TuneColors.Text,
                                 fontSize = if (isCar && playerWidth >= 1000.dp) 24.sp else 15.sp,
                                 fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TuneTextStyle)
-                            LiveStatus(isCar, color = TuneColors.Muted)
                         }
                     }
                 }
@@ -205,7 +212,7 @@ private fun GlobalMiniPlayer(isCar: Boolean) {
                         horizontalArrangement = Arrangement.spacedBy(if (isCar) 18.dp else 0.dp)) {
                         PreviewControl(R.drawable.ic_radio_previous, stringResource(R.string.player_previous),
                             if (isCar) 56.dp else 48.dp, 0.dp, if (isCar) 64.dp else 34.dp, tag = "player_previous")
-                        PreviewControl(R.drawable.ic_radio_pause, stringResource(R.string.player_demo_pause),
+                        PreviewControl(R.drawable.ic_radio_play, stringResource(R.string.action_play),
                             if (isCar) 72.dp else 48.dp, if (isCar) 72.dp else 44.dp,
                             if (isCar) 44.dp else 28.dp, background = TuneColors.Primary, tint = TuneColors.Background, tag = "player_pause")
                         PreviewControl(R.drawable.ic_radio_next, stringResource(R.string.player_next),

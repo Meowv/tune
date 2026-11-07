@@ -8,6 +8,7 @@ import com.meowv.tune.domain.PlayerController
 import com.meowv.tune.domain.RadioRepository
 import com.meowv.tune.domain.RadioQueue
 import com.meowv.tune.domain.RadioScope
+import com.meowv.tune.domain.RadioCountry
 import com.meowv.tune.domain.RadioUiState
 import com.meowv.tune.domain.ResolvedRadioScope
 import com.meowv.tune.domain.StationPage
@@ -21,23 +22,59 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+data class CountryOptions(
+    val countries: List<RadioCountry> = emptyList(),
+    val isLoading: Boolean = false,
+    val failed: Boolean = false,
+    val stale: Boolean = false
+)
+
 class RadioViewModel(
     private val repository: RadioRepository,
     player: PlayerController,
     private val countryResolver: CountryResolver,
     scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
     private val cache: DirectoryCache? = null,
-    private val queue: RadioQueue? = null
+    private val queue: RadioQueue? = null,
+    private val countryOptions: suspend (Boolean) -> DirectoryValue<List<RadioCountry>> = {
+        DirectoryValue(repository.countries(), stale = false)
+    }
 ) : ViewModel(scope) {
-    private val directory = MutableStateFlow(RadioUiState())
+    private val directory = MutableStateFlow(RadioUiState(isLoading = true))
     val radioState = directory.asStateFlow()
+    private val options = MutableStateFlow(CountryOptions())
+    val countries = options.asStateFlow()
     val playerState = player.state
     private var load: Job? = null
+    private var optionsLoad: Job? = null
+    private var requestedScope: RadioScope? = null
     private var resolved: ResolvedRadioScope? = null
     private var page = StationPage()
 
     @MainThread
+    fun setScope(scope: RadioScope) {
+        if (requestedScope != scope) refresh(scope, force = false)
+    }
+
+    @MainThread
+    fun loadCountries(force: Boolean = false) {
+        if (optionsLoad?.isActive == true) return
+        options.value = options.value.copy(isLoading = true, failed = false)
+        optionsLoad = viewModelScope.launch {
+            options.value = try {
+                val result = countryOptions(force)
+                ensureActive()
+                CountryOptions(result.value, failed = result.error != null, stale = result.stale)
+            } catch (_: TuneFailure) {
+                ensureActive()
+                options.value.copy(isLoading = false, failed = true)
+            }
+        }
+    }
+
+    @MainThread
     fun refresh(scope: RadioScope, force: Boolean = true) {
+        requestedScope = scope
         load?.cancel()
         if (directory.value.scope != scope) {
             queue?.clearScope()
