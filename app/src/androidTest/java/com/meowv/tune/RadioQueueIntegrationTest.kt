@@ -130,6 +130,11 @@ class RadioQueueIntegrationTest {
 
     private suspend fun launchReady(block: suspend () -> Unit) {
         app.userSettings.update { it.copy(scope = RadioScope(ScopeMode.COUNTRY, app.country)) }
+        // 同进程其他用例可能留下故障注入或延迟，先清空再进入用例。
+        app.resolveFailures.clear()
+        app.playbackDelays.clear()
+        app.latePlaybackDelays.clear()
+        app.resolutionStarts.clear()
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             withTimeout(5000) { connection.connected.first { it } }
             lateinit var model: RadioViewModel
@@ -139,7 +144,9 @@ class RadioQueueIntegrationTest {
             queue.clearScope()
             val stations = (1L..36L).map { station(it, scope.country) }
             queue.updateDirectory(scope, StationPage(stations, nextOffset = null))
+            // 同进程其他用例可能留下播放中的服务或未完成的解析，先归零再进入用例。
             connection.dispatch(PlayerCommand.Stop)
+            withTimeout(5000) { connection.state.first { it.phase == PlaybackPhase.IDLE } }
             try {
                 block()
             } finally {

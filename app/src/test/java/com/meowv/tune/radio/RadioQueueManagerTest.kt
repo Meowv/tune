@@ -22,6 +22,20 @@ class RadioQueueManagerTest {
     private val america = ResolvedRadioScope(RadioScope(ScopeMode.COUNTRY, us), us)
     private val global = ResolvedRadioScope(RadioScope(ScopeMode.GLOBAL), null)
 
+    @Test fun resumeSelectAdoptsSameScopeStationOutsidePage() = runBlocking {
+        val listed = testStation(1)
+        val outside = testStation(5)
+        val foreign = testStation(6, us)
+        val queue = RadioQueueManager(StubRadioRepository())
+        queue.updateDirectory(japan, StationPage(listOf(listed)))
+
+        assertNull("跨国家恢复必须拒绝", queue.select(japan, foreign))
+        val adopted = requireNotNull(queue.select(japan, outside))
+        assertEquals(outside, adopted.station)
+        assertTrue(queue.recordSuccessfulPlayback(adopted))
+        assertTrue("恢复不写入可返回历史", queue.canPrevious.value.not())
+    }
+
     @Test fun countryNextKeepsOrderLoadsAnotherPageAndWraps() = runBlocking {
         val first = testStation(1)
         val second = testStation(2)

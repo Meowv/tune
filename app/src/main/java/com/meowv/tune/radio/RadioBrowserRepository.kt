@@ -6,6 +6,7 @@ import com.meowv.tune.domain.RadioRepository
 import com.meowv.tune.domain.Station
 import com.meowv.tune.domain.StationPage
 import com.meowv.tune.network.RadioBrowserClient
+import java.util.UUID
 
 internal class RadioBrowserRepository(
     countries: CountryDirectory,
@@ -30,6 +31,11 @@ internal class RadioBrowserRepository(
         return search(mapOf("hidebroken" to "true", "order" to "random", "limit" to limit.toString()))
             .mapNotNull(RadioBrowserMapping::station).distinctBy { it.uuid }
     }
+
+    override suspend fun stationByUuid(uuid: UUID): Station? =
+        RadioBrowserMapping.rows(get("/json/stations/byuuid/$uuid", emptyMap()))
+            .firstNotNullOfOrNull(RadioBrowserMapping::station)
+            ?.takeIf { it.uuid == uuid }
 
     private suspend fun search(query: Map<String, String>) =
         RadioBrowserMapping.rows(get("/json/stations/search", query))

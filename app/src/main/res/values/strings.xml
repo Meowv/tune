@@ -17,7 +17,16 @@
   <string name="setting_theme">主题</string>
   <string name="theme_dark">深色</string>
   <string name="setting_layout">布局</string>
+  <string name="setting_large_text">大字显示</string>
+  <string name="setting_disconnect">媒体断开暂停</string>
+  <string name="setting_refresh">刷新目录</string>
+  <string name="setting_source">数据来源</string>
+  <string name="setting_licenses">开源许可</string>
   <string name="layout_auto">自动</string>
+  <string name="layout_phone">手机</string>
+  <string name="layout_car">车机</string>
+  <string name="about_source_body">电台目录与台标来自 Radio Browser（radio-browser.info），由社区维护的公开电台数据库提供。本应用不上传收听记录。</string>
+  <string name="about_licenses_body">Kotlin 与协程：Apache 2.0\nJetpack Compose、Media3、DataStore：Apache 2.0\nOkHttp：Apache 2.0\ndnsjava：BSD 2-Clause\nCoil：Apache 2.0</string>
   <string name="setting_cache">清理缓存</string>
   <string name="player_previous">上一个电台</string>
   <string name="player_next">下一个电台</string>
@@ -63,4 +72,11 @@
   <string name="playback_disconnected">播放设备已断开</string>
   <string name="mobile_playback_title">使用移动网络播放？</string>
   <string name="mobile_playback_message">当前未连接 Wi-Fi。</string>
+  <string name="notification_channel_playback">电台播放</string>
+  <string name="notification_permission_denied">通知权限未开启，通知栏与锁屏控制不可用</string>
+  <!-- 覆盖 Media3 默认英文控件描述，通知、锁屏与车机媒体面板统一使用本应用文案。 -->
+  <string name="media3_controls_play_description">播放</string>
+  <string name="media3_controls_pause_description">暂停</string>
+  <string name="media3_controls_seek_to_previous_description">上一个电台</string>
+  <string name="media3_controls_seek_to_next_description">下一个电台</string>
 </resources>

@@ -7,6 +7,9 @@ import kotlinx.coroutines.flow.StateFlow
 interface RadioRepository : CountryDirectory {
     suspend fun stationsForCountry(country: CountryCode, offset: Int, limit: Int): StationPage
     suspend fun randomGlobalStations(limit: Int): List<Station>
+
+    // 启动恢复只按 UUID 重新解析元数据，不建立可浏览历史。
+    suspend fun stationByUuid(uuid: UUID): Station?
 }
 
 class QueueSelection internal constructor(val station: Station)
@@ -19,6 +22,9 @@ interface RadioQueue {
     fun updateDirectory(scope: ResolvedRadioScope, page: StationPage)
     fun clearScope()
     fun select(scope: ResolvedRadioScope, uuid: UUID): QueueSelection?
+
+    // 恢复时该台可能不在当前目录页内，按已确认元数据直接定位。
+    fun select(scope: ResolvedRadioScope, station: Station): QueueSelection? = select(scope, station.uuid)
 
     // cursor 是已考虑的台站，播放失败重试时可以传入失败台站的 UUID。
     suspend fun next(scope: ResolvedRadioScope, cursor: UUID?): QueueSelection?
@@ -36,6 +42,7 @@ sealed interface PlayerCommand {
     data object AllowMeteredRetry : PlayerCommand
     data object DismissNetworkPrompt : PlayerCommand
     data object CancelPending : PlayerCommand
+    data class Resume(val uuid: UUID) : PlayerCommand
     data object Stop : PlayerCommand
 }
 
@@ -55,7 +62,8 @@ data class TuneSettings(
     val wifiOnly: Boolean = false,
     val dataWarning: Boolean = true,
     val pauseOnDisconnect: Boolean = true,
-    val lastSuccessfulStation: UUID? = null
+    val lastSuccessfulStation: UUID? = null,
+    val largeText: Boolean = false
 )
 
 interface SettingsRepository {

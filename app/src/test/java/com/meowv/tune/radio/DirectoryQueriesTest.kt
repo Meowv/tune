@@ -16,12 +16,14 @@ internal fun testStation(number: Long, country: CountryCode? = JP) =
 internal class StubRadioRepository(
     private val countryList: suspend () -> List<RadioCountry> = { emptyList() },
     private val countryPage: suspend (CountryCode, Int, Int) -> StationPage = { _, _, _ -> error("Unexpected country call") },
-    private val random: suspend () -> List<Station> = { error("Unexpected random call") }
+    private val random: suspend () -> List<Station> = { error("Unexpected random call") },
+    private val byUuid: suspend (UUID) -> Station? = { null }
 ) : RadioRepository {
     override suspend fun countries() = countryList()
     override suspend fun stationsForCountry(country: CountryCode, offset: Int, limit: Int) =
         countryPage(country, offset, limit)
     override suspend fun randomGlobalStations(limit: Int) = random()
+    override suspend fun stationByUuid(uuid: UUID) = byUuid(uuid)
 }
 
 internal val idlePlayer = object : PlayerController {
@@ -30,6 +32,19 @@ internal val idlePlayer = object : PlayerController {
 }
 
 class DirectoryQueriesTest {
+    @Test fun stationByUuidUsesSingleStationEndpoint() = runBlocking {
+        val station = testStation(7)
+        val repository = RadioBrowserRepository({ emptyList() }) { endpoint, query ->
+            assertTrue(endpoint.startsWith("/json/stations/byuuid/"))
+            assertTrue(query.isEmpty())
+            if (!endpoint.endsWith(station.uuid.toString())) return@RadioBrowserRepository "[]"
+            val row = mapOf("stationuuid" to station.uuid.toString(), "countrycode" to "JP", "name" to station.name)
+            row.entries.joinToString(",", "[{", "}]") { "\"${it.key}\":\"${it.value}\"" }
+        }
+        assertEquals(station, repository.stationByUuid(station.uuid))
+        assertNull(repository.stationByUuid(testStation(8).uuid))
+    }
+
     @Test fun countryQueryFiltersRowsWithoutChangingRawOffset() = runBlocking {
         val jp = testStation(1)
         val us = testStation(2, US)

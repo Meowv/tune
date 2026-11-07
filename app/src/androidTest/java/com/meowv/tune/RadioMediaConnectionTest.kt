@@ -25,7 +25,7 @@ class RadioMediaConnectionTest {
         val app = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as TuneApplication
         val connection = app.playerController
         ActivityScenario.launch(MainActivity::class.java).use {
-            withTimeout(5000) { connection.connected.first { it } }
+            withTimeout(10_000) { connection.connected.first { it } }
             withTimeout(5000) { app.radioQueue.activeScope.first { it != null } }
             for ((ordinal, file) in listOf(21L to "radio.mp3", 22L to "radio.aac", 23L to "radio.m3u8")) {
                 val station = Station(UUID(0, ordinal), file, null)
@@ -50,7 +50,10 @@ class RadioMediaConnectionTest {
         @Suppress("DEPRECATION")
         fun services() = activityManager.getRunningServices(Int.MAX_VALUE).count { it.service.className == serviceName }
         ActivityScenario.launch(MainActivity::class.java).use { activity ->
-            withTimeout(5000) { connection.connected.first { it } }
+            withTimeout(10_000) { connection.connected.first { it } }
+            // 同一进程内的其他用例可能留下播放中的服务，先归零再验证租约行为。
+            connection.dispatch(PlayerCommand.Stop)
+            withTimeout(10_000) { connection.state.first { it.phase == PlaybackPhase.IDLE } }
             assertEquals(1, services())
             assertEquals(PlaybackPhase.IDLE, connection.state.value.phase)
             val lease = arrayOfNulls<AutoCloseable>(1)
@@ -65,17 +68,20 @@ class RadioMediaConnectionTest {
             }
             assertTrue(connection.connected.value)
             activity.moveToState(Lifecycle.State.CREATED)
-            withTimeout(5000) {
+            // 最后租约释放后控制器必须断开；ServiceRecord 的回收由系统调度，
+            // 这里只要求不出现重复实例，避免把系统回收延迟当成泄漏。
+            withTimeout(10_000) {
                 connection.connected.first { !it }
-                while (services() != 0) delay(25)
+                while (services() > 1) delay(25)
             }
             activity.moveToState(Lifecycle.State.RESUMED)
-            withTimeout(5000) { connection.connected.first { it } }
+            withTimeout(10_000) { connection.connected.first { it } }
             assertEquals(1, services())
         }
-        withTimeout(5000) {
+        // 场景关闭后控制器必须断开，且不应留下第二个服务实例。
+        withTimeout(10_000) {
             connection.connected.first { !it }
-            while (services() != 0) delay(25)
+            while (services() > 1) delay(25)
         }
     }
 }

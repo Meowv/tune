@@ -2,6 +2,7 @@ package com.meowv.tune.playback
 
 import android.content.Context
 import android.media.AudioManager
+import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -10,12 +11,14 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
+import com.meowv.tune.R
 import com.meowv.tune.domain.NetworkState
 import com.meowv.tune.domain.NetworkType
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.QueueSelection
 import com.meowv.tune.domain.RadioQueue
+import com.meowv.tune.domain.RadioRepository
 import com.meowv.tune.domain.ResolvedRadioScope
 import com.meowv.tune.domain.SettingsRepository
 import com.meowv.tune.domain.Station
@@ -23,6 +26,8 @@ import com.meowv.tune.domain.TuneError
 import com.meowv.tune.domain.TuneFailure
 import com.meowv.tune.domain.TuneSettings
 import java.net.SocketTimeoutException
+import java.util.Locale
+import java.util.UUID
 import javax.net.ssl.SSLException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -43,15 +48,16 @@ import kotlinx.coroutines.sync.withLock
 
 @OptIn(UnstableApi::class)
 internal class RadioPlayback(
-    context: Context,
+    private val context: Context,
     private val player: Player,
     private val queue: RadioQueue,
     private val settings: SettingsRepository,
     private val network: StateFlow<NetworkState>,
+    private val repository: RadioRepository,
     private val retryPolicy: PlaybackRetryPolicy,
     private val resolve: suspend (PlaybackIntent) -> ResolvedRadioStream,
     private val publish: (PlayerUiState) -> Unit
-) : Player.Listener {
+) : Player.Listener, RadioSessionPlayer.SessionCommands {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val commandMutex = Mutex()
     private val audioFocus = AudioFocusController(context, ::onAudioFocusEvent)
@@ -106,6 +112,19 @@ internal class RadioPlayback(
 
     fun toggle() = submit { toggle(allowMetered = false) }
 
+    override val canPrevious: Boolean get() = queue.canPrevious.value
+    override val canNext: Boolean get() = queue.canNext.value
+
+    override fun onSessionPlay() = submit { resume(allowMetered = false) }
+
+    override fun onSessionPause() = submit { pause() }
+
+    override fun onSessionNext() = next()
+
+    override fun onSessionPrevious() = previous()
+
+    override fun onSessionStop() = stop()
+
     fun allowMeteredRetry() = submit {
         val pending = blocked ?: return@submit
         run(pending, allowMetered = true)
@@ -130,6 +149,26 @@ internal class RadioPlayback(
                 statusCode = null
             ))
         }
+    }
+
+    /**
+     * 启动恢复：仅在用户开启自播、当前空闲且范围队列可用时重新解析并播放最后成功台。
+     * 范围不匹配、元数据失效或策略拒绝时保持空闲，由电台页承担后续操作。
+     */
+    fun resumeLast(uuid: UUID) = submit {
+        if (selection != null || state.phase != PlaybackPhase.IDLE) return@submit
+        val user = settings.settings.first()
+        if (!user.autoPlay) return@submit
+        val activeScope = queue.activeScope.value ?: return@submit
+        val station = try {
+            repository.stationByUuid(uuid)
+        } catch (_: TuneFailure) {
+            null
+        } ?: return@submit
+        val country = activeScope.country
+        if (country != null && station.countryCode != country) return@submit
+        resetRetryBudget()
+        run(Command.Resume(station), allowMetered = false)
     }
 
     fun stop() {
@@ -162,7 +201,11 @@ internal class RadioPlayback(
         if (state.phase in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING, PlaybackPhase.ERROR)) return
         when {
             player.isPlaying -> {
-                if (!committed) committed = queue.recordSuccessfulPlayback(currentSelection)
+                if (!committed) {
+                    committed = queue.recordSuccessfulPlayback(currentSelection)
+                    // 只有服务确认成功的台站才写回自播恢复点。
+                    if (committed) scope.launch { settings.recordSuccessfulStation(currentSelection.station.uuid) }
+                }
                 val clearFocusError = if (state.error == TuneError.AUDIO_FOCUS_LOST) null else state.error
                 update(state.copy(phase = PlaybackPhase.PLAYING, error = clearFocusError))
             }
@@ -216,24 +259,39 @@ internal class RadioPlayback(
                 resolveAndPlay(next, PlaybackPhase.RESOLVING)
             }
             Command.Previous -> {
-                val activeScope = queue.activeScope.value ?: run {
-                    fail(TuneError.PLAYBACK)
-                    return
-                }
-                val next = queue.previous(activeScope) ?: run {
-                    fail(TuneError.PLAYBACK)
-                    return
-                }
+                // 系统媒体键不感知按钮启用状态，无可返回项时保持当前播放而不报错。
+                val activeScope = queue.activeScope.value ?: return
+                val next = queue.previous(activeScope) ?: return
                 playbackScope = activeScope
                 resolveAndPlay(next, PlaybackPhase.RESOLVING)
             }
             Command.Toggle -> toggle(allowMetered)
+            is Command.Resume -> {
+                val activeScope = queue.activeScope.value ?: return
+                val next = queue.select(activeScope, command.station) ?: return
+                playbackScope = activeScope
+                resolveAndPlay(next, PlaybackPhase.RESOLVING)
+            }
         }
     }
 
     private suspend fun toggle(allowMetered: Boolean) {
         when (state.phase) {
             PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING -> stop()
+            // 失败态下播放键即重试，不受残留的 playWhenReady 影响。
+            PlaybackPhase.ERROR -> resume(allowMetered)
+            else -> if (player.playWhenReady) pause() else resume(allowMetered)
+        }
+    }
+
+    private suspend fun pause() {
+        if (player.playWhenReady) userPause()
+    }
+
+    private suspend fun resume(allowMetered: Boolean) {
+        when (state.phase) {
+            PlaybackPhase.IDLE -> return
+            PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING -> return
             PlaybackPhase.ERROR -> {
                 val currentIntent = intent ?: return
                 val currentSelection = selection ?: return
@@ -242,18 +300,14 @@ internal class RadioPlayback(
                 resolveAndPlay(currentSelection, PlaybackPhase.RETRYING, currentIntent)
             }
             else -> {
-                if (player.playWhenReady) {
-                    userPause()
-                } else {
-                    if (!networkAllows(Command.Toggle, allowMetered)) return
-                    if (!audioFocus.acquire()) {
-                        fail(TuneError.AUDIO_FOCUS_LOST)
-                        return
-                    }
-                    resumeAfterFocusGain = false
-                    update(state.copy(error = null, statusCode = null))
-                    player.play()
+                if (!networkAllows(Command.Toggle, allowMetered)) return
+                if (!audioFocus.acquire()) {
+                    fail(TuneError.AUDIO_FOCUS_LOST)
+                    return
                 }
+                resumeAfterFocusGain = false
+                update(state.copy(error = null, statusCode = null))
+                player.play()
             }
         }
     }
@@ -338,7 +392,7 @@ internal class RadioPlayback(
         val item = MediaItem.Builder()
             .setMediaId(next.station.uuid.toString())
             .setUri(stream.url.toString())
-            .setMediaMetadata(MediaMetadata.Builder().setTitle(next.station.name).build())
+            .setMediaMetadata(sessionMetadata(next.station))
         if (stream.isHls) item.setMimeType(MimeTypes.APPLICATION_M3U8)
         if (!audioFocus.acquire()) {
             fail(TuneError.AUDIO_FOCUS_LOST)
@@ -428,6 +482,19 @@ internal class RadioPlayback(
         }
         fail(failure.kind, failure.statusCode, failed.station)
     }
+
+    // 系统媒体界面只读取这里的元数据，不额外暴露列表、历史或详情。
+    private fun sessionMetadata(station: Station): MediaMetadata = MediaMetadata.Builder()
+        .setTitle(station.name.ifBlank { context.getString(R.string.station_unnamed) })
+        .setArtist(station.countryCode?.displayName(Locale.getDefault()) ?: context.getString(R.string.app_name))
+        .setIsPlayable(true)
+        .apply { artworkUri(station.iconUrl)?.let { setArtworkUri(it) } }
+        .build()
+
+    private fun artworkUri(url: String?): Uri? = url
+        ?.trim()
+        ?.takeIf { it.startsWith("https://", ignoreCase = true) }
+        ?.let { runCatching { Uri.parse(it) }.getOrNull() }
 
     private fun classify(error: PlaybackException): TuneFailure {
         val causes = generateSequence<Throwable>(error) { it.cause }.toList()
@@ -545,5 +612,6 @@ internal class RadioPlayback(
         data object Next : Command
         data object Previous : Command
         data object Toggle : Command
+        data class Resume(val station: Station) : Command
     }
 }

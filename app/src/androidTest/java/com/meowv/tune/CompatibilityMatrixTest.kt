@@ -1,0 +1,52 @@
+package com.meowv.tune
+
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performScrollToIndex
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+
+/**
+ * T27 兼容矩阵探针：在当前窗口/密度/字体配置下检查关键区域可见、可达且不重叠。
+ * 由 matrix.sh 循环切换配置后重复执行。
+ */
+@RunWith(AndroidJUnit4::class)
+class CompatibilityMatrixTest {
+    @get:Rule
+    val compose = createAndroidComposeRule<MainActivity>()
+
+    @Test
+    fun keyAreasVisibleAndReachable() {
+        val config = compose.activity.resources.configuration
+        println(
+            "MATRIX size=${config.screenWidthDp}x${config.screenHeightDp} " +
+                "density=${config.densityDpi} font=${config.fontScale} " +
+                "orientation=${config.orientation}"
+        )
+
+        compose.onNodeWithTag("brand_header").assertIsDisplayed()
+        compose.onNodeWithTag("global_player").assertIsDisplayed()
+        compose.onNodeWithTag("nav_radio").assertIsDisplayed()
+
+        val brand = compose.onNodeWithTag("brand_header").getUnclippedBoundsInRoot()
+        val player = compose.onNodeWithTag("global_player").getUnclippedBoundsInRoot()
+        assertTrue("品牌栏不应压到播放器", brand.bottom <= player.top)
+
+        // 列表可用：滚到第 4 项且条目可点击。
+        compose.onNodeWithTag("station_list").performScrollToIndex(3)
+        compose.onNodeWithTag("station_list").assertIsDisplayed()
+
+        // 主要播放控件热区不小于 44dp。
+        listOf("player_previous", "player_pause", "player_next").forEach { tag ->
+            val bounds = compose.onNodeWithTag(tag).getUnclippedBoundsInRoot()
+            val width = (bounds.right - bounds.left).value
+            val height = (bounds.bottom - bounds.top).value
+            assertTrue("$tag 触控热区过小：${width}x$height", width >= 44f && height >= 44f)
+        }
+    }
+}

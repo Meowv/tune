@@ -45,6 +45,7 @@ class RadioContractsTest {
                 }
                 override suspend fun randomGlobalStations(limit: Int): List<Station> =
                     throw TuneFailure(TuneError.SERVER, 503)
+                override suspend fun stationByUuid(uuid: UUID): Station? = null
             }
             val lifetime = CoroutineScope(coroutineContext + SupervisorJob())
             try {

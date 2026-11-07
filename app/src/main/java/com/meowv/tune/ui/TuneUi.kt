@@ -66,6 +66,7 @@ fun TuneApp(
 ) {
     val connected by playbackConnected.collectAsStateWithLifecycle()
     val playbackState by playback.collectAsStateWithLifecycle()
+    val radioState by radio.collectAsStateWithLifecycle()
     var page by rememberSaveable { mutableStateOf(TunePage.Radio) }
     var showScopePicker by rememberSaveable { mutableStateOf(false) }
     var networkPromptDismissed by rememberSaveable { mutableStateOf(false) }
@@ -78,7 +79,7 @@ fun TuneApp(
     Surface(color = TuneColors.Background) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val windowWidth = maxWidth
-            val isCar = isCarWindow(windowWidth.value, maxHeight.value)
+            val isCar = resolveShell(settings.layout, windowWidth.value, maxHeight.value)
             LaunchedEffect(isCar) { onShellChanged(isCar) }
             Column(
                 Modifier.fillMaxSize().windowInsetsPadding(if (isCar) WindowInsets.displayCutout else WindowInsets.safeDrawing)
@@ -104,7 +105,9 @@ fun TuneApp(
                                     onPlayback = submitPlayback
                                 ) { showScopePicker = true }
                                 TunePage.Music -> MusicScreen(isCar)
-                                TunePage.Settings -> SettingsScreen(isCar, settings, onSettingsChange, onClearDirectoryCache)
+                                TunePage.Settings -> SettingsScreen(
+                                    isCar, settings, radioState, onSettingsChange, onRefreshRadio, onClearDirectoryCache
+                                )
                             }
                         }
                     }

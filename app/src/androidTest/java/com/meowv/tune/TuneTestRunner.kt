@@ -43,15 +43,23 @@ class TuneTestRunner : AndroidJUnitRunner() {
 }
 
 class TuneTestApplication : TuneApplication() {
+    // liveRadio=true 时使用真实网络与真实解析，用于 T26 公网联调。
+    // 首次访问时读取参数：Application 构造阶段 Instrumentation 尚未注册参数。
+    internal val liveRadio: Boolean by lazy {
+        InstrumentationRegistry.getArguments().getString("liveRadio") == "true"
+    }
     internal val mockNetwork = MutableStateFlow(NetworkState(NetworkType.WIFI, metered = false))
     override val networkState: StateFlow<NetworkState> get() = mockNetwork
-    override val playbackRetryPolicy = PlaybackRetryPolicy(
+    override val playbackRetryPolicy: PlaybackRetryPolicy
+        get() = if (liveRadio) super.playbackRetryPolicy else testRetryPolicy
+    private val testRetryPolicy = PlaybackRetryPolicy(
         maxSameStationRetries = 2,
         maxAlternateStations = 3,
         backoffMillis = listOf(20L, 40L)
     )
 
     override val mediaHttp by lazy {
+        if (liveRadio) return@lazy super.mediaHttp
         OkHttpClient.Builder().addInterceptor { chain ->
             val request = chain.request()
             val file = request.url.pathSegments.last()
@@ -67,6 +75,7 @@ class TuneTestApplication : TuneApplication() {
     }
 
     override suspend fun resolveStream(intent: PlaybackIntent): ResolvedRadioStream {
+        if (liveRadio) return super.resolveStream(intent)
         resolveCalls.computeIfAbsent(intent.station.uuid) { AtomicInteger() }.incrementAndGet()
         resolutionStarts[intent.station.uuid]?.complete(Unit)
         latePlaybackDelays[intent.station.uuid]?.let { withContext(NonCancellable) { delay(it) } }
@@ -90,6 +99,7 @@ class TuneTestApplication : TuneApplication() {
     override val directoryCache by lazy { DirectoryCache(testDirectory) }
     override val userSettings by lazy { DataStoreSettingsRepository(testSettings) }
     internal val country = requireNotNull(CountryCode.parse("JP"))
+    internal val foreignStation = Station(UUID(0, 500), "Foreign station", CountryCode.parse("US"))
     internal val queries = AtomicInteger()
     internal val playbackDelays = ConcurrentHashMap<UUID, Long>()
     internal val latePlaybackDelays = ConcurrentHashMap<UUID, Long>()
@@ -97,12 +107,19 @@ class TuneTestApplication : TuneApplication() {
     internal val resolveCalls = ConcurrentHashMap<UUID, AtomicInteger>()
     internal val resolveFailures = ConcurrentHashMap<UUID, AtomicInteger>()
     @Volatile internal var failQueries = false
+    @Volatile internal var failResume = false
+    internal val resumeQueries = AtomicInteger()
     private val directory = listOf(RadioCountry(country, 36))
     private val stations = (1L..36L).map { Station(UUID(0, it), "Test station $it", country) }
 
-    override suspend fun loadCountries(force: Boolean) = DirectoryValue(directory, stale = false)
+    override suspend fun loadCountries(force: Boolean) =
+        if (liveRadio) super.loadCountries(force) else DirectoryValue(directory, stale = false)
 
-    override val radioRepository: RadioRepository = object : RadioRepository {
+    override val radioRepository: RadioRepository by lazy {
+        if (liveRadio) super.radioRepository else fakeRepository
+    }
+
+    private val fakeRepository: RadioRepository = object : RadioRepository {
         override suspend fun countries() = directory
 
         override suspend fun stationsForCountry(country: CountryCode, offset: Int, limit: Int): StationPage {
@@ -117,6 +134,13 @@ class TuneTestApplication : TuneApplication() {
             queries.incrementAndGet()
             if (failQueries) throw TuneFailure(TuneError.CONNECTION)
             return stations.take(limit)
+        }
+
+        override suspend fun stationByUuid(uuid: UUID): Station? {
+            resumeQueries.incrementAndGet()
+            if (failResume) throw TuneFailure(TuneError.CONNECTION)
+            if (uuid == foreignStation.uuid) return foreignStation
+            return stations.firstOrNull { it.uuid == uuid }
         }
     }
 }

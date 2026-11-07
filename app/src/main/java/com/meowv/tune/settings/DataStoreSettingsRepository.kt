@@ -32,6 +32,7 @@ internal class DataStoreSettingsRepository(private val store: DataStore<Preferen
             val country = updated.scope.countryCode
             if (country == null) prefs.remove(Country) else prefs[Country] = country.value
             prefs[Layout] = updated.layout.name
+            prefs[LargeText] = updated.largeText
             prefs[AutoPlay] = updated.autoPlay
             prefs[WifiOnly] = updated.wifiOnly
             prefs[DataWarning] = updated.dataWarning
@@ -64,6 +65,7 @@ internal class DataStoreSettingsRepository(private val store: DataStore<Preferen
         return TuneSettings(
             scope = scope,
             layout = LayoutMode.entries.firstOrNull { it.name == prefs.read(Layout) } ?: LayoutMode.AUTO,
+            largeText = prefs.read(LargeText) ?: false,
             autoPlay = autoPlay,
             wifiOnly = prefs.read(WifiOnly) ?: false,
             dataWarning = prefs.read(DataWarning) ?: true,
@@ -78,6 +80,7 @@ internal class DataStoreSettingsRepository(private val store: DataStore<Preferen
         val Scope = stringPreferencesKey("scope")
         val Country = stringPreferencesKey("country")
         val Layout = stringPreferencesKey("layout")
+        val LargeText = booleanPreferencesKey("large_text")
         val AutoPlay = booleanPreferencesKey("auto_play")
         val WifiOnly = booleanPreferencesKey("wifi_only")
         val DataWarning = booleanPreferencesKey("data_warning")

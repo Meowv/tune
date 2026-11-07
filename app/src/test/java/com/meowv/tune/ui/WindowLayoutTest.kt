@@ -1,5 +1,6 @@
 package com.meowv.tune.ui
 
+import com.meowv.tune.domain.LayoutMode
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -19,4 +20,16 @@ class WindowLayoutTest {
         }
     }
 
+    @Test
+    fun layoutPreferenceOverridesShellWithSafeFallback() {
+        // AUTO 跟随窗口；PHONE 强制手机；CAR 强制车机，窗口过窄时回退手机。
+        assertEquals(true, resolveShell(LayoutMode.AUTO, 1280f, 720f))
+        assertEquals(false, resolveShell(LayoutMode.AUTO, 432f, 936f))
+        assertEquals(false, resolveShell(LayoutMode.PHONE, 1280f, 720f))
+        assertEquals(false, resolveShell(LayoutMode.PHONE, 1920f, 1080f))
+        assertEquals(true, resolveShell(LayoutMode.CAR, 1280f, 720f))
+        assertEquals(false, resolveShell(LayoutMode.CAR, 432f, 936f))
+        assertEquals(false, resolveShell(LayoutMode.CAR, 599f, 400f))
+        assertEquals(false, resolveShell(LayoutMode.CAR, 700f, 320f))
+    }
 }

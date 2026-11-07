@@ -5,10 +5,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 
 object TuneColors {
@@ -37,13 +41,22 @@ private val Colors = darkColorScheme(
 )
 
 @Composable
-fun TuneTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = Colors,
-        typography = Typography(),
-        content = content
-    )
+fun TuneTheme(largeText: Boolean = false, content: @Composable () -> Unit) {
+    val density = LocalDensity.current
+    // 大字偏好叠加在系统字体缩放之上，布局继续用 dp 约束，不改变窗口结构。
+    val scaled = remember(density, largeText) {
+        if (largeText) Density(density.density, density.fontScale * LARGE_TEXT_SCALE) else density
+    }
+    CompositionLocalProvider(LocalDensity provides scaled) {
+        MaterialTheme(
+            colorScheme = Colors,
+            typography = Typography(),
+            content = content
+        )
+    }
 }
+
+private const val LARGE_TEXT_SCALE = 1.25f
 
 object TuneSpacing {
     val Small = 8.dp

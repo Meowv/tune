@@ -58,6 +58,16 @@ class RadioQueueManager(private val repository: RadioRepository) : RadioQueue {
         active.select(station)
     }
 
+    override fun select(scope: ResolvedRadioScope, station: Station): QueueSelection? = synchronized(stateLock) {
+        val active = session?.takeIf { it.scope == scope } ?: return@synchronized null
+        val known = active.page.stations.firstOrNull { it.uuid == station.uuid }
+        when {
+            known != null -> active.select(known)
+            scope.country != null && station.countryCode != scope.country -> null
+            else -> active.select(station)
+        }
+    }
+
     override fun previous(scope: ResolvedRadioScope): QueueSelection? = synchronized(stateLock) {
         val active = session?.takeIf { it.scope == scope } ?: return@synchronized null
         val station = active.history.lastOrNull() ?: return@synchronized null

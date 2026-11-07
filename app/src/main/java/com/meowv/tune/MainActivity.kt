@@ -1,7 +1,11 @@
 package com.meowv.tune
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
 import java.io.IOException
 import kotlinx.coroutines.launch
@@ -27,6 +31,8 @@ import com.meowv.tune.domain.TuneFailure
 import com.meowv.tune.radio.CountryResolver
 import com.meowv.tune.radio.RadioViewModel
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
 
@@ -35,6 +41,13 @@ class MainActivity : ComponentActivity() {
     private var firstFrameReady = false
     private var carShell = false
     private var mediaLease: AutoCloseable? = null
+    private var notificationRequested = false
+    private val notificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (!granted) {
+                Toast.makeText(this, R.string.notification_permission_denied, Toast.LENGTH_SHORT).show()
+            }
+        }
     private val settingsModel by viewModels<SettingsViewModel> {
         viewModelFactory { initializer { SettingsViewModel(tuneApp.userSettings) } }
     }
@@ -56,11 +69,16 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             settingsModel.settings.filterNotNull().map { it.scope }.distinctUntilChanged().collect(radioModel::setScope)
         }
+        // 只有普通前台冷启动才尝试恢复；进程重建、回前台和配置变更都不重开流。
+        if (savedInstanceState == null && !tuneApp.autoPlayAttempted) {
+            tuneApp.autoPlayAttempted = true
+            resumeLastStation()
+        }
         setContent {
             val settings by settingsModel.settings.collectAsStateWithLifecycle()
             val storageError by settingsModel.storageError.collectAsStateWithLifecycle()
             val countries by radioModel.countries.collectAsStateWithLifecycle()
-            TuneTheme {
+            TuneTheme(largeText = settings?.largeText == true) {
                 TuneApp(
                     settings = settings ?: TuneSettings(),
                     storageError = storageError,
@@ -89,7 +107,23 @@ class MainActivity : ComponentActivity() {
         if (hasFocus) applySystemBars()
     }
 
+    // 用户开启自播时恢复最后成功台；首页目录就绪后再尝试，失败保持可操作电台页。
+    private fun resumeLastStation() {
+        lifecycleScope.launch {
+            val settings = settingsModel.settings.filterNotNull().first()
+            val uuid = settings.lastSuccessfulStation
+            if (!settings.autoPlay || uuid == null) return@launch
+            withTimeoutOrNull(8000) {
+                radioModel.radioState.first { !it.isLoading && (it.stations.isNotEmpty() || it.error != null) }
+            } ?: return@launch
+            // 目录可能比媒体服务连接更快就绪，等控制器可用再发命令。
+            withTimeoutOrNull(5000) { tuneApp.playerController.connected.first { it } } ?: return@launch
+            dispatchPlayback(PlayerCommand.Resume(uuid))
+        }
+    }
+
     private fun dispatchPlayback(command: PlayerCommand) {
+        if (command !is PlayerCommand.DismissNetworkPrompt && command !is PlayerCommand.Resume) ensureNotificationPermission()
         lifecycleScope.launch {
             try {
                 tuneApp.playerController.dispatch(command)
@@ -97,6 +131,15 @@ class MainActivity : ComponentActivity() {
                 Toast.makeText(this@MainActivity, R.string.playback_unavailable, Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    // API 33+ 才有运行时通知权限。拒绝后前台播放仍可用，只是通知栏与锁屏不显示控制。
+    private fun ensureNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+        if (notificationRequested) return
+        notificationRequested = true
+        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     override fun onStart() {

@@ -32,7 +32,13 @@ class DataStoreSettingsRepositoryTest {
             repository.recordSuccessfulStation(uuid)
         }
         open(file) { repository ->
-            assertEquals(TuneSettings(japan, LayoutMode.CAR, true, true, false, false, uuid), repository.settings.first())
+            assertEquals(
+                TuneSettings(
+                    scope = japan, layout = LayoutMode.CAR, autoPlay = true, wifiOnly = true,
+                    dataWarning = false, pauseOnDisconnect = false, lastSuccessfulStation = uuid
+                ),
+                repository.settings.first()
+            )
             repository.update { it.copy(autoPlay = false, scope = RadioScope(ScopeMode.GLOBAL)) }
             repository.recordSuccessfulStation(UUID.randomUUID())
         }

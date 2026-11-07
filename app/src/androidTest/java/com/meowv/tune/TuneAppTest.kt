@@ -227,9 +227,11 @@ class TuneAppTest {
         if (config.screenWidthDp >= 1000 && config.fontScale == 1f) {
             val version = compose.activity.packageManager.getPackageInfo(compose.activity.packageName, 0).versionName.orEmpty()
             val aboutLabel = compose.activity.getString(R.string.about_app_version, version)
-            val about = compose.onNodeWithText(aboutLabel).getUnclippedBoundsInRoot()
+            // 设置项增加后允许滚动，这里验证版本行完整可见而不是被裁切。
+            val about = compose.onNodeWithText(aboutLabel).performScrollTo().getUnclippedBoundsInRoot()
             val viewport = compose.onNodeWithTag("page_settings").getUnclippedBoundsInRoot()
-            assertTrue("Default car settings must show the version completely", about.bottom <= viewport.bottom)
+            assertTrue("Default car settings must show the version completely",
+                about.top >= viewport.top && about.bottom <= viewport.bottom)
         }
         compose.onNodeWithTag("global_player").assertIsDisplayed()
         compose.onNodeWithTag("player_previous").assertIsNotEnabled()

@@ -43,6 +43,9 @@ private val Context.directoryPreferences by preferencesDataStore(
 private val LastMirror = stringPreferencesKey("last_good_host")
 
 open class TuneApplication : Application(), SingletonImageLoader.Factory {
+    // 同一进程只尝试一次启动恢复，避免 Activity 重建或回前台重复开流。
+    internal var autoPlayAttempted = false
+
     internal open val directoryCache by lazy { DirectoryCache(directoryPreferences) }
     internal open val userSettings: SettingsRepository by lazy { settingsRepository(this) }
     private val networkMonitor by lazy { NetworkMonitor(this) }
