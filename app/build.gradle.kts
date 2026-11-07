@@ -1,7 +1,15 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.compose.compiler)
+}
+
+// 签名材料只从本地 keystore.properties 读取，文件不存在时不配置签名。
+val releaseKeystore = rootProject.file("keystore.properties")
+val releaseProperties = Properties().apply {
+    if (releaseKeystore.exists()) releaseKeystore.inputStream().use { load(it) }
 }
 
 android {
@@ -13,8 +21,8 @@ android {
         applicationId = "com.meowv.tune"
         minSdk = 28
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4.0-p3"
+        versionCode = 5
+        versionName = "1.0.0"
         testInstrumentationRunner = "com.meowv.tune.TuneTestRunner"
     }
 
@@ -29,6 +37,28 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+    }
+
+    // 签名材料只从本地 keystore.properties 读取，文件不存在时不配置签名，
+    // assembleRelease 产出未签名包，密钥与口令不进入仓库或构建日志。
+    signingConfigs {
+        if (releaseKeystore.exists()) {
+            create("release") {
+                storeFile = rootProject.file(releaseProperties.getProperty("storeFile"))
+                storePassword = releaseProperties.getProperty("storePassword")
+                keyAlias = releaseProperties.getProperty("keyAlias")
+                keyPassword = releaseProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (releaseKeystore.exists()) signingConfig = signingConfigs.getByName("release")
+        }
     }
 
     lint {

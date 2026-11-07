@@ -5,6 +5,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
@@ -45,6 +46,7 @@ class TuneAppTest {
 
     @Before
     fun resetDirectoryState() {
+        awaitCompose()
         app.mockNetwork.value = NetworkState(NetworkType.WIFI, metered = false)
         runBlocking {
             app.userSettings.update { TuneSettings(scope = RadioScope(ScopeMode.GLOBAL)) }
@@ -228,7 +230,8 @@ class TuneAppTest {
             val version = compose.activity.packageManager.getPackageInfo(compose.activity.packageName, 0).versionName.orEmpty()
             val aboutLabel = compose.activity.getString(R.string.about_app_version, version)
             // 设置项增加后允许滚动，这里验证版本行完整可见而不是被裁切。
-            val about = compose.onNodeWithText(aboutLabel).performScrollTo().getUnclippedBoundsInRoot()
+            compose.onNodeWithTag("page_settings").performScrollToNode(hasText(aboutLabel))
+            val about = compose.onNodeWithText(aboutLabel).getUnclippedBoundsInRoot()
             val viewport = compose.onNodeWithTag("page_settings").getUnclippedBoundsInRoot()
             assertTrue("Default car settings must show the version completely",
                 about.top >= viewport.top && about.bottom <= viewport.bottom)
@@ -471,10 +474,34 @@ class TuneAppTest {
         }
     }
 
+    // 低性能模拟器上 Activity 首帧可能晚于测试线程，先等语义树就绪。
+    private fun awaitCompose(timeoutMs: Long = 15_000) {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val ready = runCatching {
+                compose.onAllNodesWithTag("brand_header").fetchSemanticsNodes().isNotEmpty()
+            }.getOrDefault(false)
+            if (ready) return
+            Thread.sleep(100)
+        }
+        throw AssertionError("Compose 语义树未就绪")
+    }
+
     private fun selectPage(tag: String) {
-        val node = compose.onNodeWithTag(tag)
-        if (compose.onAllNodesWithTag("shell_car").fetchSemanticsNodes().isNotEmpty()) node.performScrollTo()
-        node.performClick()
+        val page = when (tag) {
+            "nav_settings" -> "page_settings"
+            "nav_music" -> "page_music"
+            else -> "page_radio"
+        }
+        // 慢速模拟器上首次点击可能落在重组中的布局上，重试直到目标页面出现。
+        repeat(3) {
+            val node = compose.onNodeWithTag(tag)
+            if (compose.onAllNodesWithTag("shell_car").fetchSemanticsNodes().isNotEmpty()) node.performScrollTo()
+            node.performClick()
+            compose.waitForIdle()
+            if (compose.onAllNodesWithTag(page).fetchSemanticsNodes().isNotEmpty()) return
+        }
+        throw AssertionError("页面未打开：$page")
     }
 
 }

@@ -19,6 +19,7 @@
 *.jks
 *.keystore
 key.properties
+keystore.properties
 secrets.properties
 
 # Local artifacts and diagnostics

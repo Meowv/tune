@@ -76,6 +76,8 @@ internal class RadioPlayback(
     private var alternateCount = 0
     private var generation = 0L
     private var state = PlayerUiState()
+    private var lastProgressPosition = -1L
+    private var lastProgressAt = 0L
 
     init {
         player.addListener(this)
@@ -84,6 +86,12 @@ internal class RadioPlayback(
                 .collect { (previous, next) ->
                     publish(decorate(state.copy(canPrevious = previous, canNext = next)))
                 }
+        }
+        scope.launch {
+            while (true) {
+                delay(PlaybackStallDetector.CHECK_INTERVAL_MS)
+                watchStall()
+            }
         }
         scope.launch {
             combine(network, settings.settings) { current, user -> current to user }
@@ -495,6 +503,37 @@ internal class RadioPlayback(
         ?.trim()
         ?.takeIf { it.startsWith("https://", ignoreCase = true) }
         ?.let { runCatching { Uri.parse(it) }.getOrNull() }
+
+    // 直播源静默卡死时按超时进入既有恢复预算，避免界面长期停在缓冲中。
+    private fun watchStall() {
+        if (selection == null) {
+            lastProgressAt = 0L
+            return
+        }
+        val now = android.os.SystemClock.elapsedRealtime()
+        val position = player.currentPosition
+        val buffering = player.playbackState == Player.STATE_BUFFERING
+        if (position != lastProgressPosition) {
+            lastProgressPosition = position
+            lastProgressAt = now
+            return
+        }
+        if (lastProgressAt == 0L) {
+            lastProgressAt = now
+            return
+        }
+        val stalled = PlaybackStallDetector.isStalled(
+            buffering = buffering,
+            playWhenReady = player.playWhenReady,
+            position = position,
+            lastPosition = lastProgressPosition,
+            sinceProgressMs = now - lastProgressAt
+        )
+        if (stalled) {
+            lastProgressAt = now
+            scheduleRecovery(TuneFailure(TuneError.TIMEOUT))
+        }
+    }
 
     private fun classify(error: PlaybackException): TuneFailure {
         val causes = generateSequence<Throwable>(error) { it.cause }.toList()

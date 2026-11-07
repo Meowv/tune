@@ -40,6 +40,20 @@ private val Context.testSettings by preferencesDataStore("test_tune_settings")
 class TuneTestRunner : AndroidJUnitRunner() {
     override fun newApplication(loader: ClassLoader, className: String, context: Context) =
         super.newApplication(loader, TuneTestApplication::class.java.name, context)
+
+    override fun onStart() {
+        super.onStart()
+        // API 33+ 的运行时通知权限会弹出对话框打断用例，统一预授权；
+        // 权限流程本身由 T27 单独验证。
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            runCatching {
+                uiAutomation.grantRuntimePermission(
+                    targetContext.packageName,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                )
+            }
+        }
+    }
 }
 
 class TuneTestApplication : TuneApplication() {
