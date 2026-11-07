@@ -18,6 +18,7 @@ import com.meowv.tune.domain.RadioQueue
 import com.meowv.tune.domain.RadioRepository
 import com.meowv.tune.domain.SettingsRepository
 import com.meowv.tune.playback.MediaProbe
+import com.meowv.tune.playback.PlaybackIntent
 import com.meowv.tune.playback.MediaUrlPolicy
 import com.meowv.tune.playback.RadioMediaConnection
 import com.meowv.tune.playback.RadioStreamResolver
@@ -50,8 +51,9 @@ open class TuneApplication : Application(), SingletonImageLoader.Factory {
 
     val radioQueue: RadioQueue by lazy { RadioQueueManager(radioRepository) }
 
-    internal val mediaHttp by lazy { MediaUrlPolicy.client() }
-    internal val streamResolver by lazy { RadioStreamResolver(radioBrowser, MediaProbe(mediaHttp)) }
+    internal open val mediaHttp by lazy { MediaUrlPolicy.client() }
+    private val streamResolver by lazy { RadioStreamResolver(radioBrowser, MediaProbe(mediaHttp)) }
+    internal open suspend fun resolveStream(intent: PlaybackIntent) = streamResolver.resolve(intent)
     internal val playerController by lazy { RadioMediaConnection(this) }
 
     override fun newImageLoader(context: Context): ImageLoader = ImageLoader.Builder(context)

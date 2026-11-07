@@ -36,7 +36,7 @@ data class Station(
 )
 
 enum class TuneError {
-    TIMEOUT, CONNECTION, TLS, SERVER, HTTP, INVALID_RESPONSE, STORAGE, PLAYBACK
+    TIMEOUT, CONNECTION, TLS, SERVER, HTTP, INVALID_RESPONSE, STORAGE, PLAYBACK, UNSUPPORTED_MEDIA
 }
 
 // 错误只携带可安全展示的类别和状态码。
@@ -66,7 +66,8 @@ data class PlayerUiState(
     val source: PlaybackSource = PlaybackSource.RADIO,
     val isLive: Boolean = false,
     val canPrevious: Boolean = false,
-    val canNext: Boolean = false
+    val canNext: Boolean = false,
+    val statusCode: Int? = null
 )
 
 data class RadioCountry(val code: CountryCode, val stationCount: Int) {

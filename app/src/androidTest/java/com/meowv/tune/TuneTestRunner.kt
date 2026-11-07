@@ -13,6 +13,14 @@ import com.meowv.tune.domain.TuneFailure
 import com.meowv.tune.radio.DirectoryValue
 import com.meowv.tune.radio.DirectoryCache
 import com.meowv.tune.settings.DataStoreSettingsRepository
+import com.meowv.tune.playback.PlaybackIntent
+import com.meowv.tune.playback.ResolvedRadioStream
+import androidx.test.platform.app.InstrumentationRegistry
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -25,6 +33,27 @@ class TuneTestRunner : AndroidJUnitRunner() {
 }
 
 class TuneTestApplication : TuneApplication() {
+    override val mediaHttp by lazy {
+        OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            val file = request.url.pathSegments.last()
+            val response = Response.Builder().request(request).protocol(Protocol.HTTP_1_1)
+            if (file == "missing") {
+                response.code(404).message("Not found").body(byteArrayOf().toResponseBody()).build()
+            } else {
+                val assets = InstrumentationRegistry.getInstrumentation().context.assets
+                val body = assets.open("t15/$file").use { it.readBytes() }
+                response.code(200).message("OK").body(body.toResponseBody()).build()
+            }
+        }.build()
+    }
+
+    override suspend fun resolveStream(intent: PlaybackIntent): ResolvedRadioStream {
+        val file = if (intent.station.name.startsWith("Test station ")) "radio.mp3" else intent.station.name
+        if (file == "no-source") throw TuneFailure(TuneError.INVALID_RESPONSE)
+        return ResolvedRadioStream("https://test.example/$file".toHttpUrl(), file == "radio.m3u8")
+    }
+
     override val directoryCache by lazy { DirectoryCache(testDirectory) }
     override val userSettings by lazy { DataStoreSettingsRepository(testSettings) }
     internal val country = requireNotNull(CountryCode.parse("JP"))

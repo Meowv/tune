@@ -3,6 +3,7 @@ package com.meowv.tune.ui
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -58,13 +59,16 @@ internal fun PreviewControl(
     modifier: Modifier = Modifier,
     background: Color = Color.Transparent,
     tint: Color = TuneColors.Text,
-    tag: String = ""
+    tag: String = "",
+    onClick: (() -> Unit)? = null
 ) {
     Box(
-        modifier.size(targetSize).testTag(tag).semantics {
+        modifier.size(targetSize).testTag(tag)
+            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
+            .semantics {
             role = Role.Button
             contentDescription = description
-            disabled()
+            if (onClick == null) disabled()
         }, contentAlignment = Alignment.Center
     ) {
         Box(Modifier.size(if (visualSize.value > 0) visualSize else iconSize).background(background, CircleShape), contentAlignment = Alignment.Center) {

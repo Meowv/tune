@@ -22,6 +22,8 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.meowv.tune.ui.TuneApp
 import com.meowv.tune.ui.theme.TuneTheme
 import com.meowv.tune.domain.TuneSettings
+import com.meowv.tune.domain.PlayerCommand
+import com.meowv.tune.domain.TuneFailure
 import com.meowv.tune.radio.CountryResolver
 import com.meowv.tune.radio.RadioViewModel
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -63,6 +65,9 @@ class MainActivity : ComponentActivity() {
                     settings = settings ?: TuneSettings(),
                     storageError = storageError,
                     radio = radioModel.radioState,
+                    playback = tuneApp.playerController.state,
+                    playbackConnected = tuneApp.playerController.connected,
+                    onPlayback = ::dispatchPlayback,
                     countries = countries,
                     onLoadCountries = radioModel::loadCountries,
                     onRefreshRadio = { settingsModel.settings.value?.let { radioModel.refresh(it.scope) } },
@@ -82,6 +87,16 @@ class MainActivity : ComponentActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) applySystemBars()
+    }
+
+    private fun dispatchPlayback(command: PlayerCommand) {
+        lifecycleScope.launch {
+            try {
+                tuneApp.playerController.dispatch(command)
+            } catch (_: TuneFailure) {
+                Toast.makeText(this@MainActivity, R.string.playback_unavailable, Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     override fun onStart() {

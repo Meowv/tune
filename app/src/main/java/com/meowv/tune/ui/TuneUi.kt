@@ -31,6 +31,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.meowv.tune.R
 import com.meowv.tune.domain.RadioUiState
+import com.meowv.tune.domain.PlayerUiState
+import com.meowv.tune.domain.PlayerCommand
+import com.meowv.tune.domain.PlaybackPhase
+import com.meowv.tune.domain.TuneError
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.meowv.tune.domain.TuneSettings
 import com.meowv.tune.radio.CountryOptions
 import com.meowv.tune.ui.theme.TuneColors
@@ -45,6 +50,9 @@ fun TuneApp(
     settings: TuneSettings,
     storageError: Boolean,
     radio: StateFlow<RadioUiState>,
+    playback: StateFlow<PlayerUiState>,
+    playbackConnected: StateFlow<Boolean>,
+    onPlayback: (PlayerCommand) -> Unit,
     countries: CountryOptions,
     onLoadCountries: (Boolean) -> Unit,
     onRefreshRadio: () -> Unit,
@@ -54,6 +62,7 @@ fun TuneApp(
     onShellChanged: (Boolean) -> Unit,
     onFirstLayout: () -> Unit
 ) {
+    val connected by playbackConnected.collectAsStateWithLifecycle()
     var page by rememberSaveable { mutableStateOf(TunePage.Radio) }
     var showScopePicker by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(showScopePicker) { if (showScopePicker) onLoadCountries(false) }
@@ -77,14 +86,14 @@ fun TuneApp(
                     Box(Modifier.weight(1f).fillMaxHeight()) {
                         pageStates.SaveableStateProvider(page) {
                             when (page) {
-                                TunePage.Radio -> RadioScreen(isCar, radio, onRefreshRadio, onLoadMore) { showScopePicker = true }
+                                TunePage.Radio -> RadioScreen(isCar, radio, onRefreshRadio, onLoadMore, if (connected) { station -> onPlayback(PlayerCommand.Play(station)) } else null) { showScopePicker = true }
                                 TunePage.Music -> MusicScreen(isCar)
                                 TunePage.Settings -> SettingsScreen(isCar, settings, onSettingsChange, onClearDirectoryCache)
                             }
                         }
                     }
                 }
-                GlobalMiniPlayer(isCar)
+                GlobalMiniPlayer(isCar, playback, connected, onPlayback)
                 if (!isCar) BottomNavigation(page) { page = it }
             }
             if (showScopePicker) {
@@ -186,7 +195,12 @@ private fun NavigationItem(page: TunePage, selected: Boolean, isCar: Boolean, mo
 }
 
 @Composable
-private fun GlobalMiniPlayer(isCar: Boolean) {
+private fun GlobalMiniPlayer(isCar: Boolean, playback: StateFlow<PlayerUiState>, connected: Boolean, onPlayback: (PlayerCommand) -> Unit) {
+    val state by playback.collectAsStateWithLifecycle()
+    val phase = state.phase
+    val active = phase != PlaybackPhase.IDLE
+    val pausing = phase == PlaybackPhase.PLAYING || phase == PlaybackPhase.BUFFERING
+    val canToggle = connected && active && phase != PlaybackPhase.RESOLVING && phase != PlaybackPhase.RETRYING
     if (isCar) HorizontalDivider(color = TuneColors.Border, thickness = .5.dp)
     Box(Modifier.fillMaxWidth().testTag("global_player").background(if (isCar) TuneColors.Surface else TuneColors.Background)
         .padding(start = if (isCar) 0.dp else 9.dp, end = if (isCar) 0.dp else 9.dp,
@@ -199,11 +213,12 @@ private fun GlobalMiniPlayer(isCar: Boolean) {
                 val info: @Composable (Modifier) -> Unit = { modifier ->
                     Row(modifier, verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(if (isCar) 17.dp else 8.dp)) {
-                        StationBadge(null, if (isCar) 70.dp else 42.dp)
+                        StationBadge(state.station, if (isCar) 70.dp else 42.dp)
                         Column(Modifier.weight(1f).testTag("player_info"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(stringResource(R.string.player_idle), color = TuneColors.Text,
+                            Text(state.station?.name?.ifBlank { stringResource(R.string.station_unnamed) } ?: stringResource(R.string.player_idle), color = TuneColors.Text,
                                 fontSize = if (isCar && playerWidth >= 1000.dp) 24.sp else 15.sp,
                                 fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TuneTextStyle)
+                            if (active) Text(playbackLabel(state), color = TuneColors.Muted, fontSize = 12.sp)
                         }
                     }
                 }
@@ -212,11 +227,15 @@ private fun GlobalMiniPlayer(isCar: Boolean) {
                         horizontalArrangement = Arrangement.spacedBy(if (isCar) 18.dp else 0.dp)) {
                         PreviewControl(R.drawable.ic_radio_previous, stringResource(R.string.player_previous),
                             if (isCar) 56.dp else 48.dp, 0.dp, if (isCar) 64.dp else 34.dp, tag = "player_previous")
-                        PreviewControl(R.drawable.ic_radio_play, stringResource(R.string.action_play),
+                        PreviewControl(if (pausing) R.drawable.ic_radio_pause else R.drawable.ic_radio_play,
+                            stringResource(if (pausing) R.string.action_pause else if (phase == PlaybackPhase.ERROR) R.string.directory_retry else R.string.action_play),
                             if (isCar) 72.dp else 48.dp, if (isCar) 72.dp else 44.dp,
-                            if (isCar) 44.dp else 28.dp, background = TuneColors.Primary, tint = TuneColors.Background, tag = "player_pause")
+                            if (isCar) 44.dp else 28.dp, background = TuneColors.Primary, tint = TuneColors.Background, tag = "player_pause", onClick = if (canToggle) ({ onPlayback(PlayerCommand.TogglePause) }) else null)
                         PreviewControl(R.drawable.ic_radio_next, stringResource(R.string.player_next),
                             if (isCar) 56.dp else 48.dp, 0.dp, if (isCar) 64.dp else 34.dp, tag = "player_next")
+                        if (active && connected) PreviewControl(R.drawable.ic_ui_close, stringResource(R.string.action_stop),
+                            if (isCar) 56.dp else 48.dp, 0.dp, 24.dp, tag = "player_stop",
+                            onClick = { onPlayback(PlayerCommand.Stop) })
                     }
                 }
                 if (stacked) Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(TuneSpacing.Small)) {
@@ -233,5 +252,25 @@ private fun GlobalMiniPlayer(isCar: Boolean) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun playbackLabel(state: PlayerUiState): String = when (state.phase) {
+    PlaybackPhase.IDLE -> stringResource(R.string.player_idle)
+    PlaybackPhase.RESOLVING -> stringResource(R.string.playback_resolving)
+    PlaybackPhase.RETRYING -> stringResource(R.string.playback_retrying)
+    PlaybackPhase.BUFFERING -> stringResource(R.string.playback_buffering)
+    PlaybackPhase.PLAYING -> stringResource(R.string.playback_live)
+    PlaybackPhase.PAUSED -> stringResource(R.string.playback_paused)
+    PlaybackPhase.ERROR -> when (state.error) {
+        TuneError.HTTP, TuneError.SERVER -> state.statusCode?.let { stringResource(R.string.playback_http, it) }
+            ?: stringResource(R.string.playback_unavailable)
+        TuneError.TIMEOUT -> stringResource(R.string.playback_timeout)
+        TuneError.TLS -> stringResource(R.string.playback_tls)
+        TuneError.INVALID_RESPONSE -> stringResource(R.string.playback_no_source)
+        TuneError.CONNECTION -> stringResource(R.string.playback_connection)
+        TuneError.UNSUPPORTED_MEDIA -> stringResource(R.string.playback_format)
+        else -> stringResource(R.string.playback_unavailable)
     }
 }

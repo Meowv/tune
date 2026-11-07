@@ -22,13 +22,15 @@ class RadioPlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        val transport = (application as TuneApplication).mediaHttp
+        val app = application as TuneApplication
+        val transport = app.mediaHttp
         val dataSources = OkHttpDataSource.Factory(transport).setUserAgent("MeowvTune")
         val audio = AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build()
         val player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSources))
             .setAudioAttributes(audio, true)
             .build()
+        app.playerController.engine = RadioPlayback(player, app::resolveStream, app.playerController::publish)
         val activity = PendingIntent.getActivity(this, 0,
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -39,6 +41,10 @@ class RadioPlaybackService : MediaSessionService() {
         session.takeIf { canConnect(controllerInfo) }
 
     override fun onDestroy() {
+        (application as TuneApplication).playerController.apply {
+            engine?.close()
+            engine = null
+        }
         session?.let {
             val player = it.player
             it.release()

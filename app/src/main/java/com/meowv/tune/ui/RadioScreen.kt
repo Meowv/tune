@@ -45,15 +45,15 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.StateFlow
 
 @Composable
-internal fun RadioScreen(isCar: Boolean, radio: StateFlow<RadioUiState>, onRefresh: () -> Unit, onLoadMore: () -> Unit, onScopeClick: () -> Unit) {
+internal fun RadioScreen(isCar: Boolean, radio: StateFlow<RadioUiState>, onRefresh: () -> Unit, onLoadMore: () -> Unit, onPlay: ((Station) -> Unit)?, onScopeClick: () -> Unit) {
     val state by radio.collectAsStateWithLifecycle()
     key(state.scope, state.resolvedCountryCode) {
-        RadioDirectory(isCar, state, onRefresh, onLoadMore, onScopeClick)
+        RadioDirectory(isCar, state, onRefresh, onLoadMore, onPlay, onScopeClick)
     }
 }
 
 @Composable
-private fun RadioDirectory(isCar: Boolean, state: RadioUiState, onRefresh: () -> Unit, onLoadMore: () -> Unit, onScopeClick: () -> Unit) {
+private fun RadioDirectory(isCar: Boolean, state: RadioUiState, onRefresh: () -> Unit, onLoadMore: () -> Unit, onPlay: ((Station) -> Unit)?, onScopeClick: () -> Unit) {
     val locale = LocalConfiguration.current.locales[0] ?: Locale.getDefault()
     val scopeName = scopeName(state, locale)
     val listState = rememberLazyListState()
@@ -93,7 +93,7 @@ private fun RadioDirectory(isCar: Boolean, state: RadioUiState, onRefresh: () ->
             }
             if (state.error != null) item(key = "directory_error") { DirectoryFeedback(R.string.directory_error, onRefresh) }
             items(state.stations, key = { it.uuid.toString() }, contentType = { "station" }) { station ->
-                StationRow(station, isCar)
+                StationRow(station, isCar, onPlay)
             }
             when {
                 state.isLoading -> item(key = "directory_loading") { DirectoryFeedback(R.string.directory_loading) }
@@ -153,7 +153,7 @@ private fun ScopeSelector(name: String, wide: Boolean, modifier: Modifier, onCli
 }
 
 @Composable
-private fun StationRow(station: Station, isCar: Boolean) {
+private fun StationRow(station: Station, isCar: Boolean, onPlay: ((Station) -> Unit)?) {
     val title = station.name.ifBlank { stringResource(R.string.station_unnamed) }
     Surface(
         color = TuneColors.Surface,
@@ -172,7 +172,8 @@ private fun StationRow(station: Station, isCar: Boolean) {
             }
             PreviewControl(R.drawable.ic_radio_play, stringResource(R.string.action_play),
                 if (isCar) 56.dp else 48.dp, if (isCar) 44.dp else 34.dp, if (isCar) 26.dp else 22.dp,
-                background = Color(0xFF222D49), tint = TuneColors.Primary)
+                background = Color(0xFF222D49), tint = TuneColors.Primary,
+                onClick = onPlay?.let { play -> { play(station) } })
         }
     }
 }

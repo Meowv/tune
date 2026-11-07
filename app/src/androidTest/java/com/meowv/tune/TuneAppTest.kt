@@ -31,6 +31,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.UUID
+import com.meowv.tune.domain.PlaybackPhase
 
 @OptIn(ExperimentalTestApi::class)
 @RunWith(AndroidJUnit4::class)
@@ -46,6 +47,21 @@ class TuneAppTest {
         }
         compose.onNodeWithTag("station_list").performScrollToIndex(0)
         awaitScope("收听范围，不限区域，切换地区")
+    }
+
+    @Test
+    fun stationPlayButtonControlsTheLivePlayer() {
+        val first = "station_${UUID(0, 1)}"
+        compose.waitUntil(5000) { app.playerController.connected.value }
+        compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(first))
+        compose.onNode(hasAnyAncestor(hasTestTag(first)) and hasContentDescription("播放")).performClick()
+        compose.waitUntil(8000) { app.playerController.state.value.phase == PlaybackPhase.PLAYING }
+        compose.onNodeWithTag("player_pause").performClick()
+        compose.waitUntil(3000) { app.playerController.state.value.phase == PlaybackPhase.PAUSED }
+        compose.onNodeWithTag("player_pause").performClick()
+        compose.waitUntil(3000) { app.playerController.state.value.phase == PlaybackPhase.PLAYING }
+        compose.onNodeWithTag("player_stop").performClick()
+        compose.waitUntil(3000) { app.playerController.state.value.phase == PlaybackPhase.IDLE }
     }
 
     @Test
