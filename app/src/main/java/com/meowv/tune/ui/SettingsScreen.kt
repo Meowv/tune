@@ -6,6 +6,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.selection.toggleable
+import com.meowv.tune.domain.TuneSettings
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -17,7 +19,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.*
-import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -28,7 +29,11 @@ import com.meowv.tune.ui.theme.TuneShapes
 import com.meowv.tune.ui.theme.TuneTextStyle
 
 @Composable
-internal fun SettingsScreen(isCar: Boolean) {
+internal fun SettingsScreen(
+    isCar: Boolean,
+    settings: TuneSettings,
+    onSettingsChange: ((TuneSettings) -> TuneSettings) -> Unit
+) {
     val context = LocalContext.current
     val version = remember(context) { context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty() }
     LazyColumn(Modifier.fillMaxSize().testTag("page_settings"),
@@ -40,11 +45,17 @@ internal fun SettingsScreen(isCar: Boolean) {
         }
         item(key = "playback_settings") {
             SettingsGroup(R.string.settings_playback) {
-                SettingRow(R.drawable.ic_ui_play, R.string.setting_autoplay, isCar, checked = false)
+                SettingRow(R.drawable.ic_ui_play, R.string.setting_autoplay, isCar, checked = settings.autoPlay) {
+                    onSettingsChange { current -> current.copy(autoPlay = !current.autoPlay) }
+                }
                 SettingsDivider()
-                SettingRow(R.drawable.ic_ui_wifi, R.string.setting_wifi, isCar, checked = false)
+                SettingRow(R.drawable.ic_ui_wifi, R.string.setting_wifi, isCar, checked = settings.wifiOnly) {
+                    onSettingsChange { current -> current.copy(wifiOnly = !current.wifiOnly) }
+                }
                 SettingsDivider()
-                SettingRow(R.drawable.ic_ui_info, R.string.setting_data, isCar, checked = true)
+                SettingRow(R.drawable.ic_ui_info, R.string.setting_data, isCar, checked = settings.dataWarning) {
+                    onSettingsChange { current -> current.copy(dataWarning = !current.dataWarning) }
+                }
             }
         }
         item(key = "appearance_settings") {
@@ -82,19 +93,12 @@ private fun SettingsDivider() {
 }
 
 @Composable
-private fun SettingRow(@DrawableRes resource: Int, @StringRes label: Int, isCar: Boolean, checked: Boolean? = null, @StringRes value: Int? = null) {
+private fun SettingRow(@DrawableRes resource: Int, @StringRes label: Int, isCar: Boolean, checked: Boolean? = null, @StringRes value: Int? = null, onToggle: (() -> Unit)? = null) {
     val title = stringResource(label)
     val rowModifier = Modifier.fillMaxWidth().heightIn(min = if (isCar) 56.dp else 52.dp)
         .padding(vertical = if (isCar) 4.dp else 2.dp).testTag("setting_$label")
-    val semantics = if (checked != null) {
-        val state = stringResource(if (checked) R.string.preview_toggle_on else R.string.preview_toggle_off)
-        Modifier.semantics(mergeDescendants = true) {
-            role = Role.Switch
-            contentDescription = title
-            toggleableState = if (checked) ToggleableState.On else ToggleableState.Off
-            stateDescription = state
-            disabled()
-        }
+    val semantics = if (checked != null && onToggle != null) {
+        Modifier.toggleable(checked, role = Role.Switch, onValueChange = { onToggle() })
     } else Modifier.semantics(mergeDescendants = true) { }
     Row(rowModifier.then(semantics), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Medium)) {
         Box(Modifier.size(38.dp).background(TuneColors.Raised, TuneShapes.Control), contentAlignment = Alignment.Center) {

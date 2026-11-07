@@ -5,6 +5,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.meowv.tune.settings.SettingsViewModel
+import com.meowv.tune.settings.settingsRepository
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -15,6 +22,9 @@ import com.meowv.tune.ui.theme.TuneTheme
 class MainActivity : ComponentActivity() {
     private var firstFrameReady = false
     private var carShell = false
+    private val settingsModel by viewModels<SettingsViewModel> {
+        viewModelFactory { initializer { SettingsViewModel(settingsRepository(applicationContext)) } }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
@@ -23,8 +33,13 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge(SystemBarStyle.dark(background), SystemBarStyle.dark(background))
         splash.setKeepOnScreenCondition { !firstFrameReady }
         setContent {
+            val settings by settingsModel.settings.collectAsStateWithLifecycle()
+            val storageError by settingsModel.storageError.collectAsStateWithLifecycle()
             TuneTheme {
                 TuneApp(
+                    settings = settings,
+                    storageError = storageError,
+                    onSettingsChange = settingsModel::update,
                     onShellChanged = {
                         carShell = it
                         applySystemBars()

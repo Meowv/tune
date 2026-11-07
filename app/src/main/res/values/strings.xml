@@ -23,8 +23,6 @@
   <string name="player_next">下一个电台</string>
   <string name="static_control">，静态占位，暂不可用</string>
   <string name="player_demo_pause">暂停图标，演示播放态</string>
-  <string name="preview_toggle_on">，开启，静态界面预览</string>
-  <string name="preview_toggle_off">，关闭，静态界面预览</string>
   <string name="station_morning">晨光电台</string>
   <string name="station_night">夜航 FM</string>
   <string name="station_mountain">山海之声</string>
@@ -43,4 +41,5 @@
   <string name="scope_other_countries">国家/地区</string>
   <string name="about_app_version">Meowv Tune · %1$s</string>
   <string name="action_close">关闭</string>
+  <string name="settings_storage_error">无法读取或保存设置</string>
 </resources>

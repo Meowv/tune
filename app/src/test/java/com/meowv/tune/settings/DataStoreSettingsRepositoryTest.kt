@@ -1,0 +1,85 @@
+package com.meowv.tune.settings
+
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.stringPreferencesKey
+import com.meowv.tune.domain.*
+import java.io.File
+import java.util.UUID
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
+import org.junit.Assert.*
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+
+class DataStoreSettingsRepositoryTest {
+    @get:Rule val folder = TemporaryFolder()
+
+    @Test fun preferencesSurviveReopenAndConcurrentUpdates() = runBlocking {
+        val file = File(folder.root, "tune.preferences_pb")
+        val japan = RadioScope(ScopeMode.COUNTRY, CountryCode.parse("JP"))
+        val uuid = UUID.randomUUID()
+        open(file) { repository ->
+            assertEquals(TuneSettings(), repository.settings.first())
+            coroutineScope {
+                launch(Dispatchers.Default) { repository.update { it.copy(scope = japan, layout = LayoutMode.CAR) } }
+                launch(Dispatchers.Default) { repository.update { it.copy(wifiOnly = true, dataWarning = false) } }
+                launch(Dispatchers.Default) { repository.update { it.copy(autoPlay = true, pauseOnDisconnect = false) } }
+            }
+            repository.recordSuccessfulStation(uuid)
+        }
+        open(file) { repository ->
+            assertEquals(TuneSettings(japan, LayoutMode.CAR, true, true, false, false, uuid), repository.settings.first())
+            repository.update { it.copy(autoPlay = false, scope = RadioScope(ScopeMode.GLOBAL)) }
+            repository.recordSuccessfulStation(UUID.randomUUID())
+        }
+        open(file) { repository ->
+            val settings = repository.settings.first()
+            assertFalse(settings.autoPlay)
+            assertNull(settings.lastSuccessfulStation)
+            assertEquals(ScopeMode.GLOBAL, settings.scope.mode)
+            repository.update { it.copy(autoPlay = true, lastSuccessfulStation = uuid) }
+            assertNull(repository.settings.first().lastSuccessfulStation)
+        }
+    }
+
+    @Test fun malformedPreferencesAndCorruptionRecoverToDefaults() = runBlocking {
+        val file = File(folder.root, "bad.preferences_pb")
+        val lifetime = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        try {
+            val store = PreferenceDataStoreFactory.create(scope = lifetime, produceFile = { file })
+            store.edit {
+                it[stringPreferencesKey("scope")] = "COUNTRY"
+                it[stringPreferencesKey("country")] = "ZZ"
+                it[stringPreferencesKey("layout")] = "INVALID"
+                it[stringPreferencesKey("auto_play")] = "true"
+            }
+            assertEquals(TuneSettings(), DataStoreSettingsRepository(store).settings.first())
+        } finally {
+            lifetime.coroutineContext.job.cancelAndJoin()
+        }
+        file.writeBytes(byteArrayOf(0x80.toByte()))
+        open(file) { repository ->
+            assertEquals(TuneSettings(), repository.settings.first())
+            repository.update { it.copy(scope = RadioScope(ScopeMode.GLOBAL)) }
+            assertEquals(ScopeMode.GLOBAL, repository.settings.first().scope.mode)
+        }
+    }
+
+    private suspend fun open(file: File, block: suspend (SettingsRepository) -> Unit) {
+        val lifetime = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        try {
+            val store = PreferenceDataStoreFactory.create(
+                corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+                scope = lifetime,
+                produceFile = { file }
+            )
+            withTimeout(5000) { block(DataStoreSettingsRepository(store)) }
+        } finally {
+            lifetime.coroutineContext.job.cancelAndJoin()
+        }
+    }
+}

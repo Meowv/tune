@@ -30,6 +30,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.meowv.tune.R
+import com.meowv.tune.domain.TuneSettings
 import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.ui.theme.TuneSpacing
 import com.meowv.tune.ui.theme.TuneShapes
@@ -37,9 +38,15 @@ import com.meowv.tune.ui.theme.TuneTextStyle
 import kotlin.math.min
 
 @Composable
-fun TuneApp(onShellChanged: (Boolean) -> Unit, onFirstLayout: () -> Unit) {
+fun TuneApp(
+    settings: TuneSettings,
+    storageError: Boolean,
+    onSettingsChange: ((TuneSettings) -> TuneSettings) -> Unit,
+    onShellChanged: (Boolean) -> Unit,
+    onFirstLayout: () -> Unit
+) {
     var page by rememberSaveable { mutableStateOf(TunePage.Radio) }
-    var scope by rememberSaveable { mutableStateOf(DemoScope.Auto) }
+    val scope = DemoScope.entries.firstOrNull { it.scope == settings.scope } ?: DemoScope.Auto
     var showScopePicker by rememberSaveable { mutableStateOf(false) }
     val pageStates = rememberSaveableStateHolder()
     Surface(color = TuneColors.Background) {
@@ -52,6 +59,10 @@ fun TuneApp(onShellChanged: (Boolean) -> Unit, onFirstLayout: () -> Unit) {
                     .onGloballyPositioned { onFirstLayout() }.testTag(if (isCar) "shell_car" else "shell_phone")
             ) {
                 BrandHeader(isCar)
+                if (storageError) {
+                    Text(stringResource(R.string.settings_storage_error), color = TuneColors.Text,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                }
                 Row(Modifier.weight(1f)) {
                     if (isCar) SideNavigation(page, windowWidth.value) { page = it }
                     Box(Modifier.weight(1f).fillMaxHeight()) {
@@ -59,7 +70,7 @@ fun TuneApp(onShellChanged: (Boolean) -> Unit, onFirstLayout: () -> Unit) {
                             when (page) {
                                 TunePage.Radio -> RadioScreen(isCar, scope) { showScopePicker = true }
                                 TunePage.Music -> MusicScreen(isCar)
-                                TunePage.Settings -> SettingsScreen(isCar)
+                                TunePage.Settings -> SettingsScreen(isCar, settings, onSettingsChange)
                             }
                         }
                     }
@@ -69,7 +80,8 @@ fun TuneApp(onShellChanged: (Boolean) -> Unit, onFirstLayout: () -> Unit) {
             }
             if (showScopePicker) {
                 ScopePicker(isCar, maxHeight, scope, onDismiss = { showScopePicker = false }) {
-                    scope = it
+                    val selected = it.scope
+                    onSettingsChange { current -> current.copy(scope = selected) }
                     showScopePicker = false
                 }
             }

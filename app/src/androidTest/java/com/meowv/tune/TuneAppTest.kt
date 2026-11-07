@@ -17,6 +17,10 @@ import android.content.Context
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import org.junit.Assert.*
+import org.junit.Before
+import com.meowv.tune.domain.TuneSettings
+import com.meowv.tune.settings.settingsRepository
+import kotlinx.coroutines.runBlocking
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -26,6 +30,15 @@ import org.junit.runner.RunWith
 class TuneAppTest {
     @get:Rule
     val compose = createAndroidComposeRule<MainActivity>()
+
+    @Before
+    fun resetPreviewSettings() {
+        runBlocking { settingsRepository(compose.activity).update { TuneSettings() } }
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithContentDescription("收听范围，中国，切换地区")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+    }
 
     @Test
     fun pagesShareTheSameNavigationAndPlayer() {
@@ -59,12 +72,20 @@ class TuneAppTest {
         compose.onNodeWithTag("scope_picker").assertIsDisplayed()
         compose.onNodeWithTag("scope_options").performScrollToNode(hasTestTag("scope_Japan"))
         compose.onNodeWithTag("scope_Japan").performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithContentDescription("收听范围，日本，切换地区")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
         compose.onNodeWithTag("scope_selector").assertContentDescriptionEquals("收听范围，日本，切换地区")
         selectPage("nav_music")
         compose.activityRule.scenario.recreate()
         compose.onNodeWithTag("nav_music").assertIsSelected()
         compose.onNodeWithTag("page_music").assertIsDisplayed()
         selectPage("nav_radio")
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithContentDescription("收听范围，日本，切换地区")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
         compose.onNodeWithTag("scope_selector").assertContentDescriptionEquals("收听范围，日本，切换地区")
         compose.onNodeWithTag("global_player").assertIsDisplayed()
     }
@@ -81,6 +102,10 @@ class TuneAppTest {
         openScopePicker()
         compose.onNodeWithTag("scope_options").performScrollToNode(hasTestTag("scope_Global"))
         compose.onNodeWithTag("scope_Global").performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithContentDescription("收听范围，不限区域，切换地区")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
         compose.onNodeWithTag("scope_selector").assertContentDescriptionEquals("收听范围，不限区域，切换地区")
     }
 

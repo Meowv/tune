@@ -3,19 +3,24 @@ package com.meowv.tune.ui
 import androidx.annotation.StringRes
 import androidx.compose.ui.graphics.Color
 import com.meowv.tune.R
+import com.meowv.tune.domain.CountryCode
+import com.meowv.tune.domain.RadioScope
+import com.meowv.tune.domain.ScopeMode
 
 enum class TunePage(@StringRes val label: Int) {
     Radio(R.string.menu_radio), Music(R.string.menu_music), Settings(R.string.menu_settings)
 }
 
-enum class DemoScope(@StringRes val label: Int, @StringRes val optionLabel: Int = label) {
-    Auto(R.string.scope_china, R.string.scope_auto_china),
-    Global(R.string.scope_global),
-    China(R.string.scope_china),
-    Japan(R.string.scope_japan),
-    UnitedStates(R.string.scope_us),
-    UnitedKingdom(R.string.scope_uk)
+enum class DemoScope(@StringRes val label: Int, @StringRes val optionLabel: Int = label, val scope: RadioScope) {
+    Auto(R.string.scope_china, R.string.scope_auto_china, RadioScope()),
+    Global(R.string.scope_global, scope = RadioScope(ScopeMode.GLOBAL)),
+    China(R.string.scope_china, scope = demoCountry("CN")),
+    Japan(R.string.scope_japan, scope = demoCountry("JP")),
+    UnitedStates(R.string.scope_us, scope = demoCountry("US")),
+    UnitedKingdom(R.string.scope_uk, scope = demoCountry("GB"))
 }
+
+private fun demoCountry(code: String) = RadioScope(ScopeMode.COUNTRY, requireNotNull(CountryCode.parse(code)))
 
 internal data class DemoStation(val id: String, @StringRes val name: Int, val color: Color)
 
