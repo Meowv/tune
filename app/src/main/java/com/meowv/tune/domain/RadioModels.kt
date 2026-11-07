@@ -36,7 +36,8 @@ data class Station(
 )
 
 enum class TuneError {
-    TIMEOUT, CONNECTION, TLS, SERVER, HTTP, INVALID_RESPONSE, STORAGE, PLAYBACK, UNSUPPORTED_MEDIA
+    TIMEOUT, CONNECTION, TLS, SERVER, HTTP, INVALID_RESPONSE, STORAGE, PLAYBACK, UNSUPPORTED_MEDIA,
+    NETWORK_OFFLINE, WIFI_ONLY, MOBILE_CONFIRMATION
 }
 
 // 错误只携带可安全展示的类别和状态码。
@@ -58,6 +59,15 @@ data class RadioUiState(
 enum class PlaybackSource { RADIO, MUSIC }
 
 enum class PlaybackPhase { IDLE, RESOLVING, BUFFERING, PLAYING, PAUSED, RETRYING, ERROR }
+
+enum class NetworkType { OFFLINE, WIFI, ETHERNET, CELLULAR, OTHER }
+
+data class NetworkState(
+    val type: NetworkType = NetworkType.OFFLINE,
+    val metered: Boolean = false
+) {
+    val available: Boolean get() = type != NetworkType.OFFLINE
+}
 
 data class PlayerUiState(
     val phase: PlaybackPhase = PlaybackPhase.IDLE,

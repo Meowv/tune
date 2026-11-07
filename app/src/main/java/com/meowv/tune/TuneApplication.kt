@@ -20,6 +20,7 @@ import com.meowv.tune.domain.SettingsRepository
 import com.meowv.tune.playback.MediaProbe
 import com.meowv.tune.playback.PlaybackIntent
 import com.meowv.tune.playback.MediaUrlPolicy
+import com.meowv.tune.playback.NetworkMonitor
 import com.meowv.tune.playback.RadioMediaConnection
 import com.meowv.tune.playback.RadioStreamResolver
 import coil3.ImageLoader
@@ -27,6 +28,8 @@ import coil3.SingletonImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import com.meowv.tune.settings.settingsRepository
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.StateFlow
+import com.meowv.tune.domain.NetworkState
 
 private val Context.mirrorPreferences by preferencesDataStore(
     name = "radio_browser_mirrors",
@@ -41,6 +44,8 @@ private val LastMirror = stringPreferencesKey("last_good_host")
 open class TuneApplication : Application(), SingletonImageLoader.Factory {
     internal open val directoryCache by lazy { DirectoryCache(directoryPreferences) }
     internal open val userSettings: SettingsRepository by lazy { settingsRepository(this) }
+    private val networkMonitor by lazy { NetworkMonitor(this) }
+    internal open val networkState: StateFlow<NetworkState> get() = networkMonitor.state
     private val remoteCountries by lazy { RadioBrowserCountries(radioBrowser) }
     val countryDirectory = CountryDirectory { loadCountries().value }
 

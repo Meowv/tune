@@ -33,6 +33,8 @@ class RadioPlaybackService : MediaSessionService() {
         app.playerController.engine = RadioPlayback(
             player,
             app.radioQueue,
+            app.userSettings,
+            app.networkState,
             app::resolveStream,
             app.playerController::publish
         )

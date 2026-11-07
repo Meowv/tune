@@ -33,6 +33,8 @@ sealed interface PlayerCommand {
     data object TogglePause : PlayerCommand
     data object Next : PlayerCommand
     data object Previous : PlayerCommand
+    data object AllowMeteredRetry : PlayerCommand
+    data object DismissNetworkPrompt : PlayerCommand
     data object Stop : PlayerCommand
 }
 

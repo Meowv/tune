@@ -8,13 +8,17 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
+import com.meowv.tune.domain.NetworkState
+import com.meowv.tune.domain.NetworkType
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.QueueSelection
 import com.meowv.tune.domain.RadioQueue
+import com.meowv.tune.domain.SettingsRepository
 import com.meowv.tune.domain.Station
 import com.meowv.tune.domain.TuneError
 import com.meowv.tune.domain.TuneFailure
+import com.meowv.tune.domain.TuneSettings
 import java.net.SocketTimeoutException
 import javax.net.ssl.SSLException
 import kotlinx.coroutines.CancellationException
@@ -25,7 +29,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -34,6 +41,8 @@ import kotlinx.coroutines.sync.withLock
 internal class RadioPlayback(
     private val player: Player,
     private val queue: RadioQueue,
+    private val settings: SettingsRepository,
+    private val network: StateFlow<NetworkState>,
     private val resolve: suspend (PlaybackIntent) -> ResolvedRadioStream,
     private val publish: (PlayerUiState) -> Unit
 ) : Player.Listener {
@@ -42,7 +51,9 @@ internal class RadioPlayback(
     private var request: Job? = null
     private var intent: PlaybackIntent? = null
     private var selection: QueueSelection? = null
+    private var blocked: Command? = null
     private var committed = false
+    private var meteredApproved = false
     private var generation = 0L
     private var state = PlayerUiState()
 
@@ -54,53 +65,32 @@ internal class RadioPlayback(
                     publish(decorate(state.copy(canPrevious = previous, canNext = next)))
                 }
         }
+        scope.launch {
+            combine(network, settings.settings) { current, user -> current to user }
+                .distinctUntilChanged()
+                .collect { (current, user) ->
+                    reactToNetworkChange(current, user)
+                }
+        }
     }
 
-    fun play(station: Station) = submit {
-        val activeScope = queue.activeScope.value ?: run {
-            fail(TuneError.PLAYBACK, station = station)
-            return@submit
-        }
-        val next = queue.select(activeScope, station.uuid) ?: run {
-            fail(TuneError.PLAYBACK, station = station)
-            return@submit
-        }
-        resolveAndPlay(next, PlaybackPhase.RESOLVING)
+    fun play(station: Station) = submit { run(Command.Play(station), allowMetered = false) }
+
+    fun next() = submit { run(Command.Next, allowMetered = false) }
+
+    fun previous() = submit { run(Command.Previous, allowMetered = false) }
+
+    fun toggle() = submit { toggle(allowMetered = false) }
+
+    fun allowMeteredRetry() = submit {
+        val pending = blocked ?: return@submit
+        run(pending, allowMetered = true)
     }
 
-    fun next() = submit {
-        val activeScope = queue.activeScope.value ?: run {
-            fail(TuneError.PLAYBACK)
-            return@submit
-        }
-        val next = queue.next(activeScope, cursor = null) ?: run {
-            fail(TuneError.PLAYBACK)
-            return@submit
-        }
-        resolveAndPlay(next, PlaybackPhase.RESOLVING)
-    }
-
-    fun previous() = submit {
-        val activeScope = queue.activeScope.value ?: run {
-            fail(TuneError.PLAYBACK)
-            return@submit
-        }
-        val next = queue.previous(activeScope) ?: run {
-            fail(TuneError.PLAYBACK)
-            return@submit
-        }
-        resolveAndPlay(next, PlaybackPhase.RESOLVING)
-    }
-
-    fun toggle() {
-        val currentIntent = intent ?: return
-        val currentSelection = selection ?: return
-        when (state.phase) {
-            PlaybackPhase.ERROR -> submit {
-                resolveAndPlay(currentSelection, PlaybackPhase.RETRYING, currentIntent)
-            }
-            PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING -> stop()
-            else -> if (player.playWhenReady) player.pause() else player.play()
+    fun dismissNetworkPrompt() {
+        blocked = null
+        if (state.error == TuneError.MOBILE_CONFIRMATION) {
+            if (selection == null) update(PlayerUiState()) else update(state.copy(error = null, statusCode = null))
         }
     }
 
@@ -110,7 +100,9 @@ internal class RadioPlayback(
         player.clearMediaItems()
         intent = null
         selection = null
+        blocked = null
         committed = false
+        meteredApproved = false
         update(PlayerUiState())
     }
 
@@ -155,6 +147,97 @@ internal class RadioPlayback(
         fail(kind, http?.responseCode)
     }
 
+    private suspend fun run(command: Command, allowMetered: Boolean) {
+        if (!networkAllows(command, allowMetered)) return
+        when (command) {
+            is Command.Play -> {
+                val activeScope = queue.activeScope.value ?: run {
+                    fail(TuneError.PLAYBACK, station = command.station)
+                    return
+                }
+                val next = queue.select(activeScope, command.station.uuid) ?: run {
+                    fail(TuneError.PLAYBACK, station = command.station)
+                    return
+                }
+                resolveAndPlay(next, PlaybackPhase.RESOLVING)
+            }
+            Command.Next -> {
+                val activeScope = queue.activeScope.value ?: run {
+                    fail(TuneError.PLAYBACK)
+                    return
+                }
+                val next = queue.next(activeScope, cursor = null) ?: run {
+                    fail(TuneError.PLAYBACK)
+                    return
+                }
+                resolveAndPlay(next, PlaybackPhase.RESOLVING)
+            }
+            Command.Previous -> {
+                val activeScope = queue.activeScope.value ?: run {
+                    fail(TuneError.PLAYBACK)
+                    return
+                }
+                val next = queue.previous(activeScope) ?: run {
+                    fail(TuneError.PLAYBACK)
+                    return
+                }
+                resolveAndPlay(next, PlaybackPhase.RESOLVING)
+            }
+            Command.Toggle -> toggle(allowMetered)
+        }
+    }
+
+    private suspend fun toggle(allowMetered: Boolean) {
+        when (state.phase) {
+            PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING -> stop()
+            PlaybackPhase.ERROR -> {
+                val currentIntent = intent ?: return
+                val currentSelection = selection ?: return
+                if (!networkAllows(Command.Toggle, allowMetered)) return
+                resolveAndPlay(currentSelection, PlaybackPhase.RETRYING, currentIntent)
+            }
+            else -> {
+                if (player.playWhenReady) {
+                    player.pause()
+                } else {
+                    if (!networkAllows(Command.Toggle, allowMetered)) return
+                    player.play()
+                }
+            }
+        }
+    }
+
+    private suspend fun networkAllows(command: Command, allowMetered: Boolean): Boolean {
+        val user = settings.settings.first()
+        val decision = NetworkPolicy.evaluate(network.value, user, allowMetered)
+        if (decision == NetworkDecision.ALLOWED) {
+            blocked = null
+            meteredApproved = allowMetered && network.value.metered
+            if (isNetworkError(state.error)) update(state.copy(error = null, statusCode = null))
+            return true
+        }
+        blocked = command
+        val error = decision.error
+        val phase = if (selection == null) PlaybackPhase.ERROR else state.phase
+        update(state.copy(phase = phase, error = error, statusCode = null))
+        return false
+    }
+
+    private suspend fun reactToNetworkChange(current: NetworkState, user: TuneSettings) {
+        if (selection == null) return
+        val decision = NetworkPolicy.evaluate(current, user, meteredApproved)
+        if (decision == NetworkDecision.ALLOWED) {
+            if (current.type == NetworkType.WIFI || current.type == NetworkType.ETHERNET) meteredApproved = false
+            if (isNetworkError(state.error)) update(state.copy(error = null, statusCode = null))
+            return
+        }
+        request?.cancel()
+        player.pause()
+        blocked = Command.Toggle
+        meteredApproved = false
+        update(state.copy(phase = PlaybackPhase.PAUSED, error = decision.error, statusCode = null))
+    }
+
     private fun submit(block: suspend () -> Unit) {
         val id = ++generation
         request?.cancel()
@@ -184,6 +267,7 @@ internal class RadioPlayback(
         val playbackIntent = existingIntent ?: PlaybackIntent(next.station)
         selection = next
         intent = playbackIntent
+        blocked = null
         committed = false
         update(PlayerUiState(phase = phase, station = next.station, isLive = true))
 
@@ -219,4 +303,22 @@ internal class RadioPlayback(
         canPrevious = queue.canPrevious.value,
         canNext = queue.canNext.value
     )
+
+    private val NetworkDecision.error: TuneError
+        get() = when (this) {
+            NetworkDecision.ALLOWED -> error("Allowed decisions have no error")
+            NetworkDecision.OFFLINE -> TuneError.NETWORK_OFFLINE
+            NetworkDecision.WIFI_ONLY -> TuneError.WIFI_ONLY
+            NetworkDecision.CONFIRM_METERED -> TuneError.MOBILE_CONFIRMATION
+        }
+
+    private fun isNetworkError(error: TuneError?) =
+        error in setOf(TuneError.NETWORK_OFFLINE, TuneError.WIFI_ONLY, TuneError.MOBILE_CONFIRMATION)
+
+    private sealed interface Command {
+        data class Play(val station: Station) : Command
+        data object Next : Command
+        data object Previous : Command
+        data object Toggle : Command
+    }
 }

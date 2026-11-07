@@ -11,8 +11,10 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
@@ -63,8 +65,14 @@ fun TuneApp(
     onFirstLayout: () -> Unit
 ) {
     val connected by playbackConnected.collectAsStateWithLifecycle()
+    val playbackState by playback.collectAsStateWithLifecycle()
     var page by rememberSaveable { mutableStateOf(TunePage.Radio) }
     var showScopePicker by rememberSaveable { mutableStateOf(false) }
+    var networkPromptDismissed by rememberSaveable { mutableStateOf(false) }
+    val submitPlayback: (PlayerCommand) -> Unit = { command ->
+        networkPromptDismissed = false
+        onPlayback(command)
+    }
     LaunchedEffect(showScopePicker) { if (showScopePicker) onLoadCountries(false) }
     val pageStates = rememberSaveableStateHolder()
     Surface(color = TuneColors.Background) {
@@ -86,14 +94,22 @@ fun TuneApp(
                     Box(Modifier.weight(1f).fillMaxHeight()) {
                         pageStates.SaveableStateProvider(page) {
                             when (page) {
-                                TunePage.Radio -> RadioScreen(isCar, radio, onRefreshRadio, onLoadMore, if (connected) { station -> onPlayback(PlayerCommand.Play(station)) } else null) { showScopePicker = true }
+                                TunePage.Radio -> RadioScreen(
+                                    isCar = isCar,
+                                    radio = radio,
+                                    playback = playbackState,
+                                    connected = connected,
+                                    onRefresh = onRefreshRadio,
+                                    onLoadMore = onLoadMore,
+                                    onPlayback = submitPlayback
+                                ) { showScopePicker = true }
                                 TunePage.Music -> MusicScreen(isCar)
                                 TunePage.Settings -> SettingsScreen(isCar, settings, onSettingsChange, onClearDirectoryCache)
                             }
                         }
                     }
                 }
-                GlobalMiniPlayer(isCar, playback, connected, onPlayback)
+                GlobalMiniPlayer(isCar, playbackState, connected, submitPlayback)
                 if (!isCar) BottomNavigation(page) { page = it }
             }
             if (showScopePicker) {
@@ -102,6 +118,31 @@ fun TuneApp(
                     onSettingsChange { current -> current.copy(scope = selected) }
                     showScopePicker = false
                 }
+            }
+            if (playbackState.error == TuneError.MOBILE_CONFIRMATION && !networkPromptDismissed) {
+                AlertDialog(
+                    onDismissRequest = {
+                        networkPromptDismissed = true
+                        onPlayback(PlayerCommand.DismissNetworkPrompt)
+                    },
+                    title = { Text(stringResource(R.string.mobile_playback_title), color = TuneColors.Text) },
+                    text = { Text(stringResource(R.string.mobile_playback_message), color = TuneColors.Muted) },
+                    confirmButton = {
+                        TextButton(onClick = { onPlayback(PlayerCommand.AllowMeteredRetry) }) {
+                            Text(stringResource(R.string.action_continue))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = {
+                            networkPromptDismissed = true
+                            onPlayback(PlayerCommand.DismissNetworkPrompt)
+                        }) {
+                            Text(stringResource(R.string.action_cancel))
+                        }
+                    },
+                    containerColor = TuneColors.Surface,
+                    textContentColor = TuneColors.Text
+                )
             }
         }
     }
@@ -195,8 +236,7 @@ private fun NavigationItem(page: TunePage, selected: Boolean, isCar: Boolean, mo
 }
 
 @Composable
-private fun GlobalMiniPlayer(isCar: Boolean, playback: StateFlow<PlayerUiState>, connected: Boolean, onPlayback: (PlayerCommand) -> Unit) {
-    val state by playback.collectAsStateWithLifecycle()
+private fun GlobalMiniPlayer(isCar: Boolean, state: PlayerUiState, connected: Boolean, onPlayback: (PlayerCommand) -> Unit) {
     val phase = state.phase
     val active = phase != PlaybackPhase.IDLE
     val pausing = phase == PlaybackPhase.PLAYING || phase == PlaybackPhase.BUFFERING
@@ -262,21 +302,26 @@ private fun GlobalMiniPlayer(isCar: Boolean, playback: StateFlow<PlayerUiState>,
 }
 
 @Composable
-private fun playbackLabel(state: PlayerUiState): String = when (state.phase) {
-    PlaybackPhase.IDLE -> stringResource(R.string.player_idle)
-    PlaybackPhase.RESOLVING -> stringResource(R.string.playback_resolving)
-    PlaybackPhase.RETRYING -> stringResource(R.string.playback_retrying)
-    PlaybackPhase.BUFFERING -> stringResource(R.string.playback_buffering)
-    PlaybackPhase.PLAYING -> stringResource(R.string.playback_live)
-    PlaybackPhase.PAUSED -> stringResource(R.string.playback_paused)
-    PlaybackPhase.ERROR -> when (state.error) {
-        TuneError.HTTP, TuneError.SERVER -> state.statusCode?.let { stringResource(R.string.playback_http, it) }
-            ?: stringResource(R.string.playback_unavailable)
-        TuneError.TIMEOUT -> stringResource(R.string.playback_timeout)
-        TuneError.TLS -> stringResource(R.string.playback_tls)
-        TuneError.INVALID_RESPONSE -> stringResource(R.string.playback_no_source)
-        TuneError.CONNECTION -> stringResource(R.string.playback_connection)
-        TuneError.UNSUPPORTED_MEDIA -> stringResource(R.string.playback_format)
-        else -> stringResource(R.string.playback_unavailable)
+private fun playbackLabel(state: PlayerUiState): String = when (state.error) {
+    TuneError.NETWORK_OFFLINE -> stringResource(R.string.playback_offline)
+    TuneError.WIFI_ONLY -> stringResource(R.string.playback_wifi_only)
+    TuneError.MOBILE_CONFIRMATION -> stringResource(R.string.playback_mobile_confirmation)
+    else -> when (state.phase) {
+        PlaybackPhase.IDLE -> stringResource(R.string.player_idle)
+        PlaybackPhase.RESOLVING -> stringResource(R.string.playback_resolving)
+        PlaybackPhase.RETRYING -> stringResource(R.string.playback_retrying)
+        PlaybackPhase.BUFFERING -> stringResource(R.string.playback_buffering)
+        PlaybackPhase.PLAYING -> stringResource(R.string.playback_live)
+        PlaybackPhase.PAUSED -> stringResource(R.string.playback_paused)
+        PlaybackPhase.ERROR -> when (state.error) {
+            TuneError.HTTP, TuneError.SERVER -> state.statusCode?.let { stringResource(R.string.playback_http, it) }
+                ?: stringResource(R.string.playback_unavailable)
+            TuneError.TIMEOUT -> stringResource(R.string.playback_timeout)
+            TuneError.TLS -> stringResource(R.string.playback_tls)
+            TuneError.INVALID_RESPONSE -> stringResource(R.string.playback_no_source)
+            TuneError.CONNECTION -> stringResource(R.string.playback_connection)
+            TuneError.UNSUPPORTED_MEDIA -> stringResource(R.string.playback_format)
+            else -> stringResource(R.string.playback_unavailable)
+        }
     }
 }

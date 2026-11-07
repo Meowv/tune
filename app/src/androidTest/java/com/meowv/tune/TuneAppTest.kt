@@ -22,6 +22,8 @@ import com.meowv.tune.domain.TuneSettings
 import com.meowv.tune.domain.RadioScope
 import com.meowv.tune.domain.ScopeMode
 import com.meowv.tune.domain.CountryCode
+import com.meowv.tune.domain.NetworkState
+import com.meowv.tune.domain.NetworkType
 import com.meowv.tune.settings.SettingsViewModel
 import com.meowv.tune.radio.RadioViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -42,6 +44,7 @@ class TuneAppTest {
 
     @Before
     fun resetDirectoryState() {
+        app.mockNetwork.value = NetworkState(NetworkType.WIFI, metered = false)
         runBlocking {
             app.userSettings.update { TuneSettings(scope = RadioScope(ScopeMode.GLOBAL)) }
         }
@@ -69,6 +72,13 @@ class TuneAppTest {
                 app.playerController.state.value.phase == PlaybackPhase.PLAYING
         }
         compose.onNodeWithTag("player_previous").assertIsNotEnabled()
+        compose.onNodeWithTag(first).assertHasClickAction().assertIsSelected()
+        selectPage("nav_music")
+        compose.onNode(hasText("Test station 1") and hasAnyAncestor(hasTestTag("global_player"))).assertIsDisplayed()
+        selectPage("nav_settings")
+        compose.onNode(hasText("Test station 1") and hasAnyAncestor(hasTestTag("global_player"))).assertIsDisplayed()
+        selectPage("nav_radio")
+        compose.onNodeWithTag(first).assertIsSelected()
         compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(second))
         compose.onNodeWithTag("player_pause").performClick()
         compose.waitUntil(3000) { app.playerController.state.value.phase == PlaybackPhase.PAUSED }
@@ -76,6 +86,104 @@ class TuneAppTest {
         compose.waitUntil(3000) { app.playerController.state.value.phase == PlaybackPhase.PLAYING }
         compose.onNodeWithTag("player_stop").performClick()
         compose.waitUntil(3000) { app.playerController.state.value.phase == PlaybackPhase.IDLE }
+    }
+
+    @Test
+    fun mobileWarningRequiresConfirmationBeforePlayback() {
+        app.mockNetwork.value = NetworkState(NetworkType.CELLULAR, metered = true)
+        runBlocking {
+            app.userSettings.update { it.copy(wifiOnly = false, dataWarning = true) }
+            app.userSettings.settings.first { !it.wifiOnly && it.dataWarning }
+        }
+        val first = "station_${UUID(0, 1)}"
+        compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(first))
+        compose.onNodeWithTag(first).performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithText("使用移动网络播放？").fetchSemanticsNodes().isNotEmpty()
+        }
+        assertEquals(PlaybackPhase.ERROR, app.playerController.state.value.phase)
+        compose.onNodeWithText("继续").performClick()
+        compose.waitUntil(8000) {
+            app.playerController.state.value.station?.uuid == UUID(0, 1) &&
+                app.playerController.state.value.phase == PlaybackPhase.PLAYING
+        }
+        runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
+    }
+
+    @Test
+    fun mobileWarningAlsoGuardsNextTrack() {
+        app.mockNetwork.value = NetworkState(NetworkType.CELLULAR, metered = true)
+        runBlocking {
+            app.userSettings.update { it.copy(wifiOnly = false, dataWarning = true) }
+            app.userSettings.settings.first { !it.wifiOnly && it.dataWarning }
+        }
+        val first = "station_${UUID(0, 1)}"
+        compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(first))
+        compose.onNodeWithTag(first).performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithText("使用移动网络播放？").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("继续").performClick()
+        compose.waitUntil(8000) {
+            app.playerController.state.value.station?.uuid == UUID(0, 1) &&
+                app.playerController.state.value.phase == PlaybackPhase.PLAYING
+        }
+
+        compose.onNodeWithTag("player_next").assertIsEnabled().performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithText("使用移动网络播放？").fetchSemanticsNodes().isNotEmpty()
+        }
+        assertEquals(UUID(0, 1), app.playerController.state.value.station?.uuid)
+        compose.onNodeWithText("继续").performClick()
+        compose.waitUntil(8000) {
+            app.playerController.state.value.station?.uuid == UUID(0, 2) &&
+                app.playerController.state.value.phase == PlaybackPhase.PLAYING
+        }
+        runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
+    }
+
+    @Test
+    fun wifiOnlyAndOfflineBlockPlayback() {
+        app.mockNetwork.value = NetworkState(NetworkType.CELLULAR, metered = true)
+        runBlocking {
+            app.userSettings.update { it.copy(wifiOnly = true, dataWarning = true) }
+            app.userSettings.settings.first { it.wifiOnly }
+        }
+        val first = "station_${UUID(0, 1)}"
+        compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(first))
+        compose.onNodeWithTag(first).performClick()
+        compose.waitUntil(5000) { compose.onAllNodesWithText("仅 Wi-Fi 播放已开启").fetchSemanticsNodes().isNotEmpty() }
+        assertNotEquals(PlaybackPhase.PLAYING, app.playerController.state.value.phase)
+
+        app.mockNetwork.value = NetworkState(NetworkType.OFFLINE, metered = false)
+        compose.onNodeWithTag(first).performClick()
+        compose.waitUntil(5000) { compose.onAllNodesWithText("网络不可用").fetchSemanticsNodes().isNotEmpty() }
+        assertNotEquals(PlaybackPhase.PLAYING, app.playerController.state.value.phase)
+    }
+
+    @Test
+    fun networkChangePausesAndReconnectDoesNotAutoResume() {
+        runBlocking {
+            app.userSettings.update { it.copy(wifiOnly = false, dataWarning = true) }
+            app.userSettings.settings.first { !it.wifiOnly && it.dataWarning }
+        }
+        val first = "station_${UUID(0, 1)}"
+        compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(first))
+        compose.onNodeWithTag(first).performClick()
+        compose.waitUntil(8000) { app.playerController.state.value.phase == PlaybackPhase.PLAYING }
+
+        app.mockNetwork.value = NetworkState(NetworkType.CELLULAR, metered = true)
+        compose.waitUntil(5000) {
+            app.playerController.state.value.phase == PlaybackPhase.PAUSED &&
+                app.playerController.state.value.error == com.meowv.tune.domain.TuneError.MOBILE_CONFIRMATION
+        }
+        compose.onNodeWithText("取消").performClick()
+        compose.waitUntil(3000) { app.playerController.state.value.error == null }
+
+        app.mockNetwork.value = NetworkState(NetworkType.WIFI, metered = false)
+        Thread.sleep(500)
+        assertEquals(PlaybackPhase.PAUSED, app.playerController.state.value.phase)
+        runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
     }
 
     @Test

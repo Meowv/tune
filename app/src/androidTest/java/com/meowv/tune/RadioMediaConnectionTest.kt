@@ -46,7 +46,9 @@ class RadioMediaConnectionTest {
             assertEquals(TuneError.HTTP, error.error)
             assertEquals(404, error.statusCode)
             connection.dispatch(PlayerCommand.Play(Station(UUID(0, 25), "no-source", null)))
-            val noSource = withTimeout(3000) { connection.state.first { it.phase == PlaybackPhase.ERROR } }
+            val noSource = withTimeout(3000) {
+                connection.state.first { it.station?.uuid == UUID(0, 25) && it.phase == PlaybackPhase.ERROR }
+            }
             assertEquals(TuneError.INVALID_RESPONSE, noSource.error)
             connection.dispatch(PlayerCommand.Stop)
         }

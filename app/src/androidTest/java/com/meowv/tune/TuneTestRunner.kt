@@ -6,6 +6,8 @@ import androidx.test.runner.AndroidJUnitRunner
 import com.meowv.tune.domain.CountryCode
 import com.meowv.tune.domain.RadioCountry
 import com.meowv.tune.domain.RadioRepository
+import com.meowv.tune.domain.NetworkState
+import com.meowv.tune.domain.NetworkType
 import com.meowv.tune.domain.Station
 import com.meowv.tune.domain.StationPage
 import com.meowv.tune.domain.TuneError
@@ -28,6 +30,8 @@ import okhttp3.ResponseBody.Companion.toResponseBody
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 private val Context.testDirectory by preferencesDataStore("test_radio_directory")
 private val Context.testSettings by preferencesDataStore("test_tune_settings")
@@ -38,6 +42,9 @@ class TuneTestRunner : AndroidJUnitRunner() {
 }
 
 class TuneTestApplication : TuneApplication() {
+    internal val mockNetwork = MutableStateFlow(NetworkState(NetworkType.WIFI, metered = false))
+    override val networkState: StateFlow<NetworkState> get() = mockNetwork
+
     override val mediaHttp by lazy {
         OkHttpClient.Builder().addInterceptor { chain ->
             val request = chain.request()

@@ -45,15 +45,32 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.StateFlow
 
 @Composable
-internal fun RadioScreen(isCar: Boolean, radio: StateFlow<RadioUiState>, onRefresh: () -> Unit, onLoadMore: () -> Unit, onPlay: ((Station) -> Unit)?, onScopeClick: () -> Unit) {
+internal fun RadioScreen(
+    isCar: Boolean,
+    radio: StateFlow<RadioUiState>,
+    playback: PlayerUiState,
+    connected: Boolean,
+    onRefresh: () -> Unit,
+    onLoadMore: () -> Unit,
+    onPlayback: (PlayerCommand) -> Unit,
+    onScopeClick: () -> Unit
+) {
     val state by radio.collectAsStateWithLifecycle()
     key(state.scope, state.resolvedCountryCode) {
-        RadioDirectory(isCar, state, onRefresh, onLoadMore, onPlay, onScopeClick)
+        RadioDirectory(isCar, state, playback, if (connected) onPlayback else null, onRefresh, onLoadMore, onScopeClick)
     }
 }
 
 @Composable
-private fun RadioDirectory(isCar: Boolean, state: RadioUiState, onRefresh: () -> Unit, onLoadMore: () -> Unit, onPlay: ((Station) -> Unit)?, onScopeClick: () -> Unit) {
+private fun RadioDirectory(
+    isCar: Boolean,
+    state: RadioUiState,
+    playback: PlayerUiState,
+    onPlayback: ((PlayerCommand) -> Unit)?,
+    onRefresh: () -> Unit,
+    onLoadMore: () -> Unit,
+    onScopeClick: () -> Unit
+) {
     val locale = LocalConfiguration.current.locales[0] ?: Locale.getDefault()
     val scopeName = scopeName(state, locale)
     val listState = rememberLazyListState()
@@ -93,7 +110,7 @@ private fun RadioDirectory(isCar: Boolean, state: RadioUiState, onRefresh: () ->
             }
             if (state.error != null) item(key = "directory_error") { DirectoryFeedback(R.string.directory_error, onRefresh) }
             items(state.stations, key = { it.uuid.toString() }, contentType = { "station" }) { station ->
-                StationRow(station, isCar, onPlay)
+                StationRow(station, isCar, playback, onPlayback)
             }
             when {
                 state.isLoading -> item(key = "directory_loading") { DirectoryFeedback(R.string.directory_loading) }
@@ -153,14 +170,39 @@ private fun ScopeSelector(name: String, wide: Boolean, modifier: Modifier, onCli
 }
 
 @Composable
-private fun StationRow(station: Station, isCar: Boolean, onPlay: ((Station) -> Unit)?) {
+private fun StationRow(
+    station: Station,
+    isCar: Boolean,
+    playback: PlayerUiState,
+    onPlayback: ((PlayerCommand) -> Unit)?
+) {
     val title = station.name.ifBlank { stringResource(R.string.station_unnamed) }
+    val selected = playback.station?.uuid == station.uuid
+    val active = selected && playback.phase in setOf(
+        PlaybackPhase.BUFFERING, PlaybackPhase.PLAYING, PlaybackPhase.PAUSED, PlaybackPhase.ERROR
+    )
+    val action = when {
+        onPlayback == null -> null
+        selected && playback.phase in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING) -> null
+        active -> ({ onPlayback(PlayerCommand.TogglePause) })
+        else -> ({ onPlayback(PlayerCommand.Play(station)) })
+    }
+    val stateDescription = when {
+        selected && playback.phase == PlaybackPhase.PLAYING -> stringResource(R.string.playback_live)
+        selected && playback.phase == PlaybackPhase.PAUSED -> stringResource(R.string.playback_paused)
+        selected && playback.phase == PlaybackPhase.ERROR -> stringResource(R.string.directory_retry)
+        else -> null
+    }
     Surface(
-        onClick = { onPlay?.invoke(station) },
-        enabled = onPlay != null,
-        color = TuneColors.Surface,
+        onClick = { action?.invoke() },
+        enabled = action != null,
+        color = if (selected) TuneColors.Raised else TuneColors.Surface,
         shape = TuneShapes.Station,
-        modifier = Modifier.fillMaxWidth().testTag("station_${station.uuid}")
+        border = if (selected) BorderStroke(1.dp, TuneColors.Primary) else null,
+        modifier = Modifier.fillMaxWidth().testTag("station_${station.uuid}").semantics {
+            this.selected = selected
+            stateDescription?.let { this.stateDescription = it }
+        }
     ) {
         Row(
             Modifier.heightIn(min = if (isCar) 60.dp else 72.dp).padding(horizontal = if (isCar) 14.dp else 11.dp, vertical = if (isCar) 2.dp else 8.dp),
@@ -172,10 +214,19 @@ private fun StationRow(station: Station, isCar: Boolean, onPlay: ((Station) -> U
                     fontWeight = FontWeight.Bold, lineHeight = if (isCar) 26.sp else 20.sp, style = TuneTextStyle,
                     maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
-            PreviewControl(R.drawable.ic_radio_play, stringResource(R.string.action_play),
+            PreviewControl(
+                if (selected && playback.phase in setOf(PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING)) {
+                    R.drawable.ic_radio_pause
+                } else R.drawable.ic_radio_play,
+                stringResource(
+                    if (selected && playback.phase in setOf(PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING)) {
+                        R.string.action_pause
+                    } else R.string.action_play
+                ),
                 if (isCar) 56.dp else 48.dp, if (isCar) 44.dp else 34.dp, if (isCar) 26.dp else 22.dp,
                 background = Color(0xFF222D49), tint = TuneColors.Primary,
-                onClick = onPlay?.let { play -> { play(station) } })
+                onClick = action
+            )
         }
     }
 }
