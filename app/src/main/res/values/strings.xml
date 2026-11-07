@@ -42,4 +42,5 @@
   <string name="scope_auto_china">自动 · 中国</string>
   <string name="scope_other_countries">国家/地区</string>
   <string name="about_app_version">Meowv Tune · %1$s</string>
+  <string name="action_close">关闭</string>
 </resources>
