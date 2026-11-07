@@ -3,6 +3,7 @@ package com.meowv.tune.ui
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -32,7 +33,8 @@ import com.meowv.tune.ui.theme.TuneTextStyle
 internal fun SettingsScreen(
     isCar: Boolean,
     settings: TuneSettings,
-    onSettingsChange: ((TuneSettings) -> TuneSettings) -> Unit
+    onSettingsChange: ((TuneSettings) -> TuneSettings) -> Unit,
+    onClearDirectoryCache: () -> Unit
 ) {
     val context = LocalContext.current
     val version = remember(context) { context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty() }
@@ -67,7 +69,7 @@ internal fun SettingsScreen(
         }
         item(key = "about_settings") {
             SettingsGroup(R.string.settings_about) {
-                SettingRow(R.drawable.ic_ui_refresh, R.string.setting_cache, isCar)
+                SettingRow(R.drawable.ic_ui_refresh, R.string.setting_cache, isCar, onClick = onClearDirectoryCache)
                 SettingsDivider()
                 Text(stringResource(R.string.about_app_version, version), color = TuneColors.Muted, fontSize = 13.sp,
                     style = TuneTextStyle, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
@@ -93,13 +95,14 @@ private fun SettingsDivider() {
 }
 
 @Composable
-private fun SettingRow(@DrawableRes resource: Int, @StringRes label: Int, isCar: Boolean, checked: Boolean? = null, @StringRes value: Int? = null, onToggle: (() -> Unit)? = null) {
+private fun SettingRow(@DrawableRes resource: Int, @StringRes label: Int, isCar: Boolean, checked: Boolean? = null, @StringRes value: Int? = null, onClick: (() -> Unit)? = null) {
     val title = stringResource(label)
     val rowModifier = Modifier.fillMaxWidth().heightIn(min = if (isCar) 56.dp else 52.dp)
         .padding(vertical = if (isCar) 4.dp else 2.dp).testTag("setting_$label")
-    val semantics = if (checked != null && onToggle != null) {
-        Modifier.toggleable(checked, role = Role.Switch, onValueChange = { onToggle() })
-    } else Modifier.semantics(mergeDescendants = true) { }
+    val semantics = if (checked != null && onClick != null) {
+        Modifier.toggleable(checked, role = Role.Switch, onValueChange = { onClick() })
+    } else if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick)
+    else Modifier.semantics(mergeDescendants = true) { }
     Row(rowModifier.then(semantics), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Medium)) {
         Box(Modifier.size(38.dp).background(TuneColors.Raised, TuneShapes.Control), contentAlignment = Alignment.Center) {
             TuneIcon(resource, Modifier.size(22.dp))

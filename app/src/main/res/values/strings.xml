@@ -42,4 +42,6 @@
   <string name="about_app_version">Meowv Tune · %1$s</string>
   <string name="action_close">关闭</string>
   <string name="settings_storage_error">无法读取或保存设置</string>
+  <string name="directory_cache_cleared">电台目录缓存已清理</string>
+  <string name="directory_cache_clear_failed">无法清理电台目录缓存</string>
 </resources>

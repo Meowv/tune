@@ -4,14 +4,26 @@ import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
-interface RadioRepository {
-    suspend fun stationsForCountry(country: CountryCode, offset: Int, limit: Int): List<Station>
+interface RadioRepository : CountryDirectory {
+    suspend fun stationsForCountry(country: CountryCode, offset: Int, limit: Int): StationPage
     suspend fun randomGlobalStations(limit: Int): List<Station>
 }
 
+class QueueSelection internal constructor(val station: Station)
+
 interface RadioQueue {
-    suspend fun next(scope: RadioScope, current: UUID?): Station?
-    suspend fun previous(scope: RadioScope): Station?
+    val canPrevious: StateFlow<Boolean>
+
+    fun updateDirectory(scope: ResolvedRadioScope, page: StationPage)
+    fun clearScope()
+    fun select(scope: ResolvedRadioScope, uuid: UUID): QueueSelection?
+
+    // cursor 是已考虑的台站，播放失败重试时可以传入失败台站的 UUID。
+    suspend fun next(scope: ResolvedRadioScope, cursor: UUID?): QueueSelection?
+    fun previous(scope: ResolvedRadioScope): QueueSelection?
+
+    // 只有服务确认开始播放后才提交选择，过期确认返回 false。
+    fun recordSuccessfulPlayback(selection: QueueSelection): Boolean
 }
 
 sealed interface PlayerCommand {
@@ -49,4 +61,8 @@ interface SettingsRepository {
 
     // 仅由确认播放成功的服务调用。
     suspend fun recordSuccessfulStation(uuid: UUID)
+}
+
+fun interface CountryDirectory {
+    suspend fun countries(): List<RadioCountry>
 }

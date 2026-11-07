@@ -42,6 +42,7 @@ fun TuneApp(
     settings: TuneSettings,
     storageError: Boolean,
     onSettingsChange: ((TuneSettings) -> TuneSettings) -> Unit,
+    onClearDirectoryCache: () -> Unit,
     onShellChanged: (Boolean) -> Unit,
     onFirstLayout: () -> Unit
 ) {
@@ -70,7 +71,7 @@ fun TuneApp(
                             when (page) {
                                 TunePage.Radio -> RadioScreen(isCar, scope) { showScopePicker = true }
                                 TunePage.Music -> MusicScreen(isCar)
-                                TunePage.Settings -> SettingsScreen(isCar, settings, onSettingsChange)
+                                TunePage.Settings -> SettingsScreen(isCar, settings, onSettingsChange, onClearDirectoryCache)
                             }
                         }
                     }

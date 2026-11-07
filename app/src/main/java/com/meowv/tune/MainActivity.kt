@@ -1,6 +1,10 @@
 package com.meowv.tune
 
 import android.os.Bundle
+import android.widget.Toast
+import androidx.lifecycle.lifecycleScope
+import java.io.IOException
+import kotlinx.coroutines.launch
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -40,6 +44,7 @@ class MainActivity : ComponentActivity() {
                     settings = settings,
                     storageError = storageError,
                     onSettingsChange = settingsModel::update,
+                    onClearDirectoryCache = ::clearDirectoryCache,
                     onShellChanged = {
                         carShell = it
                         applySystemBars()
@@ -53,6 +58,18 @@ class MainActivity : ComponentActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) applySystemBars()
+    }
+
+    private fun clearDirectoryCache() {
+        lifecycleScope.launch {
+            val message = try {
+                (application as TuneApplication).directoryCache.clear()
+                R.string.directory_cache_cleared
+            } catch (_: IOException) {
+                R.string.directory_cache_clear_failed
+            }
+            Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun applySystemBars() {

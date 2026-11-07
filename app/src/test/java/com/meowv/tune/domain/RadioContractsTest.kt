@@ -1,5 +1,7 @@
 package com.meowv.tune.domain
 
+import com.meowv.tune.radio.CountryResolver
+import com.meowv.tune.radio.RadioQueueManager
 import com.meowv.tune.radio.RadioViewModel
 import java.util.UUID
 import kotlinx.coroutines.CompletableDeferred
@@ -36,21 +38,31 @@ class RadioContractsTest {
                 override suspend fun dispatch(command: PlayerCommand) = error("Unexpected player command")
             }
             val repository = object : RadioRepository {
-                override suspend fun stationsForCountry(country: CountryCode, offset: Int, limit: Int): List<Station> {
+                override suspend fun countries() = emptyList<RadioCountry>()
+                override suspend fun stationsForCountry(country: CountryCode, offset: Int, limit: Int): StationPage {
                     started.complete(Unit)
-                    return withContext(NonCancellable) { stale.await() }
+                    return StationPage(withContext(NonCancellable) { stale.await() })
                 }
                 override suspend fun randomGlobalStations(limit: Int): List<Station> =
                     throw TuneFailure(TuneError.SERVER, 503)
             }
             val lifetime = CoroutineScope(coroutineContext + SupervisorJob())
             try {
-                val model = RadioViewModel(repository, player, lifetime)
-                model.refresh(RadioScope(ScopeMode.COUNTRY, station.countryCode))
+                val queue = RadioQueueManager(repository)
+                val model = RadioViewModel(repository, player, CountryResolver({ null }, { null }), lifetime, queue = queue)
+                val local = RadioScope(ScopeMode.COUNTRY, station.countryCode)
+                model.refresh(local)
                 started.await()
+                val localScope = ResolvedRadioScope(local, station.countryCode)
+                val previous = station.copy(uuid = UUID.randomUUID())
+                queue.updateDirectory(localScope, StationPage(listOf(previous, station)))
+                assertTrue(queue.recordSuccessfulPlayback(requireNotNull(queue.select(localScope, previous.uuid))))
+                assertTrue(queue.recordSuccessfulPlayback(requireNotNull(queue.select(localScope, station.uuid))))
+                assertTrue(queue.canPrevious.value)
                 val cancelledRequest = lifetime.coroutineContext[kotlinx.coroutines.Job]!!.children.single()
                 val global = RadioScope(ScopeMode.GLOBAL)
                 model.refresh(global)
+                assertFalse(queue.canPrevious.value)
                 val failed = model.radioState.first { it.error == TuneError.SERVER }
                 assertEquals(global, failed.scope)
                 stale.complete(listOf(station))

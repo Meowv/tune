@@ -40,6 +40,8 @@ enum class TuneError {
 // 错误只携带可安全展示的类别和状态码。
 class TuneFailure(val kind: TuneError, val statusCode: Int? = null) : Exception(kind.name)
 
+enum class DirectoryCacheState { FRESH, STALE }
+
 data class RadioUiState(
     val scope: RadioScope = RadioScope(),
     val resolvedCountryCode: CountryCode? = null,
@@ -47,6 +49,7 @@ data class RadioUiState(
     val selectedStationUuid: UUID? = null,
     val isLoading: Boolean = false,
     val hasMore: Boolean = false,
+    val cacheState: DirectoryCacheState? = null,
     val error: TuneError? = null
 )
 
@@ -63,3 +66,25 @@ data class PlayerUiState(
     val canPrevious: Boolean = false,
     val canNext: Boolean = false
 )
+
+data class RadioCountry(val code: CountryCode, val stationCount: Int) {
+    init {
+        require(stationCount > 0)
+    }
+
+    fun displayName(locale: Locale): String =
+        Locale("", code.value).getDisplayCountry(locale).ifBlank { code.value }
+}
+
+// AUTO 的有效国家与偏好分开，供缓存、分页和队列共同识别范围。
+data class ResolvedRadioScope(val scope: RadioScope, val country: CountryCode?) {
+    init {
+        when (scope.mode) {
+            ScopeMode.COUNTRY -> require(scope.countryCode == country)
+            ScopeMode.GLOBAL -> require(country == null)
+            ScopeMode.AUTO -> Unit
+        }
+    }
+}
+
+data class StationPage(val stations: List<Station> = emptyList(), val nextOffset: Int? = null)
