@@ -55,7 +55,8 @@ data class TuneSettings(
     val scope: RadioScope = RadioScope(),
     val autoPlay: Boolean = false,
     val lastSuccessfulStation: UUID? = null,
-    val displayMode: RadioDisplayMode = RadioDisplayMode.LIST
+    val displayMode: RadioDisplayMode = RadioDisplayMode.LIST,
+    val playbackOrder: PlaybackOrder = PlaybackOrder.SEQUENTIAL
 )
 
 interface SettingsRepository {

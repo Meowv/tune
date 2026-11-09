@@ -43,6 +43,7 @@ import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.ui.theme.TuneShapes
 import com.meowv.tune.ui.theme.TuneSpacing
 import com.meowv.tune.ui.theme.TuneTextStyle
+import kotlinx.coroutines.delay
 import java.text.Collator
 import java.util.Locale
 import kotlinx.coroutines.flow.StateFlow
@@ -268,19 +269,27 @@ private fun CardMode(
         if (index >= 0 && index != pagerState.currentPage) pagerState.scrollToPage(index)
     }
     val currentSelectedId by rememberUpdatedState(selectedId)
-    val currentPhase by rememberUpdatedState(playback.phase)
-    LaunchedEffect(pagerState, queue.size) {
-        snapshotFlow { pagerState.settledPage }.distinctUntilChanged().collect { page ->
-            val station = queue.getOrNull(page) ?: return@collect
-            if (station.uuid != currentSelectedId) {
-                if (currentPhase == PlaybackPhase.PLAYING || currentPhase == PlaybackPhase.BUFFERING) {
-                    onPlayback?.invoke(PlayerCommand.Play(station))
-                } else {
-                    onSelectTarget(station)
-                }
+    val currentOnPlayback by rememberUpdatedState(onPlayback)
+    val currentOnSelectTarget by rememberUpdatedState(onSelectTarget)
+    // 播放中（含连接/缓冲/重试）滑动后自动续播；暂停或空闲只换目标，不主动起播。
+    val currentPlaying by rememberUpdatedState(
+        playback.phase in setOf(
+            PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING,
+            PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING
+        )
+    )
+    LaunchedEffect(pagerState.settledPage) {
+        val page = pagerState.settledPage
+        val station = queue.getOrNull(page) ?: return@LaunchedEffect
+        if (station.uuid != currentSelectedId) {
+            currentOnSelectTarget(station)
+            if (currentPlaying) {
+                // 快速连续滑动时，页变化会取消上一个协程，只有最终停留的台真正发起播放。
+                delay(CARD_AUTOPLAY_DEBOUNCE_MS)
+                currentOnPlayback?.invoke(PlayerCommand.Play(station))
             }
-            if (page >= queue.lastIndex - 2) onLoadMore()
         }
+        if (page >= queue.lastIndex - 2) onLoadMore()
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val width = (if (isCar) 390.dp else 278.dp).coerceAtMost(maxWidth - 48.dp)
@@ -290,7 +299,7 @@ private fun CardMode(
         val side = ((maxWidth - width) / 2).coerceAtLeast(16.dp)
         HorizontalPager(
             state = pagerState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().testTag("station_cards"),
             pageSize = PageSize.Fixed(width),
             contentPadding = PaddingValues(horizontal = side),
             pageSpacing = 12.dp,
@@ -540,3 +549,5 @@ private fun ScopeOption(tag: String, label: String, selected: Boolean, onSelect:
         if (selected) TuneIcon(R.drawable.ic_check, Modifier.size(22.dp))
     }
 }
+
+private const val CARD_AUTOPLAY_DEBOUNCE_MS = 300L

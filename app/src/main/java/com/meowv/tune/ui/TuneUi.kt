@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.meowv.tune.R
 import com.meowv.tune.domain.PlaybackPhase
+import com.meowv.tune.domain.PlaybackOrder
 import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.RadioDisplayMode
@@ -65,18 +66,33 @@ fun TuneApp(
     val target = radioState.stations.firstOrNull { it.uuid == selectedId } ?: playbackState.station
     val paused = playbackState.phase == PlaybackPhase.PAUSED
     val idle = playbackState.phase == PlaybackPhase.IDLE
+    val shuffle = settings.playbackOrder == PlaybackOrder.SHUFFLE
     val adjacent: (Int) -> Station? = { offset ->
         val list = radioState.stations
         val index = list.indexOfFirst { it.uuid == target?.uuid }
         if (index < 0) null else list.getOrNull(index + offset)
     }
+    // 随机模式不按列表顺序，左右滑动都从当前范围随机取一台，并排除正在播放的台。
+    val randomTarget: () -> Station? = {
+        radioState.stations.filter { it.uuid != target?.uuid }.randomOrNull()
+    }
     val next: () -> Unit = {
-        if (paused || idle) adjacent(1)?.let(onSelectTarget)
-        else onPlayback(PlayerCommand.Next)
+        when {
+            shuffle -> randomTarget()?.let { station ->
+                if (paused || idle) onSelectTarget(station) else onPlayback(PlayerCommand.Play(station))
+            }
+            paused || idle -> adjacent(1)?.let(onSelectTarget)
+            else -> onPlayback(PlayerCommand.Next)
+        }
     }
     val previous: () -> Unit = {
-        if (paused || idle) adjacent(-1)?.let(onSelectTarget)
-        else onPlayback(PlayerCommand.Previous)
+        when {
+            shuffle -> randomTarget()?.let { station ->
+                if (paused || idle) onSelectTarget(station) else onPlayback(PlayerCommand.Play(station))
+            }
+            paused || idle -> adjacent(-1)?.let(onSelectTarget)
+            else -> onPlayback(PlayerCommand.Previous)
+        }
     }
     val toggle: () -> Unit = {
         val station = target
@@ -119,6 +135,18 @@ fun TuneApp(
                     state = playbackState,
                     station = target,
                     connected = connected,
+                    shuffle = shuffle,
+                    onToggleOrder = {
+                        onSettingsChange { current ->
+                            current.copy(
+                                playbackOrder = if (current.playbackOrder == PlaybackOrder.SHUFFLE) {
+                                    PlaybackOrder.SEQUENTIAL
+                                } else {
+                                    PlaybackOrder.SHUFFLE
+                                }
+                            )
+                        }
+                    },
                     onToggle = toggle,
                     onNext = next,
                     onPrevious = previous

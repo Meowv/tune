@@ -20,6 +20,8 @@
   <string name="setting_cache">清理缓存</string>
   <string name="player_previous">上一个电台</string>
   <string name="player_next">下一个电台</string>
+  <string name="player_order_sequential">顺序播放</string>
+  <string name="player_order_shuffle">随机播放</string>
   <string name="scope_label">收听范围</string>
   <string name="scope_auto">自动</string>
   <string name="scope_change">切换地区</string>

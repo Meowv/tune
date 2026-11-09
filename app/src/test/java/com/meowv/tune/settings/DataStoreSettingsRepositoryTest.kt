@@ -29,7 +29,9 @@ class DataStoreSettingsRepositoryTest {
                 launch(Dispatchers.Default) { repository.update { it.copy(scope = japan) } }
                 launch(Dispatchers.Default) { repository.update { it.copy(autoPlay = true) } }
                 launch(Dispatchers.Default) {
-                    repository.update { it.copy(displayMode = RadioDisplayMode.CARD) }
+                    repository.update {
+                        it.copy(displayMode = RadioDisplayMode.CARD, playbackOrder = PlaybackOrder.SHUFFLE)
+                    }
                 }
             }
             repository.recordSuccessfulStation(uuid)
@@ -37,8 +39,8 @@ class DataStoreSettingsRepositoryTest {
         open(file) { repository ->
             assertEquals(
                 TuneSettings(
-                    scope = japan, autoPlay = true,
-                    lastSuccessfulStation = uuid, displayMode = RadioDisplayMode.CARD
+                    scope = japan, autoPlay = true, lastSuccessfulStation = uuid,
+                    displayMode = RadioDisplayMode.CARD, playbackOrder = PlaybackOrder.SHUFFLE
                 ),
                 repository.settings.first()
             )
@@ -51,6 +53,7 @@ class DataStoreSettingsRepositoryTest {
             assertNull(settings.lastSuccessfulStation)
             assertEquals(ScopeMode.GLOBAL, settings.scope.mode)
             assertEquals(RadioDisplayMode.CARD, settings.displayMode)
+            assertEquals(PlaybackOrder.SHUFFLE, settings.playbackOrder)
             repository.update { it.copy(autoPlay = true, lastSuccessfulStation = uuid) }
             assertNull(repository.settings.first().lastSuccessfulStation)
         }

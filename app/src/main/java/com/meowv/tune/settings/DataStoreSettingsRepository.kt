@@ -32,6 +32,7 @@ internal class DataStoreSettingsRepository(private val store: DataStore<Preferen
             val country = updated.scope.countryCode
             if (country == null) prefs.remove(Country) else prefs[Country] = country.value
             prefs[DisplayMode] = updated.displayMode.name
+            prefs[Order] = updated.playbackOrder.name
             prefs[AutoPlay] = updated.autoPlay
             if (!updated.autoPlay) prefs.remove(LastStation)
         }
@@ -63,7 +64,9 @@ internal class DataStoreSettingsRepository(private val store: DataStore<Preferen
             autoPlay = autoPlay,
             lastSuccessfulStation = if (autoPlay) last else null,
             displayMode = RadioDisplayMode.entries.firstOrNull { it.name == prefs.read(DisplayMode) }
-                ?: RadioDisplayMode.LIST
+                ?: RadioDisplayMode.LIST,
+            playbackOrder = PlaybackOrder.entries.firstOrNull { it.name == prefs.read(Order) }
+                ?: PlaybackOrder.SEQUENTIAL
         )
     }
 
@@ -75,5 +78,6 @@ internal class DataStoreSettingsRepository(private val store: DataStore<Preferen
         val AutoPlay = booleanPreferencesKey("auto_play")
         val LastStation = stringPreferencesKey("last_successful_station")
         val DisplayMode = stringPreferencesKey("radio_display_mode")
+        val Order = stringPreferencesKey("playback_order")
     }
 }

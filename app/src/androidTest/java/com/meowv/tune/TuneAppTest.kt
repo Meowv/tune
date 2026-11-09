@@ -37,6 +37,7 @@ import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 import com.meowv.tune.domain.PlaybackPhase
+import com.meowv.tune.domain.PlaybackOrder
 import com.meowv.tune.domain.RadioDisplayMode
 
 @OptIn(ExperimentalTestApi::class)
@@ -129,6 +130,55 @@ class TuneAppTest {
     }
 
     @Test
+    fun shuffleTogglePersistsAndSwipesToAnotherStation() {
+        compose.waitUntil(5000) { app.playerController.connected.value }
+        val first = "station_${UUID(0, 1)}"
+        compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(first))
+        compose.onNodeWithTag(first).performClick()
+        compose.waitUntil(8000) {
+            app.playerController.state.value.station?.uuid == UUID(0, 1) &&
+                app.playerController.state.value.phase == PlaybackPhase.PLAYING
+        }
+
+        compose.onNodeWithTag("player_order").assertContentDescriptionEquals("顺序播放").performClick()
+        compose.waitUntil(3000) { order() == PlaybackOrder.SHUFFLE }
+        compose.onNodeWithTag("player_order").assertContentDescriptionEquals("随机播放")
+
+        compose.onNodeWithTag("player_info").performTouchInput { swipeLeft() }
+        compose.waitUntil(8000) {
+            val state = app.playerController.state.value
+            state.station?.uuid != UUID(0, 1) && state.phase == PlaybackPhase.PLAYING
+        }
+
+        compose.activityRule.scenario.recreate()
+        compose.waitUntil(5000) { app.playerController.connected.value }
+        compose.waitUntil(5000) { order() == PlaybackOrder.SHUFFLE }
+        compose.onNodeWithTag("player_order").assertContentDescriptionEquals("随机播放")
+        runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
+    }
+
+    @Test
+    fun cardSwipeWhilePlayingAutoPlaysSettledStation() {
+        compose.waitUntil(5000) { app.playerController.connected.value }
+        val first = "station_${UUID(0, 1)}"
+        compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(first))
+        compose.onNodeWithTag(first).performClick()
+        compose.waitUntil(8000) {
+            app.playerController.state.value.station?.uuid == UUID(0, 1) &&
+                app.playerController.state.value.phase == PlaybackPhase.PLAYING
+        }
+
+        compose.onNodeWithTag("layout_card").performClick()
+        compose.waitUntil(3000) { displayMode() == RadioDisplayMode.CARD }
+        compose.onNodeWithTag("station_cards").assertExists().performTouchInput { swipeLeft() }
+        compose.waitUntil(8000) {
+            app.playerController.state.value.station?.uuid == UUID(0, 2) &&
+                app.playerController.state.value.phase == PlaybackPhase.PLAYING
+        }
+        runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
+    }
+
+    @Test
     fun exhaustedRecoveryExposesWorkingRetryControl() {
         val stations = (1L..4L).map { UUID(0, it) }
         try {
@@ -215,7 +265,7 @@ class TuneAppTest {
         val list = compose.onNodeWithTag("station_list").getUnclippedBoundsInRoot()
         assertTrue("List must end before the fixed player", list.bottom <= player.top)
         val minimum = if (compose.onAllNodesWithTag("shell_car").fetchSemanticsNodes().isNotEmpty()) 56.dp else 48.dp
-        listOf("nav_radio", "nav_music", "nav_settings", "player_pause", "player_info").forEach { tag ->
+        listOf("nav_radio", "nav_music", "nav_settings", "player_order", "player_pause", "player_info").forEach { tag ->
             val bounds = compose.onNodeWithTag(tag).getUnclippedBoundsInRoot()
             assertTrue("$tag width", bounds.right - bounds.left + .5.dp >= minimum)
             assertTrue("$tag height", bounds.bottom - bounds.top + .5.dp >= minimum)
@@ -428,6 +478,8 @@ class TuneAppTest {
     private fun radioState() = ViewModelProvider(compose.activity)[RadioViewModel::class].radioState.value
 
     private fun displayMode() = runBlocking { app.userSettings.settings.first().displayMode }
+
+    private fun order() = runBlocking { app.userSettings.settings.first().playbackOrder }
 
     private fun openScopePicker() {
         compose.onNodeWithTag("scope_selector").performClick()

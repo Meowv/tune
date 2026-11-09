@@ -47,6 +47,8 @@ enum class DirectoryCacheState { FRESH, STALE }
 
 enum class RadioDisplayMode { LIST, CARD }
 
+enum class PlaybackOrder { SEQUENTIAL, SHUFFLE }
+
 data class RadioUiState(
     val scope: RadioScope = RadioScope(),
     val resolvedCountryCode: CountryCode? = null,

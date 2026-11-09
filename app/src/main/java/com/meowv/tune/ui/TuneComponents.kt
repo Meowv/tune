@@ -197,6 +197,8 @@ internal fun MeowvMiniPlayer(
     state: PlayerUiState,
     station: Station?,
     connected: Boolean,
+    shuffle: Boolean,
+    onToggleOrder: () -> Unit,
     onToggle: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit
@@ -209,8 +211,9 @@ internal fun MeowvMiniPlayer(
     val thresholdPx = with(LocalDensity.current) { 64.dp.toPx() }
     val currentNext by rememberUpdatedState(onNext)
     val currentPrevious by rememberUpdatedState(onPrevious)
-    val currentCanNext by rememberUpdatedState(state.canNext)
-    val currentCanPrevious by rememberUpdatedState(state.canPrevious)
+    // 随机模式下左右滑动始终可用，由上层随机取台；顺序模式才受队列边界限制。
+    val currentCanNext by rememberUpdatedState(if (shuffle) station != null else state.canNext)
+    val currentCanPrevious by rememberUpdatedState(if (shuffle) station != null else state.canPrevious)
     val name = station?.name?.ifBlank { stringResource(R.string.station_unnamed) }
         ?: stringResource(R.string.player_unselected)
     val pauseLabel = stringResource(R.string.action_pause)
@@ -223,6 +226,9 @@ internal fun MeowvMiniPlayer(
     }
     val nextLabel = stringResource(R.string.player_next)
     val previousLabel = stringResource(R.string.player_previous)
+    val orderLabel = stringResource(
+        if (shuffle) R.string.player_order_shuffle else R.string.player_order_sequential
+    )
 
     Column(Modifier.fillMaxWidth().background(if (isCar) TuneColors.Player else TuneColors.Background)) {
         if (isCar) HorizontalDivider(color = TuneColors.Divider, thickness = .5.dp)
@@ -263,10 +269,10 @@ internal fun MeowvMiniPlayer(
                     .semantics {
                         customActions = listOf(
                             CustomAccessibilityAction(nextLabel) {
-                                if (state.canNext) { onNext(); true } else false
+                                if (currentCanNext) { onNext(); true } else false
                             },
                             CustomAccessibilityAction(previousLabel) {
-                                if (state.canPrevious) { onPrevious(); true } else false
+                                if (currentCanPrevious) { onPrevious(); true } else false
                             }
                         )
                     },
@@ -276,6 +282,22 @@ internal fun MeowvMiniPlayer(
                     name, color = TuneColors.Text, fontSize = if (isCar) 18.sp else 14.sp,
                     fontWeight = FontWeight.SemiBold, maxLines = 1,
                     overflow = TextOverflow.Ellipsis, style = TuneTextStyle
+                )
+            }
+            Box(
+                Modifier.size(48.dp)
+                    .clickable(role = Role.Button, onClick = onToggleOrder)
+                    .testTag("player_order")
+                    .semantics {
+                        role = Role.Button
+                        contentDescription = orderLabel
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                TuneIcon(
+                    if (shuffle) R.drawable.ic_order_shuffle else R.drawable.ic_order_sequential,
+                    Modifier.size(if (isCar) 23.dp else 21.dp),
+                    if (shuffle) TuneColors.Primary else TuneColors.Muted
                 )
             }
             Box(
