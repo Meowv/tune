@@ -215,7 +215,7 @@ internal class RadioPlayback(
     }
 
     private suspend fun run(command: Command) {
-        if (!networkAllows()) return
+        if (!networkAllows(command.targetStation)) return
         when (command) {
             is Command.Play -> {
                 val activeScope = queue.activeScope.value ?: run {
@@ -307,14 +307,16 @@ internal class RadioPlayback(
         }
     }
 
-    private suspend fun networkAllows(): Boolean {
+    private suspend fun networkAllows(target: Station? = null): Boolean {
         val decision = NetworkPolicy.evaluate(network.value)
         if (decision == NetworkDecision.ALLOWED) {
             if (isNetworkError(state.error)) update(state.copy(error = null, statusCode = null))
             return true
         }
         val phase = if (selection == null) PlaybackPhase.ERROR else state.phase
-        update(state.copy(phase = phase, error = TuneError.NETWORK_OFFLINE, statusCode = null))
+        // 离线时起播目标还没进入播放器，错误态仍要带上该台，列表与播放器才能指向同一项。
+        val station = if (selection == null) target ?: state.station else state.station
+        update(state.copy(phase = phase, station = station, error = TuneError.NETWORK_OFFLINE, statusCode = null))
         return false
     }
 
@@ -618,5 +620,12 @@ internal class RadioPlayback(
         data object Previous : Command
         data object Toggle : Command
         data class Resume(val station: Station) : Command
+
+        // 起播类命令的目标台；切台与暂停没有目标，沿用当前台。
+        val targetStation: Station? get() = when (this) {
+            is Play -> station
+            is Resume -> station
+            else -> null
+        }
     }
 }

@@ -28,6 +28,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -199,7 +200,8 @@ private fun StationRow(
     val phase = playback.phase
     val action: (() -> Unit)? = when {
         onPlayback == null -> null
-        isCurrent && phase in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING) -> null
+        // 连接/缓冲中重复点击只会把正在起播的流推倒重来，热区保持禁用。
+        isCurrent && phase in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING, PlaybackPhase.BUFFERING) -> null
         isCurrent && phase == PlaybackPhase.PLAYING -> null
         isCurrent && phase == PlaybackPhase.PAUSED -> ({ onPlayback(PlayerCommand.TogglePause) })
         isCurrent && phase == PlaybackPhase.ERROR -> ({ onPlayback(PlayerCommand.TogglePause) })
@@ -258,18 +260,31 @@ private fun StationRow(
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
             style = TuneTextStyle
         )
-        // 播放状态与选中状态分离：波形只在真正播放时出现，缓冲转小圈，其余一律播放键。
-        when {
-            playing -> PlayingWaveBars(Modifier.size(if (isCar) 24.dp else 22.dp), TuneColors.Primary)
-            buffering -> CircularProgressIndicator(
-                Modifier.size(if (isCar) 20.dp else 18.dp),
-                color = TuneColors.Primary, strokeWidth = 2.dp
-            )
-            else -> TuneIcon(
-                R.drawable.ic_play,
-                Modifier.size(if (isCar) 24.dp else 21.dp),
-                if (selected) TuneColors.Primary else TuneColors.Muted
-            )
+        // 播放状态与选中状态分离：波形只在真正播放时出现，缓冲转小圈，失败给重试键，其余一律播放键。
+        Box(
+            Modifier.size(if (isCar) 26.dp else 24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            when {
+                playing -> PlayingWaveBars(Modifier.size(if (isCar) 24.dp else 22.dp), TuneColors.Primary)
+                buffering -> CircularProgressIndicator(
+                    Modifier.size(if (isCar) 20.dp else 18.dp),
+                    color = TuneColors.Primary,
+                    strokeWidth = 2.dp,
+                    trackColor = TuneColors.Primary.copy(alpha = .22f),
+                    strokeCap = StrokeCap.Round
+                )
+                isCurrent && phase == PlaybackPhase.ERROR -> TuneIcon(
+                    R.drawable.ic_refresh,
+                    Modifier.size(if (isCar) 22.dp else 20.dp),
+                    TuneColors.Error
+                )
+                else -> TuneIcon(
+                    R.drawable.ic_play,
+                    Modifier.size(if (isCar) 24.dp else 21.dp),
+                    if (selected) TuneColors.Primary else TuneColors.Muted
+                )
+            }
         }
     }
 }

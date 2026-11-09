@@ -41,6 +41,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -123,9 +124,9 @@ internal fun PlayingWaveBars(modifier: Modifier = Modifier, color: Color = TuneC
 private const val WAVE_BAR_COUNT = 4
 private val WAVE_STATIC_LEVELS = listOf(.42f, .78f, .55f, .9f)
 
-private enum class PlayerButtonVisual { Idle, Playing, Buffering }
+private enum class PlayerButtonVisual { Play, Pause, Loading, Retry, Unavailable }
 
-/** 底部播放器操作按钮：统一 48dp（车机 56dp）扁平热区，无底色，视觉全交给图标。 */
+/** 底部播放器操作按钮的通用热区：48dp（车机 56dp），内容由调用方决定。 */
 @Composable
 private fun MiniPlayerAction(
     tag: String,
@@ -148,6 +149,65 @@ private fun MiniPlayerAction(
         contentAlignment = Alignment.Center
     ) {
         content()
+    }
+}
+
+/**
+ * 播放器主操作按钮：48dp 热区内的 46dp 圆（车机 52dp）。
+ * 播放/暂停为品牌紫实心圆，缓冲退为同色淡底加紫色加载环，失败转为错误色重试键。
+ * 状态只由图标与底色表达，不依赖文字或外发光。
+ */
+@Composable
+private fun PlayerActionButton(
+    visual: PlayerButtonVisual,
+    label: String,
+    enabled: Boolean,
+    isCar: Boolean,
+    onClick: () -> Unit
+) {
+    val diameter = if (isCar) 52.dp else 46.dp
+    val glyph = if (isCar) 24.dp else 22.dp
+    val background by animateColorAsState(
+        when (visual) {
+            PlayerButtonVisual.Play, PlayerButtonVisual.Pause -> TuneColors.Primary
+            PlayerButtonVisual.Loading -> TuneColors.Primary.copy(alpha = .16f)
+            PlayerButtonVisual.Retry -> TuneColors.Error.copy(alpha = .16f)
+            PlayerButtonVisual.Unavailable -> TuneColors.Raised
+        },
+        animationSpec = tween(200), label = "player_action_background"
+    )
+    val tint = when (visual) {
+        PlayerButtonVisual.Play, PlayerButtonVisual.Pause -> TuneColors.Background
+        PlayerButtonVisual.Loading -> TuneColors.Primary
+        PlayerButtonVisual.Retry -> TuneColors.Error
+        PlayerButtonVisual.Unavailable -> TuneColors.Muted
+    }
+    MiniPlayerAction("player_pause", label, enabled, isCar, onClick) {
+        Box(
+            Modifier.size(diameter).background(background, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Crossfade(visual, animationSpec = tween(160), label = "player_action_glyph") { state ->
+                when (state) {
+                    PlayerButtonVisual.Loading -> CircularProgressIndicator(
+                        Modifier.size(glyph + 2.dp),
+                        color = tint,
+                        strokeWidth = 2.dp,
+                        trackColor = tint.copy(alpha = .22f),
+                        strokeCap = StrokeCap.Round
+                    )
+                    PlayerButtonVisual.Pause -> TuneIcon(
+                        R.drawable.ic_radio_pause, Modifier.size(glyph), tint
+                    )
+                    PlayerButtonVisual.Retry -> TuneIcon(
+                        R.drawable.ic_refresh, Modifier.size(glyph), tint
+                    )
+                    PlayerButtonVisual.Play, PlayerButtonVisual.Unavailable -> TuneIcon(
+                        R.drawable.ic_radio_play, Modifier.size(glyph), tint
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -300,9 +360,8 @@ internal fun MeowvMiniPlayer(
     val buffering = phase == PlaybackPhase.RESOLVING ||
         phase == PlaybackPhase.RETRYING || phase == PlaybackPhase.BUFFERING
     val playing = phase == PlaybackPhase.PLAYING
+    val failed = phase == PlaybackPhase.ERROR
     val canToggle = connected && station != null && !buffering
-    val active = connected && station != null
-    val controlTint = if (active) TuneColors.Primary else TuneColors.Muted
     val thresholdPx = with(LocalDensity.current) { 64.dp.toPx() }
     val currentNext by rememberUpdatedState(onNext)
     val currentPrevious by rememberUpdatedState(onPrevious)
@@ -315,11 +374,18 @@ internal fun MeowvMiniPlayer(
     val playLabel = stringResource(R.string.action_play)
     val retryLabel = stringResource(R.string.directory_retry)
     val bufferingLabel = stringResource(R.string.playback_buffering)
-    val buttonLabel = when {
-        buffering -> bufferingLabel
-        phase == PlaybackPhase.ERROR && state.error != null -> retryLabel
-        playing -> pauseLabel
-        else -> playLabel
+    val visual = when {
+        station == null || !connected -> PlayerButtonVisual.Unavailable
+        failed -> PlayerButtonVisual.Retry
+        buffering -> PlayerButtonVisual.Loading
+        playing -> PlayerButtonVisual.Pause
+        else -> PlayerButtonVisual.Play
+    }
+    val buttonLabel = when (visual) {
+        PlayerButtonVisual.Pause -> pauseLabel
+        PlayerButtonVisual.Loading -> bufferingLabel
+        PlayerButtonVisual.Retry -> retryLabel
+        PlayerButtonVisual.Play, PlayerButtonVisual.Unavailable -> playLabel
     }
     val nextLabel = stringResource(R.string.player_next)
     val previousLabel = stringResource(R.string.player_previous)
@@ -381,7 +447,7 @@ internal fun MeowvMiniPlayer(
                     overflow = TextOverflow.Ellipsis, style = TuneTextStyle
                 )
             }
-            // 右侧两个操作按钮统一为扁平图标按钮：无实心底色，仅靠图标颜色表达状态。
+            // 顺序开关保持扁平图标；播放键是实心圆主操作，状态只由图标表达。
             MiniPlayerAction("player_order", orderLabel, enabled = true, isCar = isCar, onClick = onToggleOrder) {
                 TuneIcon(
                     if (shuffle) R.drawable.ic_order_shuffle else R.drawable.ic_order_sequential,
@@ -389,32 +455,7 @@ internal fun MeowvMiniPlayer(
                     if (shuffle) TuneColors.Primary else TuneColors.Muted
                 )
             }
-            MiniPlayerAction("player_pause", buttonLabel, enabled = canToggle, isCar = isCar, onClick = onToggle) {
-                Crossfade(
-                    targetState = when {
-                        buffering -> PlayerButtonVisual.Buffering
-                        playing -> PlayerButtonVisual.Playing
-                        else -> PlayerButtonVisual.Idle
-                    },
-                    animationSpec = tween(180), label = "player_button_icon"
-                ) { visual ->
-                    // 与列表行状态一致：播放中是动态波形，缓冲是小转圈，其余为播放三角。
-                    when (visual) {
-                        PlayerButtonVisual.Buffering -> CircularProgressIndicator(
-                            Modifier.size(if (isCar) 24.dp else 22.dp),
-                            color = controlTint,
-                            strokeWidth = 2.dp,
-                            trackColor = TuneColors.Muted.copy(alpha = .2f)
-                        )
-                        PlayerButtonVisual.Playing -> PlayingWaveBars(
-                            Modifier.size(if (isCar) 24.dp else 22.dp), controlTint
-                        )
-                        PlayerButtonVisual.Idle -> TuneIcon(
-                            R.drawable.ic_play, Modifier.size(if (isCar) 26.dp else 24.dp), controlTint
-                        )
-                    }
-                }
-            }
+            PlayerActionButton(visual, buttonLabel, canToggle, isCar, onToggle)
         }
     }
 }

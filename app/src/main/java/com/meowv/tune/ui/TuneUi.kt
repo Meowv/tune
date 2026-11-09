@@ -97,6 +97,9 @@ fun TuneApp(
         val station = target
         when {
             station == null -> Unit
+            // 失败态一律按目标台重新起播：引擎侧可能从未建立播放意图（例如离线起播），
+            // 复用 TogglePause 会退化成空操作。
+            playbackState.phase == PlaybackPhase.ERROR -> onPlayback(PlayerCommand.Play(station))
             (paused || idle) && station.uuid != playbackState.station?.uuid ->
                 onPlayback(PlayerCommand.Play(station))
             else -> onPlayback(PlayerCommand.TogglePause)
