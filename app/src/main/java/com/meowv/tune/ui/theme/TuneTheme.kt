@@ -22,8 +22,9 @@ object TuneColors {
     val Border = Color(0xFF2A3550)
     val Divider = Color(0xFF202A40)
     val Selected = Color(0xFF252442)
+    // 导航是常驻控件，选中底色比列表/分段控件再弱一档，避免整屏出现多个同等强度的色块。
+    val NavSelected = Color(0xFF22213D)
     val Player = Color(0xFF192137)
-    val Live = Color(0xFF36D6AB)
     val Error = Color(0xFFF87171)
 }
 
@@ -50,21 +51,26 @@ fun TuneTheme(content: @Composable () -> Unit) {
 }
 
 object TuneSpacing {
+    val Hairline = 4.dp
     val Small = 8.dp
     val Medium = 12.dp
     val Large = 16.dp
     val Section = 24.dp
 }
 
+/**
+ * 圆角层级（由小到大）：图标底 < 列表行/控件 < 导航容器 < 设置容器 < 播放器 < 大卡片。
+ * 子元素圆角始终小于父容器，避免出现「内圆角比外圆角更圆」的倒挂。
+ */
 object TuneShapes {
     val Control = RoundedCornerShape(12.dp)
     val Station = RoundedCornerShape(18.dp)
-    val Input = RoundedCornerShape(15.dp)
     val Navigation = RoundedCornerShape(16.dp)
     val Chip = RoundedCornerShape(18.dp)
-    val Card = RoundedCornerShape(24.dp)
-    val SettingsGroup = RoundedCornerShape(17.dp)
     val Dialog = RoundedCornerShape(20.dp)
+    val SettingsGroup = RoundedCornerShape(20.dp)
+    val Player = RoundedCornerShape(24.dp)
+    val Card = RoundedCornerShape(28.dp)
 }
 
 val TuneTextStyle = TextStyle(fontFamily = FontFamily.SansSerif,

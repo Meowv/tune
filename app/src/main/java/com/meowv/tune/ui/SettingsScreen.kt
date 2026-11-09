@@ -58,7 +58,7 @@ internal fun SettingsScreen(
     var dialog by rememberSaveable { mutableStateOf(SettingsDialog.NONE) }
     LazyColumn(Modifier.fillMaxSize().testTag("page_settings"),
         contentPadding = PaddingValues(horizontal = if (isCar) 40.dp else 24.dp, vertical = if (isCar) 12.dp else 20.dp),
-        verticalArrangement = Arrangement.spacedBy(if (isCar) 8.dp else 14.dp)) {
+        verticalArrangement = Arrangement.spacedBy(if (isCar) 8.dp else 12.dp)) {
         item(key = "playback_settings") {
             SettingsGroup {
                 SettingRow(R.drawable.ic_ui_play, R.string.setting_autoplay, isCar, checked = settings.autoPlay) {
@@ -176,7 +176,7 @@ private fun SettingRow(
     )
     val contentAlpha = if (enabled) 1f else .55f
     val rowModifier = Modifier.fillMaxWidth().heightIn(min = if (isCar) 56.dp else 52.dp)
-        .padding(vertical = if (isCar) 4.dp else 2.dp)
+        .padding(vertical = TuneSpacing.Hairline)
         .clip(shape)
         .background(background)
         .then(if (focused) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)
@@ -203,10 +203,10 @@ private fun SettingRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Medium)
     ) {
-        Box(Modifier.size(38.dp).background(iconBackground, TuneShapes.Control), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(40.dp).background(iconBackground, TuneShapes.Control), contentAlignment = Alignment.Center) {
             TuneIcon(resource, Modifier.size(22.dp), TuneColors.Primary.copy(alpha = contentAlpha))
         }
-        Text(stringResource(label), color = TuneColors.Text.copy(alpha = contentAlpha), fontSize = if (isCar) 17.sp else 15.sp, fontWeight = FontWeight.Bold,
+        Text(stringResource(label), color = TuneColors.Text.copy(alpha = contentAlpha), fontSize = if (isCar) 17.sp else 15.sp, fontWeight = FontWeight.SemiBold,
             style = TuneTextStyle, modifier = Modifier.weight(1f))
         if (checked != null) {
             ToggleSwitch(checked)

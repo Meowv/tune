@@ -69,6 +69,7 @@ import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.Station
 import com.meowv.tune.ui.theme.TuneColors
+import com.meowv.tune.ui.theme.TuneShapes
 import com.meowv.tune.ui.theme.TuneTextStyle
 
 @Composable
@@ -218,8 +219,10 @@ private fun PlayerActionButton(
  */
 @Composable
 internal fun StationBadge(station: Station?, size: Dp) {
+    // 圆角随尺寸缩放，但不超过大卡片的 28dp，保证子元素始终比父容器更方。
+    val radius = (size * .22f).coerceAtMost(24.dp)
     Box(
-        Modifier.size(size).clip(RoundedCornerShape(size * .22f)).background(TuneColors.Raised),
+        Modifier.size(size).clip(RoundedCornerShape(radius)).background(TuneColors.Raised),
         contentAlignment = Alignment.Center
     ) {
         val url = station?.iconUrl
@@ -253,16 +256,16 @@ private object BadgeContentScale : ContentScale {
         badgeScale(srcSize.width, srcSize.height).computeScaleFactor(srcSize, dstSize)
 }
 
-/** 品牌栏：手机 64dp / 车机 78dp，单行 Logo + 名称。 */
+/** 品牌栏：手机 64dp / 车机 80dp，单行 Logo + 名称。 */
 @Composable
 internal fun MeowvTopBar(isCar: Boolean) {
     Column(Modifier.testTag("brand_header")) {
         Row(
-            Modifier.fillMaxWidth().height(if (isCar) 78.dp else 64.dp)
+            Modifier.fillMaxWidth().height(if (isCar) 80.dp else 64.dp)
                 .background(if (isCar) TuneColors.Surface else TuneColors.Background)
                 .padding(horizontal = if (isCar) 24.dp else 16.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             BrandLogo(Modifier.size(if (isCar) 44.dp else 36.dp))
             Text(
@@ -323,17 +326,17 @@ private fun NavigationItem(
         animationSpec = tween(220), label = "nav_item_color"
     )
     val background by animateColorAsState(
-        if (selected) TuneColors.Selected else Color.Transparent,
+        if (selected) TuneColors.NavSelected else Color.Transparent,
         animationSpec = tween(220), label = "nav_item_background"
     )
-    val shape = RoundedCornerShape(14.dp)
+    val shape = TuneShapes.Navigation
     val resource = when (page) {
         TunePage.Radio -> R.drawable.ic_radio
         TunePage.Music -> R.drawable.ic_music
         TunePage.Settings -> R.drawable.ic_settings
     }
     Box(
-        modifier.height(if (isCar) 64.dp else 56.dp).padding(horizontal = if (isCar) 0.dp else 9.dp)
+        modifier.height(if (isCar) 64.dp else 56.dp).padding(horizontal = if (isCar) 0.dp else 8.dp)
             .clip(shape)
             .background(background)
             .then(if (focused) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)
@@ -344,7 +347,7 @@ private fun NavigationItem(
             .padding(horizontal = if (isCar) 16.dp else 0.dp),
         contentAlignment = Alignment.Center
     ) {
-        val icon = @Composable { TuneIcon(resource, Modifier.size(if (isCar) 27.dp else 22.dp), color) }
+        val icon = @Composable { TuneIcon(resource, Modifier.size(if (isCar) 24.dp else 22.dp), color) }
         val text = @Composable {
             Text(
                 label, color = color, fontSize = if (isCar) 17.sp else 11.sp, style = TuneTextStyle,
@@ -422,15 +425,18 @@ internal fun MeowvMiniPlayer(
         Row(
             Modifier.fillMaxWidth()
                 .padding(
-                    start = if (isCar) 0.dp else 10.dp, end = if (isCar) 0.dp else 10.dp,
+                    start = if (isCar) 0.dp else 12.dp, end = if (isCar) 0.dp else 12.dp,
                     top = if (isCar) 0.dp else 8.dp, bottom = if (isCar) 0.dp else 8.dp
                 )
                 .height(if (isCar) 80.dp else 68.dp)
-                .background(TuneColors.Player, RoundedCornerShape(if (isCar) 0.dp else 24.dp))
+                .background(
+                    TuneColors.Player,
+                    if (isCar) RoundedCornerShape(0.dp) else TuneShapes.Player
+                )
                 .testTag("global_player")
                 .padding(horizontal = if (isCar) 24.dp else 12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             StationBadge(station, if (isCar) 52.dp else 46.dp)
             var drag by remember { mutableStateOf(0f) }
@@ -475,7 +481,7 @@ internal fun MeowvMiniPlayer(
             MiniPlayerAction("player_order", orderLabel, enabled = true, isCar = isCar, onClick = onToggleOrder) {
                 TuneIcon(
                     if (shuffle) R.drawable.ic_order_shuffle else R.drawable.ic_order_sequential,
-                    Modifier.size(if (isCar) 23.dp else 21.dp),
+                    Modifier.size(if (isCar) 24.dp else 22.dp),
                     if (shuffle) TuneColors.Primary else TuneColors.Muted
                 )
             }

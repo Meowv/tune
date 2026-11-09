@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -105,7 +106,7 @@ private fun RadioDirectory(
                 start = if (isCar) 24.dp else 16.dp,
                 end = if (isCar) 24.dp else 16.dp,
                 top = if (isCar) 16.dp else 12.dp,
-                bottom = if (isCar) 12.dp else 10.dp
+                bottom = 12.dp
             ),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -114,11 +115,13 @@ private fun RadioDirectory(
             LayoutSwitcher(displayMode, onDisplayModeChange, isCar)
         }
         // 列表/卡片必须拿到“头部之外”的剩余高度，否则会画到播放器下面。
+        // 滚动位置提到 Crossfade 之外，列表↔卡片来回切换不会回到顶部。
+        val listState = rememberLazyListState()
         Box(Modifier.weight(1f).fillMaxWidth()) {
             Crossfade(targetState = displayMode, animationSpec = tween(200), label = "display_mode") { mode ->
                 when (mode) {
                     RadioDisplayMode.LIST -> StationList(
-                        isCar, state, playback, selectedId, onPlayback, onLoadMore, onSelectTarget, onRefresh
+                        isCar, state, playback, selectedId, listState, onPlayback, onLoadMore, onSelectTarget, onRefresh
                     )
                     RadioDisplayMode.CARD -> CardMode(
                         isCar, state, playback, selectedId, onPlayback, onLoadMore, onSelectTarget, onRefresh
@@ -135,12 +138,12 @@ private fun StationList(
     state: RadioUiState,
     playback: PlayerUiState,
     selectedId: java.util.UUID?,
+    listState: LazyListState,
     onPlayback: ((PlayerCommand) -> Unit)?,
     onLoadMore: () -> Unit,
     onSelectTarget: (Station) -> Unit,
     onRefresh: () -> Unit
 ) {
-    val listState = rememberLazyListState()
     val loadMore by rememberUpdatedState(onLoadMore)
     LaunchedEffect(listState, state.stations.size, state.hasMore, state.isLoading, state.error) {
         if (state.hasMore && !state.isLoading && state.error == null) {
@@ -172,8 +175,9 @@ private fun StationList(
                 onSelectTarget = onSelectTarget
             )
             if (index < state.stations.lastIndex) {
+                // 分割线与台名左缘对齐（行内边距 + 台标 + 间距），不压在台标下方。
                 HorizontalDivider(
-                    modifier = Modifier.padding(start = if (isCar) 66.dp else 60.dp),
+                    modifier = Modifier.padding(start = 76.dp),
                     color = TuneColors.Divider.copy(alpha = .55f), thickness = .5.dp
                 )
             }
@@ -282,7 +286,7 @@ private fun StationRow(
                 )
                 else -> TuneIcon(
                     R.drawable.ic_play,
-                    Modifier.size(if (isCar) 24.dp else 21.dp),
+                    Modifier.size(if (isCar) 24.dp else 22.dp),
                     if (selected) TuneColors.Primary else TuneColors.Muted
                 )
             }
@@ -387,7 +391,7 @@ private fun StationCard(
         verticalArrangement = Arrangement.Center
     ) {
         StationBadge(station, artwork)
-        Spacer(Modifier.height(if (isCar) 18.dp else 16.dp))
+        Spacer(Modifier.height(if (isCar) 20.dp else 16.dp))
         // 名称固定占两行高度：短名居中不上下跳动，长名在第二行末尾省略。
         val nameLine = if (isCar) 32.sp else 27.sp
         val nameBlock = with(LocalDensity.current) { (nameLine.value * fontScale).dp * 2 }
@@ -424,12 +428,12 @@ private fun RegionChip(name: String, isCar: Boolean, modifier: Modifier, onClick
         color = TuneColors.Surface,
         shape = TuneShapes.Chip,
         border = BorderStroke(if (focused) 2.dp else 1.dp, if (focused) TuneColors.Primary else TuneColors.Border),
-        modifier = modifier.height(if (isCar) 52.dp else 44.dp)
+        modifier = modifier.height(if (isCar) 52.dp else 48.dp)
             .onFocusChanged { focused = it.isFocused }
             .semantics { contentDescription = description }
     ) {
         Row(
-            Modifier.padding(horizontal = if (isCar) 16.dp else 14.dp).clearAndSetSemantics { },
+            Modifier.padding(horizontal = if (isCar) 16.dp else 12.dp).clearAndSetSemantics { },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -445,8 +449,11 @@ private fun RegionChip(name: String, isCar: Boolean, modifier: Modifier, onClick
 
 @Composable
 private fun LayoutSwitcher(mode: RadioDisplayMode, onChange: (RadioDisplayMode) -> Unit, isCar: Boolean) {
+    // 触控格 48/52dp，内部视觉块 40/44dp：外观不变，热区达到最小触控尺寸。
+    val cell = if (isCar) 52.dp else 48.dp
+    val tile = if (isCar) 44.dp else 40.dp
     Row(
-        Modifier.background(TuneColors.Surface, TuneShapes.Navigation).padding(4.dp),
+        Modifier.clip(TuneShapes.Navigation).background(TuneColors.Surface, TuneShapes.Navigation),
         verticalAlignment = Alignment.CenterVertically
     ) {
         listOf(RadioDisplayMode.LIST, RadioDisplayMode.CARD).forEach { value ->
@@ -463,9 +470,7 @@ private fun LayoutSwitcher(mode: RadioDisplayMode, onChange: (RadioDisplayMode) 
                 animationSpec = tween(180), label = "layout_item_icon"
             )
             Box(
-                Modifier.size(if (isCar) 44.dp else 40.dp)
-                    .clip(TuneShapes.Control)
-                    .background(itemBackground)
+                Modifier.size(cell)
                     .clickable(role = Role.Button) { onChange(value) }
                     .testTag(if (value == RadioDisplayMode.LIST) "layout_list" else "layout_card")
                     .semantics {
@@ -474,11 +479,16 @@ private fun LayoutSwitcher(mode: RadioDisplayMode, onChange: (RadioDisplayMode) 
                     },
                 contentAlignment = Alignment.Center
             ) {
-                TuneIcon(
-                    if (value == RadioDisplayMode.LIST) R.drawable.ic_list_mode else R.drawable.ic_card_mode,
-                    Modifier.size(if (isCar) 24.dp else 20.dp),
-                    iconColor
-                )
+                Box(
+                    Modifier.size(tile).clip(TuneShapes.Control).background(itemBackground),
+                    contentAlignment = Alignment.Center
+                ) {
+                    TuneIcon(
+                        if (value == RadioDisplayMode.LIST) R.drawable.ic_list_mode else R.drawable.ic_card_mode,
+                        Modifier.size(if (isCar) 24.dp else 20.dp),
+                        iconColor
+                    )
+                }
             }
         }
     }
