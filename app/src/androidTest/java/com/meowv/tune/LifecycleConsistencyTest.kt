@@ -103,7 +103,7 @@ class LifecycleConsistencyTest {
     fun recreationRestoresPageScopeAndScrollPosition() = runBlocking<Unit> {
         playAndWait(2)
         selectPage("nav_settings")
-        compose.onNodeWithText("媒体断开暂停").performScrollTo()
+        compose.onNodeWithText("刷新数据").performScrollTo()
         val resolutions = app.resolveCalls[UUID(0, 2)]?.get() ?: 0
 
         compose.activityRule.scenario.recreate()

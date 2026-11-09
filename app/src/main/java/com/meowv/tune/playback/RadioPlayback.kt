@@ -13,7 +13,6 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
 import com.meowv.tune.R
 import com.meowv.tune.domain.NetworkState
-import com.meowv.tune.domain.NetworkType
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.QueueSelection
@@ -24,7 +23,6 @@ import com.meowv.tune.domain.SettingsRepository
 import com.meowv.tune.domain.Station
 import com.meowv.tune.domain.TuneError
 import com.meowv.tune.domain.TuneFailure
-import com.meowv.tune.domain.TuneSettings
 import java.net.SocketTimeoutException
 import java.util.Locale
 import java.util.UUID
@@ -40,7 +38,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -65,12 +62,9 @@ internal class RadioPlayback(
     private var request: Job? = null
     private var intent: PlaybackIntent? = null
     private var selection: QueueSelection? = null
-    private var blocked: Command? = null
     private var playbackScope: ResolvedRadioScope? = null
-    private var latestSettings = TuneSettings()
     private var committed = false
     private var recovering = false
-    private var meteredApproved = false
     private var resumeAfterFocusGain = false
     private var sameRetries = 0
     private var alternateCount = 0
@@ -94,36 +88,31 @@ internal class RadioPlayback(
             }
         }
         scope.launch {
-            combine(network, settings.settings) { current, user -> current to user }
-                .distinctUntilChanged()
-                .collect { (current, user) ->
-                    latestSettings = user
-                    reactToNetworkChange(current, user)
-                }
+            network.collect(::reactToNetworkChange)
         }
     }
 
     fun play(station: Station) = submit {
         resetRetryBudget()
-        run(Command.Play(station), allowMetered = false)
+        run(Command.Play(station))
     }
 
     fun next() = submit {
         resetRetryBudget()
-        run(Command.Next, allowMetered = false)
+        run(Command.Next)
     }
 
     fun previous() = submit {
         resetRetryBudget()
-        run(Command.Previous, allowMetered = false)
+        run(Command.Previous)
     }
 
-    fun toggle() = submit { toggle(allowMetered = false) }
+    fun toggle() = submit { togglePlayback() }
 
     override val canPrevious: Boolean get() = queue.canPrevious.value
     override val canNext: Boolean get() = queue.canNext.value
 
-    override fun onSessionPlay() = submit { resume(allowMetered = false) }
+    override fun onSessionPlay() = submit { resume() }
 
     override fun onSessionPause() = submit { pause() }
 
@@ -133,22 +122,9 @@ internal class RadioPlayback(
 
     override fun onSessionStop() = stop()
 
-    fun allowMeteredRetry() = submit {
-        val pending = blocked ?: return@submit
-        run(pending, allowMetered = true)
-    }
-
-    fun dismissNetworkPrompt() {
-        blocked = null
-        if (state.error == TuneError.MOBILE_CONFIRMATION) {
-            if (selection == null) update(PlayerUiState()) else update(state.copy(error = null, statusCode = null))
-        }
-    }
-
     fun cancelPending() {
         supersedeRequest()
         recovering = false
-        blocked = null
         resetRetryBudget()
         if (state.phase == PlaybackPhase.RESOLVING || state.phase == PlaybackPhase.RETRYING) {
             update(state.copy(
@@ -176,7 +152,7 @@ internal class RadioPlayback(
         val country = activeScope.country
         if (country != null && station.countryCode != country) return@submit
         resetRetryBudget()
-        run(Command.Resume(station), allowMetered = false)
+        run(Command.Resume(station))
     }
 
     fun stop() {
@@ -187,10 +163,8 @@ internal class RadioPlayback(
         intent = null
         selection = null
         playbackScope = null
-        blocked = null
         committed = false
         recovering = false
-        meteredApproved = false
         resumeAfterFocusGain = false
         resetRetryBudget()
         update(PlayerUiState())
@@ -234,8 +208,8 @@ internal class RadioPlayback(
         scheduleRecovery(classify(error))
     }
 
-    private suspend fun run(command: Command, allowMetered: Boolean) {
-        if (!networkAllows(command, allowMetered)) return
+    private suspend fun run(command: Command) {
+        if (!networkAllows()) return
         when (command) {
             is Command.Play -> {
                 val activeScope = queue.activeScope.value ?: run {
@@ -273,7 +247,7 @@ internal class RadioPlayback(
                 playbackScope = activeScope
                 resolveAndPlay(next, PlaybackPhase.RESOLVING)
             }
-            Command.Toggle -> toggle(allowMetered)
+            Command.Toggle -> togglePlayback()
             is Command.Resume -> {
                 val activeScope = queue.activeScope.value ?: return
                 val next = queue.select(activeScope, command.station) ?: return
@@ -283,12 +257,12 @@ internal class RadioPlayback(
         }
     }
 
-    private suspend fun toggle(allowMetered: Boolean) {
+    private suspend fun togglePlayback() {
         when (state.phase) {
             PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING -> stop()
             // 失败态下播放键即重试，不受残留的 playWhenReady 影响。
-            PlaybackPhase.ERROR -> resume(allowMetered)
-            else -> if (player.playWhenReady) pause() else resume(allowMetered)
+            PlaybackPhase.ERROR -> resume()
+            else -> if (player.playWhenReady) pause() else resume()
         }
     }
 
@@ -296,19 +270,19 @@ internal class RadioPlayback(
         if (player.playWhenReady) userPause()
     }
 
-    private suspend fun resume(allowMetered: Boolean) {
+    private suspend fun resume() {
         when (state.phase) {
             PlaybackPhase.IDLE -> return
             PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING -> return
             PlaybackPhase.ERROR -> {
                 val currentIntent = intent ?: return
                 val currentSelection = selection ?: return
-                if (!networkAllows(Command.Toggle, allowMetered)) return
+                if (!networkAllows()) return
                 resetRetryBudget()
                 resolveAndPlay(currentSelection, PlaybackPhase.RETRYING, currentIntent)
             }
             else -> {
-                if (!networkAllows(Command.Toggle, allowMetered)) return
+                if (!networkAllows()) return
                 if (!audioFocus.acquire()) {
                     fail(TuneError.AUDIO_FOCUS_LOST)
                     return
@@ -320,28 +294,20 @@ internal class RadioPlayback(
         }
     }
 
-    private suspend fun networkAllows(command: Command, allowMetered: Boolean): Boolean {
-        val user = settings.settings.first()
-        latestSettings = user
-        val decision = NetworkPolicy.evaluate(network.value, user, allowMetered)
+    private suspend fun networkAllows(): Boolean {
+        val decision = NetworkPolicy.evaluate(network.value)
         if (decision == NetworkDecision.ALLOWED) {
-            blocked = null
-            meteredApproved = allowMetered && network.value.metered
             if (isNetworkError(state.error)) update(state.copy(error = null, statusCode = null))
             return true
         }
-        blocked = command
-        val error = decision.error
         val phase = if (selection == null) PlaybackPhase.ERROR else state.phase
-        update(state.copy(phase = phase, error = error, statusCode = null))
+        update(state.copy(phase = phase, error = TuneError.NETWORK_OFFLINE, statusCode = null))
         return false
     }
 
-    private suspend fun reactToNetworkChange(current: NetworkState, user: TuneSettings) {
+    private suspend fun reactToNetworkChange(current: NetworkState) {
         if (selection == null) return
-        val decision = NetworkPolicy.evaluate(current, user, meteredApproved)
-        if (decision == NetworkDecision.ALLOWED) {
-            if (current.type == NetworkType.WIFI || current.type == NetworkType.ETHERNET) meteredApproved = false
+        if (NetworkPolicy.evaluate(current) == NetworkDecision.ALLOWED) {
             if (isNetworkError(state.error)) update(state.copy(error = null, statusCode = null))
             return
         }
@@ -349,9 +315,7 @@ internal class RadioPlayback(
         audioFocus.abandon()
         resumeAfterFocusGain = false
         player.pause()
-        blocked = Command.Toggle
-        meteredApproved = false
-        update(state.copy(phase = PlaybackPhase.PAUSED, error = decision.error, statusCode = null))
+        update(state.copy(phase = PlaybackPhase.PAUSED, error = TuneError.NETWORK_OFFLINE, statusCode = null))
     }
 
     private fun submit(block: suspend () -> Unit) {
@@ -384,7 +348,6 @@ internal class RadioPlayback(
         val playbackIntent = existingIntent ?: PlaybackIntent(next.station)
         selection = next
         intent = playbackIntent
-        blocked = null
         committed = false
         update(PlayerUiState(phase = phase, station = next.station, isLive = true))
 
@@ -437,15 +400,13 @@ internal class RadioPlayback(
     ) {
         val id = generation
         currentCoroutineContext().ensureActive()
-        val decision = NetworkPolicy.evaluate(network.value, settings.settings.first(), meteredApproved)
+        val decision = NetworkPolicy.evaluate(network.value)
         if (decision != NetworkDecision.ALLOWED) {
             request?.cancel()
-            blocked = Command.Toggle
-            meteredApproved = false
             resumeAfterFocusGain = false
             audioFocus.abandon()
             player.pause()
-            update(state.copy(phase = PlaybackPhase.PAUSED, error = decision.error, statusCode = null))
+            update(state.copy(phase = PlaybackPhase.PAUSED, error = TuneError.NETWORK_OFFLINE, statusCode = null))
             return
         }
         val canRetrySame = retryPolicy.isRetryable(failure) && retryPolicy.canRetrySame(++sameRetries)
@@ -589,9 +550,10 @@ internal class RadioPlayback(
         }
     }
 
+    // 外接输出断开默认暂停，避免声音突然从扬声器外放。
     internal fun onExternalOutputRemoved() {
         scope.launch {
-            if (selection == null || !latestSettings.pauseOnDisconnect) return@launch
+            if (selection == null) return@launch
             if (!player.isPlaying && !player.playWhenReady) return@launch
             resumeAfterFocusGain = false
             audioFocus.abandon()
@@ -635,16 +597,7 @@ internal class RadioPlayback(
         canNext = queue.canNext.value
     )
 
-    private val NetworkDecision.error: TuneError
-        get() = when (this) {
-            NetworkDecision.ALLOWED -> error("Allowed decisions have no error")
-            NetworkDecision.OFFLINE -> TuneError.NETWORK_OFFLINE
-            NetworkDecision.WIFI_ONLY -> TuneError.WIFI_ONLY
-            NetworkDecision.CONFIRM_METERED -> TuneError.MOBILE_CONFIRMATION
-        }
-
-    private fun isNetworkError(error: TuneError?) =
-        error in setOf(TuneError.NETWORK_OFFLINE, TuneError.WIFI_ONLY, TuneError.MOBILE_CONFIRMATION)
+    private fun isNetworkError(error: TuneError?) = error == TuneError.NETWORK_OFFLINE
 
     private sealed interface Command {
         data class Play(val station: Station) : Command

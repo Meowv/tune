@@ -78,7 +78,7 @@ class MainActivity : ComponentActivity() {
             val settings by settingsModel.settings.collectAsStateWithLifecycle()
             val storageError by settingsModel.storageError.collectAsStateWithLifecycle()
             val countries by radioModel.countries.collectAsStateWithLifecycle()
-            TuneTheme(largeText = settings?.largeText == true) {
+            TuneTheme {
                 TuneApp(
                     settings = settings ?: TuneSettings(),
                     storageError = storageError,
@@ -127,7 +127,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun dispatchPlayback(command: PlayerCommand) {
-        if (command !is PlayerCommand.DismissNetworkPrompt && command !is PlayerCommand.Resume) ensureNotificationPermission()
+        if (command !is PlayerCommand.Resume) ensureNotificationPermission()
         lifecycleScope.launch {
             try {
                 tuneApp.playerController.dispatch(command)

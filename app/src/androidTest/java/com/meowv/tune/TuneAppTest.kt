@@ -95,98 +95,34 @@ class TuneAppTest {
     }
 
     @Test
-    fun mobileWarningRequiresConfirmationBeforePlayback() {
+    fun cellularNetworkPlaysWithoutWarning() {
         app.mockNetwork.value = NetworkState(NetworkType.CELLULAR, metered = true)
-        runBlocking {
-            app.userSettings.update { it.copy(wifiOnly = false, dataWarning = true) }
-            app.userSettings.settings.first { !it.wifiOnly && it.dataWarning }
-        }
         val first = "station_${UUID(0, 1)}"
         compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(first))
         compose.onNodeWithTag(first).performClick()
-        compose.waitUntil(5000) {
-            compose.onAllNodesWithText("使用移动网络播放？").fetchSemanticsNodes().isNotEmpty()
-        }
-        assertEquals(PlaybackPhase.ERROR, app.playerController.state.value.phase)
-        compose.onNodeWithText("继续").performClick()
         compose.waitUntil(8000) {
             app.playerController.state.value.station?.uuid == UUID(0, 1) &&
                 app.playerController.state.value.phase == PlaybackPhase.PLAYING
         }
+        assertTrue(compose.onAllNodesWithText("使用移动网络播放？").fetchSemanticsNodes().isEmpty())
         runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
     }
 
     @Test
-    fun mobileWarningAlsoGuardsNextTrack() {
-        app.mockNetwork.value = NetworkState(NetworkType.CELLULAR, metered = true)
-        runBlocking {
-            app.userSettings.update { it.copy(wifiOnly = false, dataWarning = true) }
-            app.userSettings.settings.first { !it.wifiOnly && it.dataWarning }
-        }
-        val first = "station_${UUID(0, 1)}"
-        compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(first))
-        compose.onNodeWithTag(first).performClick()
-        compose.waitUntil(5000) {
-            compose.onAllNodesWithText("使用移动网络播放？").fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithText("继续").performClick()
-        compose.waitUntil(8000) {
-            app.playerController.state.value.station?.uuid == UUID(0, 1) &&
-                app.playerController.state.value.phase == PlaybackPhase.PLAYING
-        }
-
-        compose.onNodeWithTag("player_info").performTouchInput { swipeLeft() }
-        compose.waitUntil(5000) {
-            compose.onAllNodesWithText("使用移动网络播放？").fetchSemanticsNodes().isNotEmpty()
-        }
-        assertEquals(UUID(0, 1), app.playerController.state.value.station?.uuid)
-        compose.onNodeWithText("继续").performClick()
-        compose.waitUntil(8000) {
-            app.playerController.state.value.station?.uuid == UUID(0, 2) &&
-                app.playerController.state.value.phase == PlaybackPhase.PLAYING
-        }
-        runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
-    }
-
-    @Test
-    fun wifiOnlyAndOfflineBlockPlayback() {
-        app.mockNetwork.value = NetworkState(NetworkType.CELLULAR, metered = true)
-        runBlocking {
-            app.userSettings.update { it.copy(wifiOnly = true, dataWarning = true) }
-            app.userSettings.settings.first { it.wifiOnly }
-        }
-        val first = "station_${UUID(0, 1)}"
-        compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(first))
-        compose.onNodeWithTag(first).performClick()
-        compose.waitUntil(5000) { compose.onAllNodesWithText("仅 Wi-Fi 播放已开启").fetchSemanticsNodes().isNotEmpty() }
-        assertNotEquals(PlaybackPhase.PLAYING, app.playerController.state.value.phase)
-
-        app.mockNetwork.value = NetworkState(NetworkType.OFFLINE, metered = false)
-        compose.onNodeWithTag(first).performClick()
-        compose.waitUntil(5000) { compose.onAllNodesWithText("网络不可用").fetchSemanticsNodes().isNotEmpty() }
-        assertNotEquals(PlaybackPhase.PLAYING, app.playerController.state.value.phase)
-    }
-
-    @Test
-    fun networkChangePausesAndReconnectDoesNotAutoResume() {
-        runBlocking {
-            app.userSettings.update { it.copy(wifiOnly = false, dataWarning = true) }
-            app.userSettings.settings.first { !it.wifiOnly && it.dataWarning }
-        }
+    fun networkLossPausesAndReconnectDoesNotAutoResume() {
         val first = "station_${UUID(0, 1)}"
         compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(first))
         compose.onNodeWithTag(first).performClick()
         compose.waitUntil(8000) { app.playerController.state.value.phase == PlaybackPhase.PLAYING }
 
-        app.mockNetwork.value = NetworkState(NetworkType.CELLULAR, metered = true)
+        app.mockNetwork.value = NetworkState(NetworkType.OFFLINE, metered = false)
         compose.waitUntil(5000) {
             app.playerController.state.value.phase == PlaybackPhase.PAUSED &&
-                app.playerController.state.value.error == com.meowv.tune.domain.TuneError.MOBILE_CONFIRMATION
+                app.playerController.state.value.error == com.meowv.tune.domain.TuneError.NETWORK_OFFLINE
         }
-        compose.onNodeWithText("取消").performClick()
-        compose.waitUntil(3000) { app.playerController.state.value.error == null }
 
         app.mockNetwork.value = NetworkState(NetworkType.WIFI, metered = false)
+        compose.waitUntil(3000) { app.playerController.state.value.error == null }
         Thread.sleep(500)
         assertEquals(PlaybackPhase.PAUSED, app.playerController.state.value.phase)
         runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
@@ -227,18 +163,7 @@ class TuneAppTest {
         compose.onNodeWithText("开发中").performScrollTo().assertIsDisplayed()
         selectPage("nav_settings")
         compose.onNodeWithTag("page_settings").assertIsDisplayed()
-        compose.onNodeWithText("启动自动播放").performScrollTo().assertIsDisplayed()
-        val config = compose.activity.resources.configuration
-        if (config.screenWidthDp >= 1000 && config.fontScale == 1f) {
-            val version = compose.activity.packageManager.getPackageInfo(compose.activity.packageName, 0).versionName.orEmpty()
-            val aboutLabel = compose.activity.getString(R.string.about_app_version, version)
-            // 设置项增加后允许滚动，这里验证版本行完整可见而不是被裁切。
-            compose.onNodeWithTag("page_settings").performScrollToNode(hasText(aboutLabel))
-            val about = compose.onNodeWithText(aboutLabel).getUnclippedBoundsInRoot()
-            val viewport = compose.onNodeWithTag("page_settings").getUnclippedBoundsInRoot()
-            assertTrue("Default car settings must show the version completely",
-                about.top >= viewport.top && about.bottom <= viewport.bottom)
-        }
+        compose.onNodeWithText("自动播放").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("global_player").assertIsDisplayed()
         compose.onNodeWithTag("player_pause").assertIsNotEnabled()
         assertFalse(app.radioQueue.canPrevious.value)

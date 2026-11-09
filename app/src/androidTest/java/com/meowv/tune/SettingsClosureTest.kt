@@ -1,21 +1,14 @@
 package com.meowv.tune
 
-import androidx.compose.ui.test.assertHasClickAction
-import androidx.compose.ui.test.assertIsOff
-import androidx.compose.ui.test.assertIsOn
-import androidx.compose.ui.test.getBoundsInRoot
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
-import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
-import androidx.lifecycle.ViewModelProvider
+import androidx.compose.ui.test.performScrollToNode
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
-import com.meowv.tune.domain.LayoutMode
 import com.meowv.tune.domain.NetworkState
 import com.meowv.tune.domain.NetworkType
 import com.meowv.tune.domain.PlaybackPhase
@@ -25,14 +18,11 @@ import com.meowv.tune.domain.ScopeMode
 import com.meowv.tune.domain.Station
 import com.meowv.tune.domain.StationPage
 import com.meowv.tune.domain.TuneSettings
-import com.meowv.tune.radio.RadioViewModel
 import java.util.UUID
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -53,73 +43,23 @@ class SettingsClosureTest {
     }
 
     @Test
-    fun layoutPreferenceSwitchesShellWithoutRestartingPlayback() = runBlocking<Unit> {
-        compose.waitUntil(5000) { app.playerController.connected.value }
-        val scope = withTimeout(5000) { app.radioQueue.activeScope.first { it != null } }!!
-        app.radioQueue.clearScope()
-        app.radioQueue.updateDirectory(scope, StationPage((1L..3L).map { station(it) }))
-        val playing = station(1)
-        app.playerController.dispatch(PlayerCommand.Play(playing))
-        withTimeout(8000) { app.playerController.state.first { it.phase == PlaybackPhase.PLAYING } }
-
+    fun settingsExposeOnlySupportedEntries() {
         openPage("nav_settings")
-        compose.onNodeWithTag("shell_car").assertExists()
-        scrollSettingsTo("布局")
-        compose.onNodeWithText("布局").performClick()
-        compose.onNodeWithTag("layout_option_phone").performClick()
-        compose.waitUntil(3000) { current().layout == LayoutMode.PHONE }
-        awaitTag("shell_phone")
+        compose.onNodeWithText("自动播放").assertExists()
+        listOf(
+            "启动自动播放", "媒体断开暂停", "仅 Wi-Fi 播放", "流量提醒",
+            "主题", "布局", "大字显示", "播放", "数据与关于"
+        ).forEach {
+            compose.onNodeWithText(it).assertDoesNotExist()
+        }
 
-        assertEquals(PlaybackPhase.PLAYING, app.playerController.state.value.phase)
-        assertEquals(playing.uuid, app.playerController.state.value.station?.uuid)
-
-        scrollSettingsTo("布局")
-        compose.onNodeWithText("布局").performClick()
-        compose.onNodeWithTag("layout_option_car").performClick()
-        compose.waitUntil(3000) { current().layout == LayoutMode.CAR }
-        awaitTag("shell_car")
-        assertEquals(playing.uuid, app.playerController.state.value.station?.uuid)
-    }
-
-    @Test
-    fun largeTextPreferenceGrowsAndPersists() = runBlocking<Unit> {
-        openPage("nav_settings")
-        scrollSettingsTo("大字显示")
-        val row = compose.onNodeWithText("大字显示")
-        row.assertIsOff()
-        val before = diagnosticsHeight()
-        row.performClick()
-        compose.waitUntil(3000) { current().largeText }
-        val after = diagnosticsHeight()
-        assertTrue("大字显示应放大文本：$before -> $after", after > before)
-
-        compose.activityRule.scenario.recreate()
-        compose.waitUntil(5000) { current().largeText }
-        awaitTag("shell_car")
-        openPage("nav_settings")
-        scrollSettingsTo("大字显示")
-        compose.onNodeWithText("大字显示").assertIsOn()
-    }
-
-    @Test
-    fun disconnectSettingPersistsAcrossRecreation() = runBlocking<Unit> {
-        openPage("nav_settings")
-        scrollSettingsTo("媒体断开暂停")
-        compose.onNodeWithText("媒体断开暂停").assertIsOn().performClick()
-        compose.waitUntil(3000) { !current().pauseOnDisconnect }
-        compose.activityRule.scenario.recreate()
-        compose.waitUntil(5000) { !current().pauseOnDisconnect }
-        openPage("nav_settings")
-        scrollSettingsTo("媒体断开暂停")
-        compose.onNodeWithText("媒体断开暂停").assertIsOff()
-    }
-
-    @Test
-    fun fixedDarkThemeHasNoSwitchEntry() {
-        openPage("nav_settings")
-        scrollSettingsTo("主题")
-        compose.onNodeWithText("深色").assertExists()
-        assertFalse("固定深色不应伪装可切换", hasClickAction("主题"))
+        scrollSettingsTo("开源许可")
+        listOf("刷新数据", "清理缓存", "数据来源", "开源许可").forEach {
+            compose.onNodeWithText(it).assertExists()
+        }
+        compose.onNodeWithText("刷新目录").assertDoesNotExist()
+        compose.onNodeWithTag("settings_diagnostics").assertDoesNotExist()
+        compose.onAllNodes(hasText("Meowv Tune ·", substring = true)).assertCountEquals(0)
     }
 
     @Test
@@ -133,8 +73,8 @@ class SettingsClosureTest {
         withTimeout(8000) { app.playerController.state.first { it.phase == PlaybackPhase.PLAYING } }
 
         openPage("nav_settings")
-        scrollSettingsTo("刷新目录")
-        compose.onNodeWithText("刷新目录").performClick()
+        scrollSettingsTo("刷新数据")
+        compose.onNodeWithText("刷新数据").performClick()
         scrollSettingsTo("清理缓存")
         compose.onNodeWithText("清理缓存").performClick()
         compose.waitForIdle()
@@ -154,33 +94,6 @@ class SettingsClosureTest {
         compose.onNodeWithText("Apache 2.0", substring = true).assertExists()
         compose.onNodeWithText("关闭").performClick()
     }
-
-    @Test
-    fun diagnosticsStayShortAndAvoidUrls() {
-        openPage("nav_settings")
-        scrollSettingsTo("范围", substring = true)
-        val diagnostics = compose.onNodeWithTag("settings_diagnostics")
-        val text = diagnostics.fetchSemanticsNode().config.toString()
-        assertFalse("诊断不应包含地址", text.contains("http", ignoreCase = true))
-        assertTrue("诊断应给出范围", text.contains("范围"))
-    }
-
-    private fun current(): TuneSettings = runBlocking { app.userSettings.settings.first() }
-
-    private fun awaitTag(tag: String) {
-        compose.waitUntil(5000) { compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() }
-    }
-
-    // 诊断行是普通文本，不受设置行固定高度影响，用它衡量字体缩放。
-    private fun diagnosticsHeight(): androidx.compose.ui.unit.Dp {
-        scrollSettingsTo("范围", substring = true)
-        return compose.onNodeWithTag("settings_diagnostics").getBoundsInRoot().let { it.bottom - it.top }
-    }
-
-    private fun hasClickAction(text: String): Boolean =
-        compose.onNodeWithText(text).fetchSemanticsNode().config.contains(
-            androidx.compose.ui.semantics.SemanticsActions.OnClick
-        )
 
     // LazyColumn 只组合可见项，先滚动列表再定位目标行。
     private fun scrollSettingsTo(text: String, substring: Boolean = false) {

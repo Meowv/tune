@@ -420,7 +420,7 @@ private val CountryLocale = Locale.SIMPLIFIED_CHINESE
 @Composable
 private fun scopeName(state: RadioUiState, locale: Locale): String = when (state.scope.mode) {
     ScopeMode.AUTO -> state.resolvedCountryCode?.let { stringResource(R.string.scope_auto_country, it.displayName(locale)) }
-        ?: stringResource(if (state.isLoading || state.error != null) R.string.layout_auto else R.string.scope_global)
+        ?: stringResource(if (state.isLoading || state.error != null) R.string.scope_auto else R.string.scope_global)
     ScopeMode.COUNTRY -> requireNotNull(state.scope.countryCode).displayName(locale)
     ScopeMode.GLOBAL -> stringResource(R.string.scope_global)
 }
@@ -494,7 +494,7 @@ private fun ScopeOptions(
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             item(key = "AUTO") {
-                ScopeOption("Auto", stringResource(R.string.layout_auto), scope.mode == ScopeMode.AUTO) {
+                ScopeOption("Auto", stringResource(R.string.scope_auto), scope.mode == ScopeMode.AUTO) {
                     onSelect(RadioScope())
                 }
             }

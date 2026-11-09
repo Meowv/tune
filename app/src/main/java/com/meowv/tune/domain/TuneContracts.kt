@@ -39,8 +39,6 @@ sealed interface PlayerCommand {
     data object TogglePause : PlayerCommand
     data object Next : PlayerCommand
     data object Previous : PlayerCommand
-    data object AllowMeteredRetry : PlayerCommand
-    data object DismissNetworkPrompt : PlayerCommand
     data object CancelPending : PlayerCommand
     data class Resume(val uuid: UUID) : PlayerCommand
     data object Stop : PlayerCommand
@@ -53,17 +51,10 @@ interface PlayerController {
     suspend fun dispatch(command: PlayerCommand)
 }
 
-enum class LayoutMode { AUTO, PHONE, CAR }
-
 data class TuneSettings(
     val scope: RadioScope = RadioScope(),
-    val layout: LayoutMode = LayoutMode.AUTO,
     val autoPlay: Boolean = false,
-    val wifiOnly: Boolean = false,
-    val dataWarning: Boolean = true,
-    val pauseOnDisconnect: Boolean = true,
     val lastSuccessfulStation: UUID? = null,
-    val largeText: Boolean = false,
     val displayMode: RadioDisplayMode = RadioDisplayMode.LIST
 )
 

@@ -1,13 +1,11 @@
 package com.meowv.tune.ui
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
@@ -55,11 +53,6 @@ fun TuneApp(
     val radioState by radio.collectAsStateWithLifecycle()
     var page by rememberSaveable { mutableStateOf(TunePage.Radio) }
     var showScopePicker by rememberSaveable { mutableStateOf(false) }
-    var networkPromptDismissed by rememberSaveable { mutableStateOf(false) }
-    val submitPlayback: (PlayerCommand) -> Unit = { command ->
-        networkPromptDismissed = false
-        onPlayback(command)
-    }
     LaunchedEffect(showScopePicker) { if (showScopePicker) onLoadCountries(false) }
     val pageStates = rememberSaveableStateHolder()
     val snackbar = remember { SnackbarHostState() }
@@ -79,26 +72,26 @@ fun TuneApp(
     }
     val next: () -> Unit = {
         if (paused || idle) adjacent(1)?.let(onSelectTarget)
-        else submitPlayback(PlayerCommand.Next)
+        else onPlayback(PlayerCommand.Next)
     }
     val previous: () -> Unit = {
         if (paused || idle) adjacent(-1)?.let(onSelectTarget)
-        else submitPlayback(PlayerCommand.Previous)
+        else onPlayback(PlayerCommand.Previous)
     }
     val toggle: () -> Unit = {
         val station = target
         when {
             station == null -> Unit
             (paused || idle) && station.uuid != playbackState.station?.uuid ->
-                submitPlayback(PlayerCommand.Play(station))
-            else -> submitPlayback(PlayerCommand.TogglePause)
+                onPlayback(PlayerCommand.Play(station))
+            else -> onPlayback(PlayerCommand.TogglePause)
         }
     }
 
     Surface(color = TuneColors.Background) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val windowWidth = maxWidth
-            val isCar = resolveShell(settings.layout, windowWidth.value, maxHeight.value)
+            val isCar = isCarWindow(windowWidth.value, maxHeight.value)
             LaunchedEffect(isCar) { onShellChanged(isCar) }
             Column(
                 Modifier.fillMaxSize()
@@ -116,10 +109,10 @@ fun TuneApp(
                 if (isCar) {
                     Row(Modifier.weight(1f)) {
                         MeowvNavigationRail(page) { page = it }
-                        Box(Modifier.weight(1f).fillMaxHeight()) { pageContent(page, pageStates, isCar, settings, radio, playbackState, connected, radioState, submitPlayback, onSelectTarget, onDisplayModeChange, onSettingsChange, onRefreshRadio, onLoadMore, onClearDirectoryCache, { showScopePicker = true }) }
+                        Box(Modifier.weight(1f).fillMaxHeight()) { pageContent(page, pageStates, isCar, settings, radio, playbackState, connected, onPlayback, onSelectTarget, onDisplayModeChange, onSettingsChange, onRefreshRadio, onLoadMore, onClearDirectoryCache, { showScopePicker = true }) }
                     }
                 } else {
-                    Box(Modifier.weight(1f).fillMaxWidth()) { pageContent(page, pageStates, isCar, settings, radio, playbackState, connected, radioState, submitPlayback, onSelectTarget, onDisplayModeChange, onSettingsChange, onRefreshRadio, onLoadMore, onClearDirectoryCache, { showScopePicker = true }) }
+                    Box(Modifier.weight(1f).fillMaxWidth()) { pageContent(page, pageStates, isCar, settings, radio, playbackState, connected, onPlayback, onSelectTarget, onDisplayModeChange, onSettingsChange, onRefreshRadio, onLoadMore, onClearDirectoryCache, { showScopePicker = true }) }
                 }
                 MeowvMiniPlayer(
                     isCar = isCar,
@@ -145,31 +138,6 @@ fun TuneApp(
                     showScopePicker = false
                 }
             }
-            if (playbackState.error == TuneError.MOBILE_CONFIRMATION && !networkPromptDismissed) {
-                AlertDialog(
-                    onDismissRequest = {
-                        networkPromptDismissed = true
-                        onPlayback(PlayerCommand.DismissNetworkPrompt)
-                    },
-                    title = { Text(stringResource(R.string.mobile_playback_title), color = TuneColors.Text) },
-                    text = { Text(stringResource(R.string.mobile_playback_message), color = TuneColors.Muted) },
-                    confirmButton = {
-                        TextButton(onClick = { onPlayback(PlayerCommand.AllowMeteredRetry) }) {
-                            Text(stringResource(R.string.action_continue))
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = {
-                            networkPromptDismissed = true
-                            onPlayback(PlayerCommand.DismissNetworkPrompt)
-                        }) {
-                            Text(stringResource(R.string.action_cancel))
-                        }
-                    },
-                    containerColor = TuneColors.Surface,
-                    textContentColor = TuneColors.Text
-                )
-            }
         }
     }
 }
@@ -177,9 +145,7 @@ fun TuneApp(
 @Composable
 private fun playbackErrorText(error: TuneError?, statusCode: Int?): String? = when (error) {
     null -> null
-    TuneError.MOBILE_CONFIRMATION -> null
     TuneError.NETWORK_OFFLINE -> stringResource(R.string.playback_offline)
-    TuneError.WIFI_ONLY -> stringResource(R.string.playback_wifi_only)
     TuneError.AUDIO_FOCUS_LOST -> stringResource(R.string.playback_focus_lost)
     TuneError.AUDIO_DISCONNECTED -> stringResource(R.string.playback_disconnected)
     TuneError.HTTP, TuneError.SERVER -> statusCode?.let { stringResource(R.string.playback_http, it) }
@@ -201,7 +167,6 @@ private fun pageContent(
     radio: StateFlow<RadioUiState>,
     playback: PlayerUiState,
     connected: Boolean,
-    radioState: RadioUiState,
     onPlayback: (PlayerCommand) -> Unit,
     onSelectTarget: (Station) -> Unit,
     onDisplayModeChange: (RadioDisplayMode) -> Unit,
@@ -228,7 +193,7 @@ private fun pageContent(
             )
             TunePage.Music -> MusicScreen(isCar)
             TunePage.Settings -> SettingsScreen(
-                isCar, settings, radioState, onSettingsChange, onRefreshRadio, onClearDirectoryCache
+                isCar, settings, onSettingsChange, onRefreshRadio, onClearDirectoryCache
             )
         }
     }

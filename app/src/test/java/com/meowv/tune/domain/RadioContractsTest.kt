@@ -51,6 +51,9 @@ class RadioContractsTest {
             try {
                 val queue = RadioQueueManager(repository)
                 val model = RadioViewModel(repository, player, CountryResolver({ null }, { null }), lifetime, queue = queue)
+                // 先让 init 的播放器状态收集协程启动，后续只把刷新任务当作取消目标。
+                kotlinx.coroutines.yield()
+                val baseline = lifetime.coroutineContext[kotlinx.coroutines.Job]!!.children.toSet()
                 val local = RadioScope(ScopeMode.COUNTRY, station.countryCode)
                 model.refresh(local)
                 started.await()
@@ -60,7 +63,7 @@ class RadioContractsTest {
                 assertTrue(queue.recordSuccessfulPlayback(requireNotNull(queue.select(localScope, previous.uuid))))
                 assertTrue(queue.recordSuccessfulPlayback(requireNotNull(queue.select(localScope, station.uuid))))
                 assertTrue(queue.canPrevious.value)
-                val cancelledRequest = lifetime.coroutineContext[kotlinx.coroutines.Job]!!.children.single()
+                val cancelledRequest = lifetime.coroutineContext[kotlinx.coroutines.Job]!!.children.single { it !in baseline }
                 val global = RadioScope(ScopeMode.GLOBAL)
                 model.refresh(global)
                 assertFalse(queue.canPrevious.value)

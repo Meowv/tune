@@ -188,10 +188,12 @@ class DirectoryQueriesTest {
             val lifetime = CoroutineScope(coroutineContext + SupervisorJob())
             try {
                 val model = RadioViewModel(repository, idlePlayer, CountryResolver({ null }, { null }), lifetime)
+                kotlinx.coroutines.yield()
+                val baseline = lifetime.coroutineContext.job.children.toSet()
                 val japan = RadioScope(ScopeMode.COUNTRY, JP)
                 model.setScope(japan)
                 oldRequestStarted.await()
-                val original = lifetime.coroutineContext.job.children.single()
+                val original = lifetime.coroutineContext.job.children.single { it !in baseline }
                 model.setScope(RadioScope(ScopeMode.COUNTRY, US))
                 model.radioState.first { it.resolvedCountryCode == US }
                 model.setScope(japan)

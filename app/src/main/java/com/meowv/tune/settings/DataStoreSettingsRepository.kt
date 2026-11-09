@@ -31,13 +31,8 @@ internal class DataStoreSettingsRepository(private val store: DataStore<Preferen
             prefs[Scope] = updated.scope.mode.name
             val country = updated.scope.countryCode
             if (country == null) prefs.remove(Country) else prefs[Country] = country.value
-            prefs[Layout] = updated.layout.name
-            prefs[LargeText] = updated.largeText
             prefs[DisplayMode] = updated.displayMode.name
             prefs[AutoPlay] = updated.autoPlay
-            prefs[WifiOnly] = updated.wifiOnly
-            prefs[DataWarning] = updated.dataWarning
-            prefs[PauseOnDisconnect] = updated.pauseOnDisconnect
             if (!updated.autoPlay) prefs.remove(LastStation)
         }
     }
@@ -65,12 +60,7 @@ internal class DataStoreSettingsRepository(private val store: DataStore<Preferen
         }
         return TuneSettings(
             scope = scope,
-            layout = LayoutMode.entries.firstOrNull { it.name == prefs.read(Layout) } ?: LayoutMode.AUTO,
-            largeText = prefs.read(LargeText) ?: false,
             autoPlay = autoPlay,
-            wifiOnly = prefs.read(WifiOnly) ?: false,
-            dataWarning = prefs.read(DataWarning) ?: true,
-            pauseOnDisconnect = prefs.read(PauseOnDisconnect) ?: true,
             lastSuccessfulStation = if (autoPlay) last else null,
             displayMode = RadioDisplayMode.entries.firstOrNull { it.name == prefs.read(DisplayMode) }
                 ?: RadioDisplayMode.LIST
@@ -82,12 +72,7 @@ internal class DataStoreSettingsRepository(private val store: DataStore<Preferen
     private companion object {
         val Scope = stringPreferencesKey("scope")
         val Country = stringPreferencesKey("country")
-        val Layout = stringPreferencesKey("layout")
-        val LargeText = booleanPreferencesKey("large_text")
         val AutoPlay = booleanPreferencesKey("auto_play")
-        val WifiOnly = booleanPreferencesKey("wifi_only")
-        val DataWarning = booleanPreferencesKey("data_warning")
-        val PauseOnDisconnect = booleanPreferencesKey("pause_on_disconnect")
         val LastStation = stringPreferencesKey("last_successful_station")
         val DisplayMode = stringPreferencesKey("radio_display_mode")
     }

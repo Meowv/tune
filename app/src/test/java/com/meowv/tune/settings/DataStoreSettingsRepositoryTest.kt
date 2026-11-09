@@ -2,6 +2,7 @@ package com.meowv.tune.settings
 
 import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -25,17 +26,19 @@ class DataStoreSettingsRepositoryTest {
         open(file) { repository ->
             assertEquals(TuneSettings(), repository.settings.first())
             coroutineScope {
-                launch(Dispatchers.Default) { repository.update { it.copy(scope = japan, layout = LayoutMode.CAR) } }
-                launch(Dispatchers.Default) { repository.update { it.copy(wifiOnly = true, dataWarning = false) } }
-                launch(Dispatchers.Default) { repository.update { it.copy(autoPlay = true, pauseOnDisconnect = false) } }
+                launch(Dispatchers.Default) { repository.update { it.copy(scope = japan) } }
+                launch(Dispatchers.Default) { repository.update { it.copy(autoPlay = true) } }
+                launch(Dispatchers.Default) {
+                    repository.update { it.copy(displayMode = RadioDisplayMode.CARD) }
+                }
             }
             repository.recordSuccessfulStation(uuid)
         }
         open(file) { repository ->
             assertEquals(
                 TuneSettings(
-                    scope = japan, layout = LayoutMode.CAR, autoPlay = true, wifiOnly = true,
-                    dataWarning = false, pauseOnDisconnect = false, lastSuccessfulStation = uuid
+                    scope = japan, autoPlay = true,
+                    lastSuccessfulStation = uuid, displayMode = RadioDisplayMode.CARD
                 ),
                 repository.settings.first()
             )
@@ -47,6 +50,7 @@ class DataStoreSettingsRepositoryTest {
             assertFalse(settings.autoPlay)
             assertNull(settings.lastSuccessfulStation)
             assertEquals(ScopeMode.GLOBAL, settings.scope.mode)
+            assertEquals(RadioDisplayMode.CARD, settings.displayMode)
             repository.update { it.copy(autoPlay = true, lastSuccessfulStation = uuid) }
             assertNull(repository.settings.first().lastSuccessfulStation)
         }
@@ -60,8 +64,13 @@ class DataStoreSettingsRepositoryTest {
             store.edit {
                 it[stringPreferencesKey("scope")] = "COUNTRY"
                 it[stringPreferencesKey("country")] = "ZZ"
-                it[stringPreferencesKey("layout")] = "INVALID"
                 it[stringPreferencesKey("auto_play")] = "true"
+                // 已下线的设置键即使残留也不应再影响当前设置。
+                it[booleanPreferencesKey("wifi_only")] = true
+                it[booleanPreferencesKey("data_warning")] = false
+                it[booleanPreferencesKey("large_text")] = true
+                it[booleanPreferencesKey("pause_on_disconnect")] = false
+                it[stringPreferencesKey("layout")] = "CAR"
             }
             assertEquals(TuneSettings(), DataStoreSettingsRepository(store).settings.first())
         } finally {

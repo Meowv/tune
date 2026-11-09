@@ -21,7 +21,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -87,11 +86,9 @@ class PlaybackAudioPolicyTest {
         }
     }
 
-    @Test fun externalOutputRemovalHonorsPauseOnDisconnectSetting() = runBlocking {
+    @Test fun externalOutputRemovalAlwaysPauses() = runBlocking {
         launchReady {
             val first = station(1)
-            app.userSettings.update { it.copy(pauseOnDisconnect = true) }
-            app.userSettings.settings.first { it.pauseOnDisconnect }
             playAndWait(first)
             requireNotNull(connection.engine).onExternalOutputRemoved()
             withTimeout(3000) {
@@ -99,20 +96,12 @@ class PlaybackAudioPolicyTest {
                     it.phase == PlaybackPhase.PAUSED && it.error == TuneError.AUDIO_DISCONNECTED
                 }
             }
-
-            app.userSettings.update { it.copy(pauseOnDisconnect = false) }
-            app.userSettings.settings.first { !it.pauseOnDisconnect }
-            playAndWait(first)
-            requireNotNull(connection.engine).onExternalOutputRemoved()
-            delay(250)
-            assertTrue(connection.state.value.phase == PlaybackPhase.PLAYING)
-            assertEquals(null, connection.state.value.error)
         }
     }
 
     private suspend fun launchReady(block: suspend () -> Unit) {
         app.userSettings.update {
-            it.copy(scope = RadioScope(ScopeMode.COUNTRY, app.country), pauseOnDisconnect = true)
+            it.copy(scope = RadioScope(ScopeMode.COUNTRY, app.country))
         }
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             withTimeout(5000) { connection.connected.first { it } }
