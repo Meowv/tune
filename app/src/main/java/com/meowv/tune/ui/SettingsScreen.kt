@@ -2,8 +2,13 @@ package com.meowv.tune.ui
 
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -13,13 +18,18 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.*
@@ -105,15 +115,51 @@ private fun SettingRow(
     checked: Boolean? = null,
     onClick: () -> Unit
 ) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    var focused by remember { mutableStateOf(false) }
+    val shape = TuneShapes.Control
+    // 与电台列表一致：按住时整行圆角高亮，焦点态补描边，波纹裁进圆角内。
+    val background by animateColorAsState(
+        when {
+            pressed -> TuneColors.Primary.copy(alpha = .12f)
+            focused -> TuneColors.Selected
+            else -> Color.Transparent
+        },
+        animationSpec = tween(180), label = "setting_row_background"
+    )
+    val iconBackground by animateColorAsState(
+        if (pressed || focused) TuneColors.Primary.copy(alpha = .18f) else TuneColors.Raised,
+        animationSpec = tween(180), label = "setting_row_icon"
+    )
     val rowModifier = Modifier.fillMaxWidth().heightIn(min = if (isCar) 56.dp else 52.dp)
-        .padding(vertical = if (isCar) 4.dp else 2.dp).testTag("setting_$label")
-    val semantics = if (checked != null) {
-        Modifier.toggleable(checked, role = Role.Switch, onValueChange = { onClick() })
+        .padding(vertical = if (isCar) 4.dp else 2.dp)
+        .clip(shape)
+        .background(background)
+        .then(if (focused) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)
+        .onFocusChanged { focused = it.isFocused }
+        .testTag("setting_$label")
+    val action = if (checked != null) {
+        Modifier.toggleable(
+            value = checked,
+            interactionSource = interaction,
+            indication = ripple(color = TuneColors.Primary),
+            role = Role.Switch
+        ) { onClick() }
     } else {
-        Modifier.clickable(role = Role.Button, onClick = onClick)
+        Modifier.clickable(
+            interactionSource = interaction,
+            indication = ripple(color = TuneColors.Primary),
+            role = Role.Button,
+            onClick = onClick
+        )
     }
-    Row(rowModifier.then(semantics), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Medium)) {
-        Box(Modifier.size(38.dp).background(TuneColors.Raised, TuneShapes.Control), contentAlignment = Alignment.Center) {
+    Row(
+        rowModifier.then(action),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Medium)
+    ) {
+        Box(Modifier.size(38.dp).background(iconBackground, TuneShapes.Control), contentAlignment = Alignment.Center) {
             TuneIcon(resource, Modifier.size(22.dp))
         }
         Text(stringResource(label), color = TuneColors.Text, fontSize = if (isCar) 17.sp else 15.sp, fontWeight = FontWeight.Bold,
