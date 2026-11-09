@@ -19,15 +19,19 @@ STUDIO_DATA_DIR="${STUDIO_DATA_DIR:-$PROJECT_DIR/../meowv.com/build/studio.meowv
 
 usage() {
     cat <<'EOF'
-用法：./build.sh [debug|release] [额外的 Gradle 参数...]
+用法：./build.sh [debug|release] [选项] [额外的 Gradle 参数...]
 
-  debug     构建 Debug APK（默认）
-  release   构建 Release APK（R8 + 资源压缩；有 keystore.properties 时自动签名）
-            产物同时发布到 app/build/meowvtune/：MeowvTune-<版本>.apk + stable.json
+  debug       构建 Debug APK（默认）
+  release     构建 Release APK（R8 + 资源压缩；有 keystore.properties 时自动签名）
+              versionCode 自动 +1（构建失败会回滚），versionName 仍由人工维护
+              产物同时发布到 app/build/meowvtune/：MeowvTune-<版本>.apk + stable.json
+
+  --no-bump   本次不递增 versionCode，用于验证签名/产物，避免触发完整 R8 重建
 
 示例：
   ./build.sh
   ./build.sh release
+  ./build.sh release --no-bump
   ./build.sh release --offline
 
 可覆盖的环境变量：
@@ -38,18 +42,23 @@ EOF
 }
 
 MODE=debug
-case "${1:-}" in
-    release|--release|-r) MODE=release; shift ;;
-    debug|--debug|-d) MODE=debug; shift ;;
-    -h|--help) usage; exit 0 ;;
-    "") ;;
-    -*) ;;  # 其余选项原样交给 Gradle，如 -q、--offline
-    *)
-        echo "未知参数：$1" >&2
-        usage >&2
-        exit 1
-        ;;
-esac
+BUMP=1
+GRADLE_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        release|--release|-r) MODE=release ;;
+        debug|--debug|-d) MODE=debug ;;
+        --no-bump) BUMP=0 ;;
+        -h|--help) usage; exit 0 ;;
+        -*) GRADLE_ARGS+=("$1") ;;  # 其余选项原样交给 Gradle，如 -q、--offline
+        *)
+            echo "未知参数：$1" >&2
+            usage >&2
+            exit 1
+            ;;
+    esac
+    shift
+done
 
 if [[ -z "${JAVA_HOME:-}" ]] && ! command -v java >/dev/null 2>&1; then
     echo "构建失败，请安装 JDK 17 并配置 JAVA_HOME。" >&2
@@ -65,16 +74,66 @@ if [[ ! -f local.properties && -z "${ANDROID_HOME:-}" && -z "${ANDROID_SDK_ROOT:
     fi
 fi
 
+VERSION_FILE="$PROJECT_DIR/app/build.gradle.kts"
+ORIGINAL_VERSION_CODE=""
+
+read_version_code() {
+    sed -n 's/^[[:space:]]*versionCode = \([0-9][0-9]*\)[[:space:]]*$/\1/p' "$VERSION_FILE" | head -1
+}
+
+read_version_name() {
+    sed -n 's/^[[:space:]]*versionName = "\([^"]*\)"[[:space:]]*$/\1/p' "$VERSION_FILE" | head -1
+}
+
+write_version_code() {
+    local value="$1"
+    sed -i.bak -E "s/^([[:space:]]*versionCode = )[0-9]+[[:space:]]*$/\1$value/" "$VERSION_FILE"
+    rm -f "$VERSION_FILE.bak"
+}
+
+# 每次发布构建把 versionCode +1；versionName 仍由人工按语义化版本调整。
+# 构建失败时回滚，避免只涨号不出包。
+bump_version_code() {
+    local current next
+    current="$(read_version_code)"
+    if [[ -z "$current" ]]; then
+        echo "未在 app/build.gradle.kts 找到 versionCode = <数字>，已停止发布构建。" >&2
+        exit 1
+    fi
+    next=$((current + 1))
+    ORIGINAL_VERSION_CODE="$current"
+    write_version_code "$next"
+    if [[ "$(read_version_code)" != "$next" ]]; then
+        echo "versionCode 写入失败，已停止发布构建。" >&2
+        exit 1
+    fi
+    printf '版本号：versionCode %s → %s（versionName 保持 %s）\n' "$current" "$next" "$(read_version_name)"
+}
+
+rollback_version_code() {
+    local status=$?
+    if [[ "$status" -ne 0 && -n "$ORIGINAL_VERSION_CODE" ]]; then
+        write_version_code "$ORIGINAL_VERSION_CODE"
+        printf '构建失败，versionCode 已回滚到 %s。\n' "$ORIGINAL_VERSION_CODE" >&2
+    fi
+}
+
 if [[ "$MODE" == "release" ]]; then
     TASK=":app:assembleRelease"
     if [[ ! -f keystore.properties ]]; then
         echo "提示：未找到 keystore.properties，Release 将产出未签名包。" >&2
     fi
+    if [[ "$BUMP" -eq 1 ]]; then
+        trap rollback_version_code EXIT
+        bump_version_code
+    else
+        printf '跳过 versionCode 自增（--no-bump），沿用 %s\n' "$(read_version_code)"
+    fi
 else
     TASK=":app:assembleDebug"
 fi
 
-./gradlew "$TASK" "$@"
+./gradlew "$TASK" ${GRADLE_ARGS[@]+"${GRADLE_ARGS[@]}"}
 
 if [[ "$MODE" == "release" ]]; then
     # 签名配置存在时产物为 app-release.apk，否则为 app-release-unsigned.apk；
