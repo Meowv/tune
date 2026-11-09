@@ -155,9 +155,9 @@ private fun MiniPlayerAction(
 }
 
 /**
- * 播放器主操作按钮：48dp 热区内的 46dp 圆（车机 52dp）。
- * 播放/暂停为品牌紫实心圆，缓冲退为同色淡底加紫色加载环，失败转为错误色重试键。
- * 状态只由图标与底色表达，不依赖文字或外发光。
+ * 播放器主操作按钮：48dp 热区（车机 56dp），视觉只有图标本身，不铺底色。
+ * 与随机键、列表行保持同一套无底色图标语言；状态靠图形与颜色区分：
+ * 播放/暂停为品牌紫，缓冲是品牌紫加载环，失败转错误色重试键，未选台为灰色。
  */
 @Composable
 private fun PlayerActionButton(
@@ -167,47 +167,33 @@ private fun PlayerActionButton(
     isCar: Boolean,
     onClick: () -> Unit
 ) {
-    val diameter = if (isCar) 52.dp else 46.dp
-    val glyph = if (isCar) 24.dp else 22.dp
-    val background by animateColorAsState(
-        when (visual) {
-            PlayerButtonVisual.Play, PlayerButtonVisual.Pause -> TuneColors.Primary
-            PlayerButtonVisual.Loading -> TuneColors.Primary.copy(alpha = .16f)
-            PlayerButtonVisual.Retry -> TuneColors.Error.copy(alpha = .16f)
-            PlayerButtonVisual.Unavailable -> TuneColors.Raised
-        },
-        animationSpec = tween(200), label = "player_action_background"
-    )
+    // 主操作图标比次级图标大一档，去掉底色后仍能拉开层级。
+    val glyph = if (isCar) 26.dp else 24.dp
     val tint = when (visual) {
-        PlayerButtonVisual.Play, PlayerButtonVisual.Pause -> TuneColors.Background
+        PlayerButtonVisual.Play, PlayerButtonVisual.Pause -> TuneColors.Primary
         PlayerButtonVisual.Loading -> TuneColors.Primary
         PlayerButtonVisual.Retry -> TuneColors.Error
         PlayerButtonVisual.Unavailable -> TuneColors.Muted
     }
     MiniPlayerAction("player_pause", label, enabled, isCar, onClick) {
-        Box(
-            Modifier.size(diameter).background(background, CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Crossfade(visual, animationSpec = tween(160), label = "player_action_glyph") { state ->
-                when (state) {
-                    PlayerButtonVisual.Loading -> CircularProgressIndicator(
-                        Modifier.size(glyph + 2.dp),
-                        color = tint,
-                        strokeWidth = 2.dp,
-                        trackColor = tint.copy(alpha = .22f),
-                        strokeCap = StrokeCap.Round
-                    )
-                    PlayerButtonVisual.Pause -> TuneIcon(
-                        R.drawable.ic_radio_pause, Modifier.size(glyph), tint
-                    )
-                    PlayerButtonVisual.Retry -> TuneIcon(
-                        R.drawable.ic_refresh, Modifier.size(glyph), tint
-                    )
-                    PlayerButtonVisual.Play, PlayerButtonVisual.Unavailable -> TuneIcon(
-                        R.drawable.ic_radio_play, Modifier.size(glyph), tint
-                    )
-                }
+        Crossfade(visual, animationSpec = tween(160), label = "player_action_glyph") { state ->
+            when (state) {
+                PlayerButtonVisual.Loading -> CircularProgressIndicator(
+                    Modifier.size(glyph - 2.dp),
+                    color = tint,
+                    strokeWidth = 2.dp,
+                    trackColor = tint.copy(alpha = .22f),
+                    strokeCap = StrokeCap.Round
+                )
+                PlayerButtonVisual.Pause -> TuneIcon(
+                    R.drawable.ic_radio_pause, Modifier.size(glyph), tint
+                )
+                PlayerButtonVisual.Retry -> TuneIcon(
+                    R.drawable.ic_refresh, Modifier.size(glyph), tint
+                )
+                PlayerButtonVisual.Play, PlayerButtonVisual.Unavailable -> TuneIcon(
+                    R.drawable.ic_radio_play, Modifier.size(glyph), tint
+                )
             }
         }
     }
