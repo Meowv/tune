@@ -149,7 +149,7 @@ class TuneTestApplication : TuneApplication() {
         releaseDate = "2026-11-15",
         title = "MeowvTune 1.1.0",
         releaseNotes = listOf("优化电台播放体验", "修复部分问题"),
-        apkUrl = "https://studio.meowv.com/data/meowvtune/1.1.0/MeowvTune-1.1.0.apk",
+        apkUrl = "https://studio.meowv.com/data/meowvtune/MeowvTune-1.1.0.apk",
         apkSizeBytes = 25_600_000,
         apkSha256 = "a".repeat(64)
     )

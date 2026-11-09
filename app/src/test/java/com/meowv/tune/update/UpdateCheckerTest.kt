@@ -97,7 +97,7 @@ class UpdateCheckerTest {
         versionName: String = "1.1.0",
         versionCode: Long = 101,
         minSdk: Int = 28,
-        apkUrl: String = "https://studio.meowv.com/data/meowvtune/1.1.0/MeowvTune-1.1.0.apk",
+        apkUrl: String = "https://studio.meowv.com/data/meowvtune/MeowvTune-1.1.0.apk",
         sha256: String = "a".repeat(64)
     ) = UpdateInfo(
         packageName = packageName,

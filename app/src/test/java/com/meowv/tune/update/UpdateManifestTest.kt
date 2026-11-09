@@ -17,7 +17,7 @@ class UpdateManifestTest {
         assertEquals("2026-11-15", info.releaseDate)
         assertEquals("MeowvTune 1.1.0", info.title)
         assertEquals(listOf("优化电台播放体验", "修复部分问题"), info.releaseNotes)
-        assertEquals("https://studio.meowv.com/data/meowvtune/1.1.0/MeowvTune-1.1.0.apk", info.apkUrl)
+        assertEquals("https://studio.meowv.com/data/meowvtune/MeowvTune-1.1.0.apk", info.apkUrl)
         assertEquals(25_600_000L, info.apkSizeBytes)
         assertEquals("a".repeat(64), info.apkSha256)
     }
@@ -75,7 +75,7 @@ class UpdateManifestTest {
           "title": "MeowvTune 1.1.0",
           "releaseNotes": ["优化电台播放体验", "修复部分问题"],
           "apk": {
-            "url": "https://studio.meowv.com/data/meowvtune/1.1.0/MeowvTune-1.1.0.apk",
+            "url": "https://studio.meowv.com/data/meowvtune/MeowvTune-1.1.0.apk",
             "sizeBytes": 25600000,
             "sha256": "${"a".repeat(64)}"
           }
