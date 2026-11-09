@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.ScaleFactor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -211,22 +212,45 @@ private fun PlayerActionButton(
     }
 }
 
+/**
+ * 台标容器：固定正方形 + 统一圆角，图片按容器边界裁切，不拉伸也不越界。
+ * 缩放策略见 [BadgeContentScale]：近方形图铺满，其余完整展示。
+ */
 @Composable
 internal fun StationBadge(station: Station?, size: Dp) {
     Box(
         Modifier.size(size).clip(RoundedCornerShape(size * .22f)).background(TuneColors.Raised),
         contentAlignment = Alignment.Center
     ) {
-        if (station?.iconUrl == null) {
+        val url = station?.iconUrl
+        if (url.isNullOrBlank()) {
             TuneIcon(R.drawable.ic_radio, Modifier.size(size * .55f))
         } else {
             val fallback = painterResource(R.drawable.ic_radio)
             AsyncImage(
-                station.iconUrl, null, Modifier.fillMaxSize(),
-                placeholder = fallback, error = fallback, contentScale = ContentScale.Crop
+                url, null, Modifier.fillMaxSize(),
+                placeholder = fallback, error = fallback,
+                contentScale = BadgeContentScale
             )
         }
     }
+}
+
+/** 容器的正方形比例允许 10% 误差，超出后铺满就会切到可见内容。 */
+private val BADGE_CROP_RANGE = .9f..1.11f
+
+internal fun badgeScale(width: Float, height: Float): ContentScale {
+    if (width <= 0f || height <= 0f) return ContentScale.Fit
+    return if (width / height in BADGE_CROP_RANGE) ContentScale.Crop else ContentScale.Fit
+}
+
+/**
+ * 按每张图的实际尺寸在绘制期决定缩放方式：不额外记录状态，也不触发重组，
+ * 列表滚动时不会因为图片尺寸回写而抖动。
+ */
+private object BadgeContentScale : ContentScale {
+    override fun computeScaleFactor(srcSize: Size, dstSize: Size): ScaleFactor =
+        badgeScale(srcSize.width, srcSize.height).computeScaleFactor(srcSize, dstSize)
 }
 
 /** 品牌栏：手机 64dp / 车机 78dp，单行 Logo + 名称。 */

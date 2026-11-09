@@ -14,6 +14,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.initializer
@@ -25,10 +26,12 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.meowv.tune.ui.TuneApp
 import com.meowv.tune.ui.theme.TuneTheme
+import com.meowv.tune.domain.TuneError
 import com.meowv.tune.domain.TuneSettings
 import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.domain.TuneFailure
 import com.meowv.tune.radio.CountryResolver
+import com.meowv.tune.radio.DirectoryRefresh
 import com.meowv.tune.radio.RadioViewModel
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -42,6 +45,7 @@ class MainActivity : ComponentActivity() {
     private var carShell = false
     private var mediaLease: AutoCloseable? = null
     private var notificationRequested = false
+    private val snackbar = SnackbarHostState()
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (!granted) {
@@ -69,6 +73,24 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             settingsModel.settings.filterNotNull().map { it.scope }.distinctUntilChanged().collect(radioModel::setScope)
         }
+        // 设置页刷新的结果统一走同一条 Snackbar：先复位状态再提示，避免旋转后重复弹出。
+        lifecycleScope.launch {
+            radioModel.refreshState.collect { state ->
+                when (state) {
+                    DirectoryRefresh.Success -> {
+                        radioModel.acknowledgeRefresh()
+                        snackbar.showSnackbar(getString(R.string.directory_refreshed))
+                    }
+                    is DirectoryRefresh.Failed -> {
+                        radioModel.acknowledgeRefresh()
+                        snackbar.showSnackbar(
+                            getString(R.string.directory_refresh_failed, refreshFailureReason(state.error))
+                        )
+                    }
+                    DirectoryRefresh.Idle, DirectoryRefresh.Running -> Unit
+                }
+            }
+        }
         // 只有普通前台冷启动才尝试恢复；进程重建、回前台和配置变更都不重开流。
         if (savedInstanceState == null && !tuneApp.autoPlayAttempted) {
             tuneApp.autoPlayAttempted = true
@@ -78,6 +100,7 @@ class MainActivity : ComponentActivity() {
             val settings by settingsModel.settings.collectAsStateWithLifecycle()
             val storageError by settingsModel.storageError.collectAsStateWithLifecycle()
             val countries by radioModel.countries.collectAsStateWithLifecycle()
+            val refresh by radioModel.refreshState.collectAsStateWithLifecycle()
             TuneTheme {
                 TuneApp(
                     settings = settings ?: TuneSettings(),
@@ -85,6 +108,8 @@ class MainActivity : ComponentActivity() {
                     radio = radioModel.radioState,
                     playback = tuneApp.playerController.state,
                     playbackConnected = tuneApp.playerController.connected,
+                    snackbar = snackbar,
+                    directoryRefreshing = refresh == DirectoryRefresh.Running,
                     onPlayback = ::dispatchPlayback,
                     onSelectTarget = radioModel::selectTarget,
                     onDisplayModeChange = { mode ->
@@ -93,6 +118,7 @@ class MainActivity : ComponentActivity() {
                     countries = countries,
                     onLoadCountries = radioModel::loadCountries,
                     onRefreshRadio = { settingsModel.settings.value?.let { radioModel.refresh(it.scope) } },
+                    onRefreshFromSettings = { settingsModel.settings.value?.let { radioModel.refreshManually(it.scope) } },
                     onLoadMore = radioModel::loadMore,
                     onSettingsChange = settingsModel::update,
                     onClearDirectoryCache = ::clearDirectoryCache,
@@ -165,9 +191,18 @@ class MainActivity : ComponentActivity() {
             } catch (_: IOException) {
                 R.string.directory_cache_clear_failed
             }
-            Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
+            snackbar.showSnackbar(getString(message))
         }
     }
+
+    // 刷新失败只说人话，不把异常类型暴露给用户。
+    private fun refreshFailureReason(error: TuneError?): String = getString(
+        when (error) {
+            TuneError.NETWORK_OFFLINE -> R.string.directory_reason_offline
+            TuneError.TIMEOUT -> R.string.directory_reason_timeout
+            else -> R.string.directory_reason_unavailable
+        }
+    )
 
     private fun applySystemBars() {
         WindowCompat.getInsetsController(window, window.decorView).apply {

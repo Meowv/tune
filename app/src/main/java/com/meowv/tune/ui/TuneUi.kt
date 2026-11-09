@@ -39,12 +39,15 @@ fun TuneApp(
     radio: StateFlow<RadioUiState>,
     playback: StateFlow<PlayerUiState>,
     playbackConnected: StateFlow<Boolean>,
+    snackbar: SnackbarHostState,
+    directoryRefreshing: Boolean,
     onPlayback: (PlayerCommand) -> Unit,
     onSelectTarget: (Station) -> Unit,
     onDisplayModeChange: (RadioDisplayMode) -> Unit,
     countries: CountryOptions,
     onLoadCountries: (Boolean) -> Unit,
     onRefreshRadio: () -> Unit,
+    onRefreshFromSettings: () -> Unit,
     onLoadMore: () -> Unit,
     onSettingsChange: ((TuneSettings) -> TuneSettings) -> Unit,
     onClearDirectoryCache: () -> Unit,
@@ -58,7 +61,6 @@ fun TuneApp(
     var showScopePicker by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(showScopePicker) { if (showScopePicker) onLoadCountries(false) }
     val pageStates = rememberSaveableStateHolder()
-    val snackbar = remember { SnackbarHostState() }
     val errorText = playbackErrorText(playbackState.error, playbackState.statusCode)
     LaunchedEffect(playbackState.error) {
         if (errorText != null) snackbar.showSnackbar(errorText, duration = SnackbarDuration.Short)
@@ -128,12 +130,12 @@ fun TuneApp(
                     Row(Modifier.weight(1f)) {
                         MeowvNavigationRail(page) { page = it }
                         Crossfade(page, Modifier.weight(1f).fillMaxHeight(), animationSpec = tween(220), label = "page_switch") { target ->
-                            Box(Modifier.fillMaxSize()) { pageContent(target, pageStates, isCar, settings, radio, playbackState, connected, onPlayback, onSelectTarget, onDisplayModeChange, onSettingsChange, onRefreshRadio, onLoadMore, onClearDirectoryCache, { showScopePicker = true }) }
+                            Box(Modifier.fillMaxSize()) { pageContent(target, pageStates, isCar, settings, radio, playbackState, connected, directoryRefreshing, onPlayback, onSelectTarget, onDisplayModeChange, onSettingsChange, onRefreshRadio, onRefreshFromSettings, onLoadMore, onClearDirectoryCache, { showScopePicker = true }) }
                         }
                     }
                 } else {
                     Crossfade(page, Modifier.weight(1f).fillMaxWidth(), animationSpec = tween(220), label = "page_switch") { target ->
-                        Box(Modifier.fillMaxSize()) { pageContent(target, pageStates, isCar, settings, radio, playbackState, connected, onPlayback, onSelectTarget, onDisplayModeChange, onSettingsChange, onRefreshRadio, onLoadMore, onClearDirectoryCache, { showScopePicker = true }) }
+                        Box(Modifier.fillMaxSize()) { pageContent(target, pageStates, isCar, settings, radio, playbackState, connected, directoryRefreshing, onPlayback, onSelectTarget, onDisplayModeChange, onSettingsChange, onRefreshRadio, onRefreshFromSettings, onLoadMore, onClearDirectoryCache, { showScopePicker = true }) }
                     }
                 }
                 MeowvMiniPlayer(
@@ -161,7 +163,10 @@ fun TuneApp(
             }
             SnackbarHost(
                 snackbar,
-                Modifier.align(Alignment.BottomCenter).padding(bottom = if (isCar) 96.dp else 152.dp)
+                // 让出系统栏高度后再按播放器/导航栏厚度上移，避免提示压在播放器上。
+                Modifier.align(Alignment.BottomCenter)
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
+                    .padding(bottom = if (isCar) 96.dp else 152.dp)
             )
             if (showScopePicker) {
                 ScopePicker(
@@ -201,11 +206,13 @@ private fun pageContent(
     radio: StateFlow<RadioUiState>,
     playback: PlayerUiState,
     connected: Boolean,
+    directoryRefreshing: Boolean,
     onPlayback: (PlayerCommand) -> Unit,
     onSelectTarget: (Station) -> Unit,
     onDisplayModeChange: (RadioDisplayMode) -> Unit,
     onSettingsChange: ((TuneSettings) -> TuneSettings) -> Unit,
     onRefreshRadio: () -> Unit,
+    onRefreshFromSettings: () -> Unit,
     onLoadMore: () -> Unit,
     onClearDirectoryCache: () -> Unit,
     onScopeClick: () -> Unit
@@ -227,7 +234,12 @@ private fun pageContent(
             )
             TunePage.Music -> MusicScreen(isCar)
             TunePage.Settings -> SettingsScreen(
-                isCar, settings, onSettingsChange, onRefreshRadio, onClearDirectoryCache
+                isCar = isCar,
+                settings = settings,
+                refreshing = directoryRefreshing,
+                onSettingsChange = onSettingsChange,
+                onRefreshDirectory = onRefreshFromSettings,
+                onClearDirectoryCache = onClearDirectoryCache
             )
         }
     }

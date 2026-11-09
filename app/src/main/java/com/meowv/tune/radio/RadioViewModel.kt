@@ -14,6 +14,7 @@ import com.meowv.tune.domain.RadioUiState
 import com.meowv.tune.domain.ResolvedRadioScope
 import com.meowv.tune.domain.Station
 import com.meowv.tune.domain.StationPage
+import com.meowv.tune.domain.TuneError
 import com.meowv.tune.domain.TuneFailure
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +32,14 @@ data class CountryOptions(
     val stale: Boolean = false
 )
 
+/** 设置页「刷新数据」的一次性反馈状态；Idle 之外的终态由 UI 消费后复位。 */
+sealed interface DirectoryRefresh {
+    data object Idle : DirectoryRefresh
+    data object Running : DirectoryRefresh
+    data object Success : DirectoryRefresh
+    data class Failed(val error: TuneError?) : DirectoryRefresh
+}
+
 class RadioViewModel(
     private val repository: RadioRepository,
     private val player: PlayerController,
@@ -46,6 +55,8 @@ class RadioViewModel(
     val radioState = directory.asStateFlow()
     private val options = MutableStateFlow(CountryOptions())
     val countries = options.asStateFlow()
+    private val refresh = MutableStateFlow<DirectoryRefresh>(DirectoryRefresh.Idle)
+    val refreshState = refresh.asStateFlow()
     val playerState = player.state
     private var load: Job? = null
     private var optionsLoad: Job? = null
@@ -126,6 +137,30 @@ class RadioViewModel(
                 break
             }
         }
+    }
+
+    /**
+     * 设置页触发的刷新：复用 [refresh] 的加载链路，额外给出「进行中 / 完成 / 失败」反馈。
+     * 进行中重复点击直接忽略，避免叠加请求。
+     */
+    @MainThread
+    fun refreshManually(scope: RadioScope) {
+        if (refresh.value == DirectoryRefresh.Running) return
+        refresh.value = DirectoryRefresh.Running
+        refresh(scope, force = true)
+        val job = load
+        viewModelScope.launch {
+            job?.join()
+            // 期间又被新的加载取代时，结果由那一次负责，这里不覆盖。
+            if (directory.value.isLoading) return@launch
+            val error = directory.value.error
+            refresh.value = if (error == null) DirectoryRefresh.Success else DirectoryRefresh.Failed(error)
+        }
+    }
+
+    @MainThread
+    fun acknowledgeRefresh() {
+        if (refresh.value != DirectoryRefresh.Running) refresh.value = DirectoryRefresh.Idle
     }
 
     @MainThread

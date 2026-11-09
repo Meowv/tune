@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -226,7 +227,7 @@ private fun StationRow(
         phase in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING, PlaybackPhase.BUFFERING)
     val playing = isCurrent && phase == PlaybackPhase.PLAYING
     Row(
-        Modifier.fillMaxWidth().height(if (isCar) 80.dp else 78.dp)
+        Modifier.fillMaxWidth().height(if (isCar) 72.dp else 78.dp)
             .clip(shape)
             .background(rowBackground)
             .drawBehind {
@@ -253,7 +254,7 @@ private fun StationRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(if (isCar) 16.dp else 12.dp)
     ) {
-        StationBadge(station, if (isCar) 56.dp else 54.dp)
+        StationBadge(station, if (isCar) 48.dp else 54.dp)
         Text(
             title, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
             color = TuneColors.Text, fontSize = if (isCar) 20.sp else 17.sp,
@@ -344,8 +345,8 @@ private fun CardMode(
         // 卡片尺寸整体收敛约 6%，台标随卡片高度再缩 10% 左右，四周保留呼吸空间。
         val width = (if (isCar) 366.dp else 262.dp).coerceAtMost(maxWidth - 48.dp)
         val height = (if (isCar) 366.dp else 308.dp).coerceAtMost(maxHeight - 24.dp)
-        // 车机带 cutout 时可用高度更小，台标随卡片高度收缩，避免文字被裁掉。
-        val artwork = (height - 48.dp - 96.dp).coerceIn(88.dp, if (isCar) 194.dp else 148.dp)
+        // 高度吃紧时先缩台标，给两行名称和国家行留位置，避免文字被裁。
+        val artwork = (height - 48.dp - 112.dp).coerceIn(88.dp, if (isCar) 194.dp else 148.dp)
         val side = ((maxWidth - width) / 2).coerceAtLeast(16.dp)
         HorizontalPager(
             state = pagerState,
@@ -387,12 +388,23 @@ private fun StationCard(
     ) {
         StationBadge(station, artwork)
         Spacer(Modifier.height(if (isCar) 18.dp else 16.dp))
-        Text(
-            station.name.ifBlank { stringResource(R.string.station_unnamed) },
-            color = TuneColors.Text, fontSize = if (isCar) 26.sp else 22.sp,
-            fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            style = TuneTextStyle
-        )
+        // 名称固定占两行高度：短名居中不上下跳动，长名在第二行末尾省略。
+        val nameLine = if (isCar) 32.sp else 27.sp
+        val nameBlock = with(LocalDensity.current) { (nameLine.value * fontScale).dp * 2 }
+        Box(Modifier.fillMaxWidth().heightIn(min = nameBlock), contentAlignment = Alignment.Center) {
+            Text(
+                station.name.ifBlank { stringResource(R.string.station_unnamed) },
+                modifier = Modifier.fillMaxWidth(),
+                color = TuneColors.Text,
+                fontSize = if (isCar) 26.sp else 22.sp,
+                lineHeight = nameLine,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                style = TuneTextStyle
+            )
+        }
         if (showCountry) station.countryCode?.let {
             Spacer(Modifier.height(8.dp))
             Text(
