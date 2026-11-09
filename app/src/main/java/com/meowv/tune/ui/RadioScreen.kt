@@ -19,7 +19,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -205,14 +211,28 @@ private fun StationRow(
         else -> null
     }
     val shape = TuneShapes.Station
+    val selectedBrush = Brush.horizontalGradient(
+        listOf(TuneColors.Primary.copy(alpha = .18f), TuneColors.Primary.copy(alpha = .08f))
+    )
     Row(
         Modifier.fillMaxWidth().height(if (isCar) 76.dp else 72.dp)
             .clip(shape)
-            .background(if (selected) TuneColors.Selected else androidx.compose.ui.graphics.Color.Transparent)
-            .then(
-                if (selected) Modifier.border(1.dp, TuneColors.SelectedStroke.copy(alpha = .6f), shape)
-                else Modifier
+            .background(
+                if (selected) selectedBrush else Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent)),
+                shape
             )
+            .drawBehind {
+                if (selected) {
+                    val barWidth = 3.dp.toPx()
+                    val barHeight = (if (isCar) 30.dp else 26.dp).toPx()
+                    drawRoundRect(
+                        color = TuneColors.Primary,
+                        topLeft = Offset(0f, (size.height - barHeight) / 2f),
+                        size = Size(barWidth, barHeight),
+                        cornerRadius = CornerRadius(barWidth / 2f)
+                    )
+                }
+            }
             .selectable(
                 selected = selected,
                 enabled = action != null,

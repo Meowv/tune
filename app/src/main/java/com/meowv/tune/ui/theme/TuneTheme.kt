@@ -22,9 +22,6 @@ object TuneColors {
     val Border = Color(0xFF2A3550)
     val Divider = Color(0xFF2A3550)
     val Player = Color(0xFF192137)
-    val PlayerButton = Color(0xFF332A4D)
-    val Selected = Color(0xFF27213E)
-    val SelectedStroke = Color(0xFF54426F)
     val Live = Color(0xFF36D6AB)
     val Error = Color(0xFFF87171)
 }

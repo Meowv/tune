@@ -26,7 +26,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -208,6 +210,13 @@ internal fun MeowvMiniPlayer(
         phase == PlaybackPhase.RETRYING || phase == PlaybackPhase.BUFFERING
     val playing = phase == PlaybackPhase.PLAYING
     val canToggle = connected && station != null && !buffering
+    // 缓冲时按钮不可点，但保留高亮底色，让进度环始终落在主按钮上。
+    val active = connected && station != null
+    val buttonBrush = if (active) {
+        Brush.linearGradient(listOf(TuneColors.Accent, TuneColors.Primary))
+    } else {
+        Brush.linearGradient(listOf(TuneColors.Raised, TuneColors.Raised))
+    }
     val thresholdPx = with(LocalDensity.current) { 64.dp.toPx() }
     val currentNext by rememberUpdatedState(onNext)
     val currentPrevious by rememberUpdatedState(onPrevious)
@@ -219,7 +228,9 @@ internal fun MeowvMiniPlayer(
     val pauseLabel = stringResource(R.string.action_pause)
     val playLabel = stringResource(R.string.action_play)
     val retryLabel = stringResource(R.string.directory_retry)
+    val bufferingLabel = stringResource(R.string.playback_buffering)
     val buttonLabel = when {
+        buffering -> bufferingLabel
         phase == PlaybackPhase.ERROR && state.error != null -> retryLabel
         playing -> pauseLabel
         else -> playLabel
@@ -301,8 +312,9 @@ internal fun MeowvMiniPlayer(
                 )
             }
             Box(
-                Modifier.size(if (isCar) 56.dp else 48.dp)
-                    .background(TuneColors.PlayerButton, CircleShape)
+                Modifier.size(if (isCar) 64.dp else 56.dp)
+                    .shadow(if (active) 10.dp else 0.dp, CircleShape, clip = false)
+                    .background(buttonBrush, CircleShape)
                     .clickable(enabled = canToggle, role = Role.Button, onClick = onToggle)
                     .testTag("player_pause")
                     .semantics {
@@ -314,13 +326,16 @@ internal fun MeowvMiniPlayer(
             ) {
                 if (buffering) {
                     CircularProgressIndicator(
-                        Modifier.size(24.dp), color = TuneColors.Primary, strokeWidth = 2.dp
+                        Modifier.size(if (isCar) 30.dp else 26.dp),
+                        color = Color.White,
+                        strokeWidth = 2.5.dp,
+                        trackColor = Color.White.copy(alpha = .25f)
                     )
                 } else {
                     TuneIcon(
                         if (playing) R.drawable.ic_pause else R.drawable.ic_play,
-                        Modifier.size(if (isCar) 26.dp else 22.dp),
-                        if (canToggle) TuneColors.Primary else TuneColors.Muted
+                        Modifier.size(if (isCar) 28.dp else 24.dp),
+                        if (active) Color.White else TuneColors.Muted
                     )
                 }
             }
