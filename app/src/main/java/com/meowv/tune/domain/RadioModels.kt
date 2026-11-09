@@ -45,6 +45,8 @@ class TuneFailure(val kind: TuneError, val statusCode: Int? = null) : Exception(
 
 enum class DirectoryCacheState { FRESH, STALE }
 
+enum class RadioDisplayMode { LIST, CARD }
+
 data class RadioUiState(
     val scope: RadioScope = RadioScope(),
     val resolvedCountryCode: CountryCode? = null,

@@ -24,7 +24,13 @@ object TuneColors {
     val Text = Color(0xFFF8FAFC)
     val Muted = Color(0xFFA9B4C8)
     val Border = Color(0xFF2A3550)
-    val Live = Color(0xFF34D399)
+    val Divider = Color(0xFF2A3550)
+    val Player = Color(0xFF192137)
+    val PlayerButton = Color(0xFF332A4D)
+    val Selected = Color(0xFF27213E)
+    val SelectedStroke = Color(0xFF54426F)
+    val Live = Color(0xFF36D6AB)
+    val Error = Color(0xFFF87171)
 }
 
 private val Colors = darkColorScheme(
@@ -70,6 +76,8 @@ object TuneShapes {
     val Station = RoundedCornerShape(14.dp)
     val Input = RoundedCornerShape(15.dp)
     val Navigation = RoundedCornerShape(16.dp)
+    val Chip = RoundedCornerShape(18.dp)
+    val Card = RoundedCornerShape(24.dp)
     val SettingsGroup = RoundedCornerShape(17.dp)
     val Dialog = RoundedCornerShape(20.dp)
 }

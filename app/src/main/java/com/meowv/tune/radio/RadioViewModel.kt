@@ -12,6 +12,7 @@ import com.meowv.tune.domain.RadioScope
 import com.meowv.tune.domain.RadioCountry
 import com.meowv.tune.domain.RadioUiState
 import com.meowv.tune.domain.ResolvedRadioScope
+import com.meowv.tune.domain.Station
 import com.meowv.tune.domain.StationPage
 import com.meowv.tune.domain.TuneFailure
 import kotlinx.coroutines.CoroutineScope
@@ -51,6 +52,24 @@ class RadioViewModel(
     private var requestedScope: RadioScope? = null
     private var resolved: ResolvedRadioScope? = null
     private var page = StationPage()
+
+    init {
+        // 播放器确认的台站回写为 UI 选中项，媒体键/自动恢复时列表与播放器保持一致。
+        scope.launch {
+            player.state.collect { state ->
+                val station = state.station ?: return@collect
+                if (directory.value.selectedStationUuid != station.uuid) {
+                    directory.value = directory.value.copy(selectedStationUuid = station.uuid)
+                }
+            }
+        }
+    }
+
+    /** 暂停或空闲时滑动只更新目标台，不触发播放。 */
+    @MainThread
+    fun selectTarget(station: Station) {
+        directory.value = directory.value.copy(selectedStationUuid = station.uuid)
+    }
 
     @MainThread
     fun setScope(scope: RadioScope) {
@@ -145,10 +164,14 @@ class RadioViewModel(
         resolved = candidate
         page = result
         queue?.updateDirectory(candidate, result)
+        // 同范围刷新时保留仍存在的选中台，避免暂停状态下目标被清空。
+        val selected = directory.value.selectedStationUuid
+            ?.takeIf { id -> result.stations.any { it.uuid == id } }
         directory.value = RadioUiState(
             scope = candidate.scope,
             resolvedCountryCode = candidate.country,
             stations = result.stations,
+            selectedStationUuid = selected,
             hasMore = result.nextOffset != null,
             cacheState = cacheState,
             isLoading = isLoading

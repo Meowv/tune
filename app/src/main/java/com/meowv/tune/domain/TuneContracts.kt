@@ -63,7 +63,8 @@ data class TuneSettings(
     val dataWarning: Boolean = true,
     val pauseOnDisconnect: Boolean = true,
     val lastSuccessfulStation: UUID? = null,
-    val largeText: Boolean = false
+    val largeText: Boolean = false,
+    val displayMode: RadioDisplayMode = RadioDisplayMode.LIST
 )
 
 interface SettingsRepository {

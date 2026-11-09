@@ -33,6 +33,7 @@ internal class DataStoreSettingsRepository(private val store: DataStore<Preferen
             if (country == null) prefs.remove(Country) else prefs[Country] = country.value
             prefs[Layout] = updated.layout.name
             prefs[LargeText] = updated.largeText
+            prefs[DisplayMode] = updated.displayMode.name
             prefs[AutoPlay] = updated.autoPlay
             prefs[WifiOnly] = updated.wifiOnly
             prefs[DataWarning] = updated.dataWarning
@@ -70,7 +71,9 @@ internal class DataStoreSettingsRepository(private val store: DataStore<Preferen
             wifiOnly = prefs.read(WifiOnly) ?: false,
             dataWarning = prefs.read(DataWarning) ?: true,
             pauseOnDisconnect = prefs.read(PauseOnDisconnect) ?: true,
-            lastSuccessfulStation = if (autoPlay) last else null
+            lastSuccessfulStation = if (autoPlay) last else null,
+            displayMode = RadioDisplayMode.entries.firstOrNull { it.name == prefs.read(DisplayMode) }
+                ?: RadioDisplayMode.LIST
         )
     }
 
@@ -86,5 +89,6 @@ internal class DataStoreSettingsRepository(private val store: DataStore<Preferen
         val DataWarning = booleanPreferencesKey("data_warning")
         val PauseOnDisconnect = booleanPreferencesKey("pause_on_disconnect")
         val LastStation = stringPreferencesKey("last_successful_station")
+        val DisplayMode = stringPreferencesKey("radio_display_mode")
     }
 }

@@ -3,9 +3,12 @@ package com.meowv.tune
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.meowv.tune.domain.RadioDisplayMode
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -22,6 +25,14 @@ class CompatibilityMatrixTest {
 
     @Test
     fun keyAreasVisibleAndReachable() {
+        runBlocking {
+            (compose.activity.application as TuneTestApplication).userSettings.update {
+                it.copy(displayMode = RadioDisplayMode.LIST)
+            }
+        }
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithTag("station_list").fetchSemanticsNodes().isNotEmpty()
+        }
         val config = compose.activity.resources.configuration
         println(
             "MATRIX size=${config.screenWidthDp}x${config.screenHeightDp} " +
@@ -42,7 +53,7 @@ class CompatibilityMatrixTest {
         compose.onNodeWithTag("station_list").assertIsDisplayed()
 
         // 主要播放控件热区不小于 44dp。
-        listOf("player_previous", "player_pause", "player_next").forEach { tag ->
+        listOf("player_pause", "nav_radio", "nav_music", "nav_settings").forEach { tag ->
             val bounds = compose.onNodeWithTag(tag).getUnclippedBoundsInRoot()
             val width = (bounds.right - bounds.left).value
             val height = (bounds.bottom - bounds.top).value

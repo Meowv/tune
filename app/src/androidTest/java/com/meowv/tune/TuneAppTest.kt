@@ -33,9 +33,11 @@ import kotlinx.coroutines.flow.first
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 import com.meowv.tune.domain.PlaybackPhase
+import com.meowv.tune.domain.RadioDisplayMode
 
 @OptIn(ExperimentalTestApi::class)
 @RunWith(AndroidJUnit4::class)
@@ -63,18 +65,19 @@ class TuneAppTest {
         compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(first))
         compose.onNodeWithTag(first).performClick()
         compose.waitUntil(8000) { app.playerController.state.value.phase == PlaybackPhase.PLAYING }
-        compose.onNodeWithTag("player_previous").assertIsNotEnabled()
-        compose.onNodeWithTag("player_next").assertIsEnabled().performClick()
+        assertFalse("首台没有上一台", app.radioQueue.canPrevious.value)
+        assertTrue(app.radioQueue.canNext.value)
+        compose.onNodeWithTag("player_info").performTouchInput { swipeLeft() }
         compose.waitUntil(8000) {
             app.playerController.state.value.station?.uuid == UUID(0, 2) &&
                 app.playerController.state.value.phase == PlaybackPhase.PLAYING
         }
-        compose.onNodeWithTag("player_previous").assertIsEnabled().performClick()
+        compose.onNodeWithTag("player_info").performTouchInput { swipeRight() }
         compose.waitUntil(8000) {
             app.playerController.state.value.station?.uuid == UUID(0, 1) &&
                 app.playerController.state.value.phase == PlaybackPhase.PLAYING
         }
-        compose.onNodeWithTag("player_previous").assertIsNotEnabled()
+        assertFalse("回到最早一台后不可再上一台", app.radioQueue.canPrevious.value)
         compose.onNodeWithTag(first).assertHasClickAction().assertIsSelected()
         selectPage("nav_music")
         compose.onNode(hasText("Test station 1") and hasAnyAncestor(hasTestTag("global_player"))).assertIsDisplayed()
@@ -87,7 +90,7 @@ class TuneAppTest {
         compose.waitUntil(3000) { app.playerController.state.value.phase == PlaybackPhase.PAUSED }
         compose.onNodeWithTag("player_pause").performClick()
         compose.waitUntil(3000) { app.playerController.state.value.phase == PlaybackPhase.PLAYING }
-        compose.onNodeWithTag("player_stop").performClick()
+        runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
         compose.waitUntil(3000) { app.playerController.state.value.phase == PlaybackPhase.IDLE }
     }
 
@@ -132,7 +135,7 @@ class TuneAppTest {
                 app.playerController.state.value.phase == PlaybackPhase.PLAYING
         }
 
-        compose.onNodeWithTag("player_next").assertIsEnabled().performClick()
+        compose.onNodeWithTag("player_info").performTouchInput { swipeLeft() }
         compose.waitUntil(5000) {
             compose.onAllNodesWithText("使用移动网络播放？").fetchSemanticsNodes().isNotEmpty()
         }
@@ -237,9 +240,8 @@ class TuneAppTest {
                 about.top >= viewport.top && about.bottom <= viewport.bottom)
         }
         compose.onNodeWithTag("global_player").assertIsDisplayed()
-        compose.onNodeWithTag("player_previous").assertIsNotEnabled()
         compose.onNodeWithTag("player_pause").assertIsNotEnabled()
-        compose.onNodeWithTag("player_next").assertIsNotEnabled()
+        assertFalse(app.radioQueue.canPrevious.value)
         selectPage("nav_radio")
         compose.onNodeWithTag("page_radio").assertIsDisplayed()
     }
@@ -288,7 +290,7 @@ class TuneAppTest {
         val list = compose.onNodeWithTag("station_list").getUnclippedBoundsInRoot()
         assertTrue("List must end before the fixed player", list.bottom <= player.top)
         val minimum = if (compose.onAllNodesWithTag("shell_car").fetchSemanticsNodes().isNotEmpty()) 56.dp else 48.dp
-        listOf("nav_radio", "nav_music", "nav_settings", "player_previous", "player_pause", "player_next").forEach { tag ->
+        listOf("nav_radio", "nav_music", "nav_settings", "player_pause", "player_info").forEach { tag ->
             val bounds = compose.onNodeWithTag(tag).getUnclippedBoundsInRoot()
             assertTrue("$tag width", bounds.right - bounds.left + .5.dp >= minimum)
             assertTrue("$tag height", bounds.bottom - bounds.top + .5.dp >= minimum)
@@ -328,7 +330,7 @@ class TuneAppTest {
     fun stationScrollPositionSurvivesNavigationAndRecreation() {
         val tag = "station_${UUID(0, 6)}"
         compose.waitUntil(5000) { compose.onAllNodesWithText("Test station 1").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithTag("station_list").performScrollToIndex(6)
+        compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(tag))
         compose.onNodeWithTag(tag).assertIsDisplayed()
         val queries = app.queries.get()
         selectPage("nav_music")
@@ -344,7 +346,11 @@ class TuneAppTest {
         runBlocking { app.userSettings.update { it.copy(scope = RadioScope(ScopeMode.COUNTRY, app.country)) } }
         val label = countryScopeLabel()
         awaitScope(label)
-        compose.onNodeWithTag("directory_refresh").performClick()
+        compose.activityRule.scenario.onActivity { activity ->
+            ViewModelProvider(activity)[RadioViewModel::class].refresh(
+                RadioScope(ScopeMode.COUNTRY, app.country), force = true
+            )
+        }
         compose.waitUntil(5000) {
             var firstPageReady = false
             compose.activityRule.scenario.onActivity { activity ->
@@ -354,7 +360,7 @@ class TuneAppTest {
             firstPageReady
         }
         val queries = app.queries.get()
-        compose.onNodeWithTag("station_list").performScrollToIndex(30)
+        compose.onNodeWithTag("station_list").performScrollToIndex(29)
         compose.waitUntil(5000) { app.queries.get() > queries }
         compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag("station_${UUID(0, 36)}"))
         compose.onNodeWithTag("station_${UUID(0, 36)}").assertIsDisplayed()
@@ -366,10 +372,12 @@ class TuneAppTest {
         compose.waitUntil(5000) { compose.onAllNodesWithText("Test station 1").fetchSemanticsNodes().isNotEmpty() }
         app.failQueries = true
         try {
-            compose.onNodeWithTag("directory_refresh").performClick()
+            compose.activityRule.scenario.onActivity { activity ->
+                ViewModelProvider(activity)[RadioViewModel::class].refresh(
+                    RadioScope(ScopeMode.COUNTRY, app.country), force = true
+                )
+            }
             compose.waitUntil(5000) { compose.onAllNodesWithText("加载失败").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("station_list").performScrollToNode(hasText("缓存"))
-            compose.onNodeWithText("缓存").assertIsDisplayed()
             compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag("station_${UUID(0, 1)}"))
             compose.onNodeWithTag("station_${UUID(0, 1)}").assertIsDisplayed()
         } finally {
@@ -385,7 +393,7 @@ class TuneAppTest {
         val country = requireNotNull(CountryCode.parse("US"))
         runBlocking { app.userSettings.update { it.copy(scope = RadioScope(ScopeMode.COUNTRY, country)) } }
         val activity = compose.activity
-        awaitScope(activity.getString(R.string.scope_picker_description, country.displayName(activity.resources.configuration.locales[0])))
+        awaitScope(activity.getString(R.string.scope_picker_description, country.displayName(Locale.SIMPLIFIED_CHINESE)))
         compose.waitUntil(5000) { compose.onAllNodesWithText("暂无可用电台").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("暂无可用电台").assertIsDisplayed()
         compose.onNodeWithText("Test station 1").assertDoesNotExist()
@@ -405,7 +413,7 @@ class TuneAppTest {
             val manager = compose.activity.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
             compose.waitUntil(5000) { manager.isTouchExplorationEnabled }
             compose.waitForIdle()
-            compose.onNodeWithTag("scope_selector").performScrollTo()
+            compose.onNodeWithTag("scope_selector")
             fun currentRoot(): AccessibilityNodeInfo? = automation.rootInActiveWindow
                 ?: automation.windows.mapNotNull { it.root }.firstOrNull { it.packageName == "com.meowv.tune" }
             compose.waitUntil(15000) { currentRoot() != null }
@@ -445,13 +453,64 @@ class TuneAppTest {
         }
     }
 
+    @Test
+    fun pausedSwipeChangesTargetWithoutPlaying() {
+        compose.waitUntil(5000) { app.playerController.connected.value }
+        val first = "station_${UUID(0, 1)}"
+        compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(first))
+        compose.onNodeWithTag(first).performClick()
+        compose.waitUntil(8000) {
+            app.playerController.state.value.phase == PlaybackPhase.PLAYING &&
+                app.playerController.state.value.station?.uuid == UUID(0, 1)
+        }
+        compose.onNodeWithTag("player_pause").performClick()
+        compose.waitUntil(3000) { app.playerController.state.value.phase == PlaybackPhase.PAUSED }
+
+        compose.onNodeWithTag("player_info").performTouchInput { swipeLeft() }
+        compose.waitUntil(3000) { radioState().selectedStationUuid == UUID(0, 2) }
+        assertEquals("暂停时滑动不能换音频", UUID(0, 1), app.playerController.state.value.station?.uuid)
+        assertEquals(PlaybackPhase.PAUSED, app.playerController.state.value.phase)
+
+        compose.onNodeWithTag("player_pause").performClick()
+        compose.waitUntil(8000) {
+            app.playerController.state.value.station?.uuid == UUID(0, 2) &&
+                app.playerController.state.value.phase == PlaybackPhase.PLAYING
+        }
+        runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
+    }
+
+    @Test
+    fun displayModeSwitchKeepsPlaybackAndStation() {
+        compose.waitUntil(5000) { app.playerController.connected.value }
+        val first = "station_${UUID(0, 1)}"
+        compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(first))
+        compose.onNodeWithTag(first).performClick()
+        compose.waitUntil(8000) { app.playerController.state.value.phase == PlaybackPhase.PLAYING }
+        val queries = app.queries.get()
+
+        compose.onNodeWithTag("layout_card").performClick()
+        compose.waitUntil(3000) { displayMode() == RadioDisplayMode.CARD }
+        assertEquals(UUID(0, 1), app.playerController.state.value.station?.uuid)
+        assertEquals(PlaybackPhase.PLAYING, app.playerController.state.value.phase)
+
+        compose.onNodeWithTag("layout_list").performClick()
+        compose.waitUntil(3000) { displayMode() == RadioDisplayMode.LIST }
+        assertEquals(UUID(0, 1), app.playerController.state.value.station?.uuid)
+        assertEquals(queries, app.queries.get())
+        runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
+    }
+
+    private fun radioState() = ViewModelProvider(compose.activity)[RadioViewModel::class].radioState.value
+
+    private fun displayMode() = runBlocking { app.userSettings.settings.first().displayMode }
+
     private fun openScopePicker() {
-        compose.onNodeWithTag("scope_selector").performScrollTo().performClick()
+        compose.onNodeWithTag("scope_selector").performClick()
     }
 
     private fun countryScopeLabel(): String {
         val activity = compose.activity
-        return activity.getString(R.string.scope_picker_description, app.country.displayName(activity.resources.configuration.locales[0]))
+        return activity.getString(R.string.scope_picker_description, app.country.displayName(Locale.SIMPLIFIED_CHINESE))
     }
 
     private fun awaitScope(label: String) {

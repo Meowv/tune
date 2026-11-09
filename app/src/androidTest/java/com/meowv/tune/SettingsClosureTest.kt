@@ -68,7 +68,7 @@ class SettingsClosureTest {
         compose.onNodeWithText("布局").performClick()
         compose.onNodeWithTag("layout_option_phone").performClick()
         compose.waitUntil(3000) { current().layout == LayoutMode.PHONE }
-        compose.onNodeWithTag("shell_phone").assertExists()
+        awaitTag("shell_phone")
 
         assertEquals(PlaybackPhase.PLAYING, app.playerController.state.value.phase)
         assertEquals(playing.uuid, app.playerController.state.value.station?.uuid)
@@ -77,7 +77,7 @@ class SettingsClosureTest {
         compose.onNodeWithText("布局").performClick()
         compose.onNodeWithTag("layout_option_car").performClick()
         compose.waitUntil(3000) { current().layout == LayoutMode.CAR }
-        compose.onNodeWithTag("shell_car").assertExists()
+        awaitTag("shell_car")
         assertEquals(playing.uuid, app.playerController.state.value.station?.uuid)
     }
 
@@ -95,7 +95,7 @@ class SettingsClosureTest {
 
         compose.activityRule.scenario.recreate()
         compose.waitUntil(5000) { current().largeText }
-        compose.onNodeWithTag("shell_car").assertExists()
+        awaitTag("shell_car")
         openPage("nav_settings")
         scrollSettingsTo("大字显示")
         compose.onNodeWithText("大字显示").assertIsOn()
@@ -166,6 +166,10 @@ class SettingsClosureTest {
     }
 
     private fun current(): TuneSettings = runBlocking { app.userSettings.settings.first() }
+
+    private fun awaitTag(tag: String) {
+        compose.waitUntil(5000) { compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() }
+    }
 
     // 诊断行是普通文本，不受设置行固定高度影响，用它衡量字体缩放。
     private fun diagnosticsHeight(): androidx.compose.ui.unit.Dp {

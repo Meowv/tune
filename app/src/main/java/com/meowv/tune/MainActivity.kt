@@ -86,6 +86,10 @@ class MainActivity : ComponentActivity() {
                     playback = tuneApp.playerController.state,
                     playbackConnected = tuneApp.playerController.connected,
                     onPlayback = ::dispatchPlayback,
+                    onSelectTarget = radioModel::selectTarget,
+                    onDisplayModeChange = { mode ->
+                        settingsModel.update { it.copy(displayMode = mode) }
+                    },
                     countries = countries,
                     onLoadCountries = radioModel::loadCountries,
                     onRefreshRadio = { settingsModel.settings.value?.let { radioModel.refresh(it.scope) } },
