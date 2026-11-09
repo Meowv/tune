@@ -1,5 +1,7 @@
 package com.meowv.tune.ui
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -125,10 +127,14 @@ fun TuneApp(
                 if (isCar) {
                     Row(Modifier.weight(1f)) {
                         MeowvNavigationRail(page) { page = it }
-                        Box(Modifier.weight(1f).fillMaxHeight()) { pageContent(page, pageStates, isCar, settings, radio, playbackState, connected, onPlayback, onSelectTarget, onDisplayModeChange, onSettingsChange, onRefreshRadio, onLoadMore, onClearDirectoryCache, { showScopePicker = true }) }
+                        Crossfade(page, Modifier.weight(1f).fillMaxHeight(), animationSpec = tween(220), label = "page_switch") { target ->
+                            Box(Modifier.fillMaxSize()) { pageContent(target, pageStates, isCar, settings, radio, playbackState, connected, onPlayback, onSelectTarget, onDisplayModeChange, onSettingsChange, onRefreshRadio, onLoadMore, onClearDirectoryCache, { showScopePicker = true }) }
+                        }
                     }
                 } else {
-                    Box(Modifier.weight(1f).fillMaxWidth()) { pageContent(page, pageStates, isCar, settings, radio, playbackState, connected, onPlayback, onSelectTarget, onDisplayModeChange, onSettingsChange, onRefreshRadio, onLoadMore, onClearDirectoryCache, { showScopePicker = true }) }
+                    Crossfade(page, Modifier.weight(1f).fillMaxWidth(), animationSpec = tween(220), label = "page_switch") { target ->
+                        Box(Modifier.fillMaxSize()) { pageContent(target, pageStates, isCar, settings, radio, playbackState, connected, onPlayback, onSelectTarget, onDisplayModeChange, onSettingsChange, onRefreshRadio, onLoadMore, onClearDirectoryCache, { showScopePicker = true }) }
+                    }
                 }
                 MeowvMiniPlayer(
                     isCar = isCar,

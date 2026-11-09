@@ -1,6 +1,16 @@
 package com.meowv.tune.ui
 
+import android.provider.Settings
 import androidx.annotation.DrawableRes
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,12 +36,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -66,6 +78,52 @@ internal fun TuneIcon(@DrawableRes resource: Int, modifier: Modifier = Modifier,
 internal fun BrandLogo(modifier: Modifier = Modifier) {
     Image(painterResource(R.drawable.ic_meowvtune_logo), contentDescription = null, modifier = modifier)
 }
+
+/**
+ * 播放中的动态音频波形：4 根竖条以不同周期低幅起伏。
+ * 系统关闭动画（Animator duration scale = 0）时退化为静态条，避免无谓消耗。
+ */
+@Composable
+internal fun PlayingWaveBars(modifier: Modifier = Modifier, color: Color = TuneColors.Primary) {
+    val context = LocalContext.current
+    val motionEnabled = remember {
+        Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f
+    }
+    val fractions: List<androidx.compose.runtime.State<Float>> = if (motionEnabled) {
+        val transition = rememberInfiniteTransition(label = "playing_wave")
+        List(WAVE_BAR_COUNT) { index ->
+            transition.animateFloat(
+                initialValue = .28f, targetValue = .96f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(durationMillis = 560 + index * 130, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "wave_bar_$index"
+            )
+        }
+    } else {
+        WAVE_STATIC_LEVELS.map { remember { mutableStateOf(it) } }
+    }
+    Canvas(modifier) {
+        val gap = size.width / (WAVE_BAR_COUNT * 2f + 1f)
+        val barWidth = gap
+        fractions.forEachIndexed { index, state ->
+            val height = (size.height * state.value).coerceIn(size.height * .2f, size.height)
+            val left = gap + index * (barWidth + gap)
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(left, (size.height - height) / 2f),
+                size = Size(barWidth, height),
+                cornerRadius = CornerRadius(barWidth / 2f)
+            )
+        }
+    }
+}
+
+private const val WAVE_BAR_COUNT = 4
+private val WAVE_STATIC_LEVELS = listOf(.42f, .78f, .55f, .9f)
+
+private enum class PlayerButtonVisual { Idle, Playing, Buffering }
 
 @Composable
 internal fun StationBadge(station: Station?, size: Dp) {
@@ -150,7 +208,14 @@ private fun NavigationItem(
 ) {
     var focused by remember { mutableStateOf(false) }
     val label = stringResource(page.label)
-    val color = if (selected) TuneColors.Primary else TuneColors.Muted
+    val color by animateColorAsState(
+        if (selected) TuneColors.Primary else TuneColors.Muted,
+        animationSpec = tween(220), label = "nav_item_color"
+    )
+    val background by animateColorAsState(
+        if (selected) TuneColors.Selected else Color.Transparent,
+        animationSpec = tween(220), label = "nav_item_background"
+    )
     val shape = RoundedCornerShape(14.dp)
     val resource = when (page) {
         TunePage.Radio -> R.drawable.ic_radio
@@ -160,7 +225,7 @@ private fun NavigationItem(
     Box(
         modifier.height(if (isCar) 64.dp else 56.dp).padding(horizontal = if (isCar) 0.dp else 9.dp)
             .clip(shape)
-            .background(if (selected) TuneColors.Raised else Color.Transparent)
+            .background(background)
             .then(if (focused) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .selectable(selected, role = Role.Tab, onClick = { onPage(page) })
@@ -211,12 +276,9 @@ internal fun MeowvMiniPlayer(
     val playing = phase == PlaybackPhase.PLAYING
     val canToggle = connected && station != null && !buffering
     // 缓冲时按钮不可点，但保留高亮底色，让进度环始终落在主按钮上。
+    // 纯色紫取代渐变 + 外发光，降低主按钮的视觉权重。
     val active = connected && station != null
-    val buttonBrush = if (active) {
-        Brush.linearGradient(listOf(TuneColors.Accent, TuneColors.Primary))
-    } else {
-        Brush.linearGradient(listOf(TuneColors.Raised, TuneColors.Raised))
-    }
+    val buttonColor = if (active) TuneColors.Primary else TuneColors.Raised
     val thresholdPx = with(LocalDensity.current) { 64.dp.toPx() }
     val currentNext by rememberUpdatedState(onNext)
     val currentPrevious by rememberUpdatedState(onPrevious)
@@ -246,17 +308,17 @@ internal fun MeowvMiniPlayer(
         Row(
             Modifier.fillMaxWidth()
                 .padding(
-                    start = if (isCar) 0.dp else 8.dp, end = if (isCar) 0.dp else 8.dp,
+                    start = if (isCar) 0.dp else 10.dp, end = if (isCar) 0.dp else 10.dp,
                     top = if (isCar) 0.dp else 8.dp, bottom = if (isCar) 0.dp else 8.dp
                 )
                 .height(if (isCar) 80.dp else 68.dp)
-                .background(TuneColors.Player, RoundedCornerShape(if (isCar) 0.dp else 18.dp))
+                .background(TuneColors.Player, RoundedCornerShape(if (isCar) 0.dp else 24.dp))
                 .testTag("global_player")
                 .padding(horizontal = if (isCar) 24.dp else 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            StationBadge(station, if (isCar) 52.dp else 44.dp)
+            StationBadge(station, if (isCar) 52.dp else 46.dp)
             var drag by remember { mutableStateOf(0f) }
             Row(
                 Modifier.weight(1f).fillMaxHeight()
@@ -290,7 +352,7 @@ internal fun MeowvMiniPlayer(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    name, color = TuneColors.Text, fontSize = if (isCar) 18.sp else 14.sp,
+                    name, color = TuneColors.Text, fontSize = if (isCar) 18.sp else 16.sp,
                     fontWeight = FontWeight.SemiBold, maxLines = 1,
                     overflow = TextOverflow.Ellipsis, style = TuneTextStyle
                 )
@@ -312,9 +374,9 @@ internal fun MeowvMiniPlayer(
                 )
             }
             Box(
-                Modifier.size(if (isCar) 64.dp else 56.dp)
-                    .shadow(if (active) 10.dp else 0.dp, CircleShape, clip = false)
-                    .background(buttonBrush, CircleShape)
+                Modifier.size(if (isCar) 56.dp else 50.dp)
+                    .clip(CircleShape)
+                    .background(buttonColor)
                     .clickable(enabled = canToggle, role = Role.Button, onClick = onToggle)
                     .testTag("player_pause")
                     .semantics {
@@ -324,19 +386,30 @@ internal fun MeowvMiniPlayer(
                     },
                 contentAlignment = Alignment.Center
             ) {
-                if (buffering) {
-                    CircularProgressIndicator(
-                        Modifier.size(if (isCar) 30.dp else 26.dp),
-                        color = Color.White,
-                        strokeWidth = 2.5.dp,
-                        trackColor = Color.White.copy(alpha = .25f)
-                    )
-                } else {
-                    TuneIcon(
-                        if (playing) R.drawable.ic_pause else R.drawable.ic_play,
-                        Modifier.size(if (isCar) 28.dp else 24.dp),
-                        if (active) Color.White else TuneColors.Muted
-                    )
+                Crossfade(
+                    targetState = when {
+                        buffering -> PlayerButtonVisual.Buffering
+                        playing -> PlayerButtonVisual.Playing
+                        else -> PlayerButtonVisual.Idle
+                    },
+                    animationSpec = tween(180), label = "player_button_icon"
+                ) { visual ->
+                    when (visual) {
+                        PlayerButtonVisual.Buffering -> CircularProgressIndicator(
+                            Modifier.size(if (isCar) 28.dp else 24.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp,
+                            trackColor = Color.White.copy(alpha = .25f)
+                        )
+                        PlayerButtonVisual.Playing -> TuneIcon(
+                            R.drawable.ic_pause, Modifier.size(if (isCar) 26.dp else 22.dp),
+                            if (active) Color.White else TuneColors.Muted
+                        )
+                        PlayerButtonVisual.Idle -> TuneIcon(
+                            R.drawable.ic_play, Modifier.size(if (isCar) 26.dp else 22.dp),
+                            if (active) Color.White else TuneColors.Muted
+                        )
+                    }
                 }
             }
         }

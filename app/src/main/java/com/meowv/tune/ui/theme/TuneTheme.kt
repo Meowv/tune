@@ -17,10 +17,11 @@ object TuneColors {
     val Raised = Color(0xFF1B2540)
     val Primary = Color(0xFFA78BFA)
     val Accent = Color(0xFF8B5CF6)
-    val Text = Color(0xFFF8FAFC)
-    val Muted = Color(0xFFA9B4C8)
+    val Text = Color(0xFFF4F5FB)
+    val Muted = Color(0xFFA7B0C5)
     val Border = Color(0xFF2A3550)
-    val Divider = Color(0xFF2A3550)
+    val Divider = Color(0xFF202A40)
+    val Selected = Color(0xFF252442)
     val Player = Color(0xFF192137)
     val Live = Color(0xFF36D6AB)
     val Error = Color(0xFFF87171)
@@ -57,7 +58,7 @@ object TuneSpacing {
 
 object TuneShapes {
     val Control = RoundedCornerShape(12.dp)
-    val Station = RoundedCornerShape(14.dp)
+    val Station = RoundedCornerShape(18.dp)
     val Input = RoundedCornerShape(15.dp)
     val Navigation = RoundedCornerShape(16.dp)
     val Chip = RoundedCornerShape(18.dp)
