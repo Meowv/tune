@@ -33,6 +33,9 @@ import com.meowv.tune.domain.TuneFailure
 import com.meowv.tune.radio.CountryResolver
 import com.meowv.tune.radio.DirectoryRefresh
 import com.meowv.tune.radio.RadioViewModel
+import com.meowv.tune.update.LocalVersion
+import com.meowv.tune.update.UpdateChecker
+import com.meowv.tune.update.UpdateViewModel
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
@@ -62,6 +65,24 @@ class MainActivity : ComponentActivity() {
                     cache = tuneApp.directoryCache, queue = tuneApp.radioQueue, countryOptions = tuneApp::loadCountries)
             }
         }
+    }
+    private val updateModel by viewModels<UpdateViewModel> {
+        viewModelFactory {
+            initializer {
+                UpdateViewModel(tuneApp.updateRepository, UpdateChecker(), localVersion())
+            }
+        }
+    }
+
+    private fun localVersion(): LocalVersion {
+        val info = packageManager.getPackageInfo(packageName, 0)
+        return LocalVersion(
+            packageName = packageName,
+            versionName = info.versionName ?: BuildConfig.VERSION_NAME,
+            versionCode = info.longVersionCode,
+            sdkInt = Build.VERSION.SDK_INT,
+            channel = tuneApp.updateChannel
+        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -101,6 +122,7 @@ class MainActivity : ComponentActivity() {
             val storageError by settingsModel.storageError.collectAsStateWithLifecycle()
             val countries by radioModel.countries.collectAsStateWithLifecycle()
             val refresh by radioModel.refreshState.collectAsStateWithLifecycle()
+            val update by updateModel.state.collectAsStateWithLifecycle()
             TuneTheme {
                 TuneApp(
                     settings = settings ?: TuneSettings(),
@@ -110,6 +132,9 @@ class MainActivity : ComponentActivity() {
                     playbackConnected = tuneApp.playerController.connected,
                     snackbar = snackbar,
                     directoryRefreshing = refresh == DirectoryRefresh.Running,
+                    localVersion = updateModel.local,
+                    update = update,
+                    onCheckUpdate = updateModel::check,
                     onPlayback = ::dispatchPlayback,
                     onSelectTarget = radioModel::selectTarget,
                     onDisplayModeChange = { mode ->

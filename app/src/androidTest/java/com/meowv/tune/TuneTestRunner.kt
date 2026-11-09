@@ -18,6 +18,8 @@ import com.meowv.tune.settings.DataStoreSettingsRepository
 import com.meowv.tune.playback.PlaybackIntent
 import com.meowv.tune.playback.PlaybackRetryPolicy
 import com.meowv.tune.playback.ResolvedRadioStream
+import com.meowv.tune.update.UpdateInfo
+import com.meowv.tune.update.UpdateRepository
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CompletableDeferred
@@ -132,6 +134,25 @@ class TuneTestApplication : TuneApplication() {
     override val radioRepository: RadioRepository by lazy {
         if (liveRadio) super.radioRepository else fakeRepository
     }
+
+    // 版本检查在测试里走固定清单，避免真实网络影响用例时序。
+    override val updateRepository: UpdateRepository = object : UpdateRepository {
+        override suspend fun fetch(): UpdateInfo = testManifest
+    }
+
+    val testManifest = UpdateInfo(
+        packageName = "com.meowv.tune",
+        channel = "stable",
+        versionName = "1.1.0",
+        versionCode = 101,
+        minSdkVersion = 28,
+        releaseDate = "2026-11-15",
+        title = "MeowvTune 1.1.0",
+        releaseNotes = listOf("优化电台播放体验", "修复部分问题"),
+        apkUrl = "https://studio.meowv.com/data/meowvtune/1.1.0/MeowvTune-1.1.0.apk",
+        apkSizeBytes = 25_600_000,
+        apkSha256 = "a".repeat(64)
+    )
 
     private val fakeRepository: RadioRepository = object : RadioRepository {
         override suspend fun countries() = directory

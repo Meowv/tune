@@ -37,6 +37,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.meowv.tune.R
@@ -51,9 +52,11 @@ internal fun SettingsScreen(
     isCar: Boolean,
     settings: TuneSettings,
     refreshing: Boolean,
+    updateSubtitle: String,
     onSettingsChange: ((TuneSettings) -> TuneSettings) -> Unit,
     onRefreshDirectory: () -> Unit,
-    onClearDirectoryCache: () -> Unit
+    onClearDirectoryCache: () -> Unit,
+    onOpenUpdate: () -> Unit
 ) {
     var dialog by rememberSaveable { mutableStateOf(SettingsDialog.NONE) }
     LazyColumn(Modifier.fillMaxSize().testTag("page_settings"),
@@ -88,6 +91,14 @@ internal fun SettingsScreen(
                     R.drawable.ic_ui_check, R.string.setting_licenses, isCar,
                     trailing = { Chevron(isCar) },
                     onClick = { dialog = SettingsDialog.LICENSES }
+                )
+                SettingsDivider()
+                // 版本与更新：副标题跟随检查状态，入口只在设置页，不新增主菜单。
+                SettingRow(
+                    R.drawable.ic_update, R.string.setting_update, isCar,
+                    subtitle = updateSubtitle,
+                    trailing = { Chevron(isCar) },
+                    onClick = onOpenUpdate
                 )
             }
         }
@@ -154,6 +165,7 @@ private fun SettingRow(
     isCar: Boolean,
     checked: Boolean? = null,
     enabled: Boolean = true,
+    subtitle: String? = null,
     trailing: (@Composable () -> Unit)? = null,
     onClick: () -> Unit
 ) {
@@ -206,8 +218,21 @@ private fun SettingRow(
         Box(Modifier.size(40.dp).background(iconBackground, TuneShapes.Control), contentAlignment = Alignment.Center) {
             TuneIcon(resource, Modifier.size(22.dp), TuneColors.Primary.copy(alpha = contentAlpha))
         }
-        Text(stringResource(label), color = TuneColors.Text.copy(alpha = contentAlpha), fontSize = if (isCar) 17.sp else 15.sp, fontWeight = FontWeight.SemiBold,
-            style = TuneTextStyle, modifier = Modifier.weight(1f))
+        Column(Modifier.weight(1f)) {
+            Text(
+                stringResource(label), color = TuneColors.Text.copy(alpha = contentAlpha),
+                fontSize = if (isCar) 17.sp else 15.sp, fontWeight = FontWeight.SemiBold,
+                style = TuneTextStyle, maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
+            if (subtitle != null) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    subtitle, color = TuneColors.Muted.copy(alpha = contentAlpha),
+                    fontSize = if (isCar) 14.sp else 12.sp, style = TuneTextStyle,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
         if (checked != null) {
             ToggleSwitch(checked)
         } else {

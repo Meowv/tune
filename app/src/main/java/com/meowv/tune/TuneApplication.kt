@@ -28,6 +28,9 @@ import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import com.meowv.tune.settings.settingsRepository
+import com.meowv.tune.update.HttpUpdateRepository
+import com.meowv.tune.update.UpdateClient
+import com.meowv.tune.update.UpdateRepository
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.StateFlow
 import com.meowv.tune.domain.NetworkState
@@ -58,6 +61,19 @@ open class TuneApplication : Application(), SingletonImageLoader.Factory {
         directoryCache.loadCountries(force, remoteCountries::countries)
 
     internal open val radioRepository: RadioRepository by lazy { RadioBrowserRepository(countryDirectory, radioBrowser) }
+
+    // 版本检查只依赖一个 HTTPS 清单地址；地址与渠道来自构建配置，测试可整体替换。
+    internal open val updateRepository: UpdateRepository by lazy {
+        HttpUpdateRepository(
+            UpdateClient(appVersionName()),
+            BuildConfig.UPDATE_MANIFEST_URL
+        )
+    }
+
+    internal val updateChannel: String get() = BuildConfig.UPDATE_CHANNEL
+
+    internal fun appVersionName(): String =
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown"
 
     val radioQueue: RadioQueue by lazy { RadioQueueManager(radioRepository) }
 

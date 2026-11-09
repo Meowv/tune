@@ -2,6 +2,7 @@ package com.meowv.tune.ui
 
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -30,6 +31,8 @@ import com.meowv.tune.domain.TuneError
 import com.meowv.tune.domain.TuneSettings
 import com.meowv.tune.radio.CountryOptions
 import com.meowv.tune.ui.theme.TuneColors
+import com.meowv.tune.update.LocalVersion
+import com.meowv.tune.update.UpdateUiState
 import kotlinx.coroutines.flow.StateFlow
 
 @Composable
@@ -41,6 +44,9 @@ fun TuneApp(
     playbackConnected: StateFlow<Boolean>,
     snackbar: SnackbarHostState,
     directoryRefreshing: Boolean,
+    localVersion: LocalVersion,
+    update: UpdateUiState,
+    onCheckUpdate: () -> Unit,
     onPlayback: (PlayerCommand) -> Unit,
     onSelectTarget: (Station) -> Unit,
     onDisplayModeChange: (RadioDisplayMode) -> Unit,
@@ -59,7 +65,14 @@ fun TuneApp(
     val radioState by radio.collectAsStateWithLifecycle()
     var page by rememberSaveable { mutableStateOf(TunePage.Radio) }
     var showScopePicker by rememberSaveable { mutableStateOf(false) }
+    var showUpdate by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(showScopePicker) { if (showScopePicker) onLoadCountries(false) }
+    // 进入版本页时检查一次；重复进入由 ViewModel 的进行中判断挡住，不会叠加请求。
+    LaunchedEffect(showUpdate) { if (showUpdate) onCheckUpdate() }
+    // 首次打开设置页时补一次后台检查，让入口副标题能显示真实状态。
+    LaunchedEffect(page, update) {
+        if (page == TunePage.Settings && update is UpdateUiState.Idle) onCheckUpdate()
+    }
     val pageStates = rememberSaveableStateHolder()
     val errorText = playbackErrorText(playbackState.error, playbackState.statusCode)
     LaunchedEffect(playbackState.error) {
@@ -113,6 +126,7 @@ fun TuneApp(
             val windowWidth = maxWidth
             val isCar = isCarWindow(windowWidth.value, maxHeight.value)
             LaunchedEffect(isCar) { onShellChanged(isCar) }
+            val updateSubtitle = updateSubtitle(update, localVersion.versionName)
             Column(
                 Modifier.fillMaxSize()
                     .windowInsetsPadding(if (isCar) WindowInsets.displayCutout else WindowInsets.safeDrawing)
@@ -130,12 +144,28 @@ fun TuneApp(
                     Row(Modifier.weight(1f)) {
                         MeowvNavigationRail(page) { page = it }
                         Crossfade(page, Modifier.weight(1f).fillMaxHeight(), animationSpec = tween(220), label = "page_switch") { target ->
-                            Box(Modifier.fillMaxSize()) { pageContent(target, pageStates, isCar, settings, radio, playbackState, connected, directoryRefreshing, onPlayback, onSelectTarget, onDisplayModeChange, onSettingsChange, onRefreshRadio, onRefreshFromSettings, onLoadMore, onClearDirectoryCache, { showScopePicker = true }) }
+                            Box(Modifier.fillMaxSize()) {
+                                pageContent(
+                                    target, pageStates, isCar, settings, radio, playbackState, connected,
+                                    directoryRefreshing, updateSubtitle, onPlayback, onSelectTarget,
+                                    onDisplayModeChange, onSettingsChange, onRefreshRadio,
+                                    onRefreshFromSettings, onLoadMore, onClearDirectoryCache,
+                                    { showUpdate = true }, { showScopePicker = true }
+                                )
+                            }
                         }
                     }
                 } else {
                     Crossfade(page, Modifier.weight(1f).fillMaxWidth(), animationSpec = tween(220), label = "page_switch") { target ->
-                        Box(Modifier.fillMaxSize()) { pageContent(target, pageStates, isCar, settings, radio, playbackState, connected, directoryRefreshing, onPlayback, onSelectTarget, onDisplayModeChange, onSettingsChange, onRefreshRadio, onRefreshFromSettings, onLoadMore, onClearDirectoryCache, { showScopePicker = true }) }
+                        Box(Modifier.fillMaxSize()) {
+                            pageContent(
+                                target, pageStates, isCar, settings, radio, playbackState, connected,
+                                directoryRefreshing, updateSubtitle, onPlayback, onSelectTarget,
+                                onDisplayModeChange, onSettingsChange, onRefreshRadio,
+                                onRefreshFromSettings, onLoadMore, onClearDirectoryCache,
+                                { showUpdate = true }, { showScopePicker = true }
+                            )
+                        }
                     }
                 }
                 MeowvMiniPlayer(
@@ -161,6 +191,21 @@ fun TuneApp(
                 )
                 if (!isCar) MeowvNavigationBar(page) { page = it }
             }
+            // 版本页覆盖整个外壳（含播放器与导航），保持主菜单仍是三个。
+            if (showUpdate) {
+                UpdateScreen(
+                    isCar = isCar,
+                    local = localVersion,
+                    state = update,
+                    onBack = { showUpdate = false },
+                    onCheck = onCheckUpdate,
+                    modifier = Modifier.fillMaxSize()
+                        .background(TuneColors.Background)
+                        .windowInsetsPadding(
+                            if (isCar) WindowInsets.displayCutout else WindowInsets.safeDrawing
+                        )
+                )
+            }
             SnackbarHost(
                 snackbar,
                 // 让出系统栏高度后再按播放器/导航栏厚度上移，避免提示压在播放器上。
@@ -178,6 +223,20 @@ fun TuneApp(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun updateSubtitle(state: UpdateUiState, versionName: String): String {
+    val current = "v$versionName"
+    return when (state) {
+        UpdateUiState.Checking -> stringResource(R.string.update_subtitle_checking, current)
+        is UpdateUiState.UpToDate -> stringResource(R.string.update_subtitle_latest, current)
+        is UpdateUiState.UpdateAvailable ->
+            stringResource(R.string.update_subtitle_available, current, "v${state.info.versionName}")
+        is UpdateUiState.Error -> stringResource(R.string.update_subtitle_failed, current)
+        is UpdateUiState.Downgrade -> stringResource(R.string.update_subtitle_downgrade, current)
+        UpdateUiState.Idle -> stringResource(R.string.update_subtitle_idle, current)
     }
 }
 
@@ -207,6 +266,7 @@ private fun pageContent(
     playback: PlayerUiState,
     connected: Boolean,
     directoryRefreshing: Boolean,
+    updateSubtitle: String,
     onPlayback: (PlayerCommand) -> Unit,
     onSelectTarget: (Station) -> Unit,
     onDisplayModeChange: (RadioDisplayMode) -> Unit,
@@ -215,6 +275,7 @@ private fun pageContent(
     onRefreshFromSettings: () -> Unit,
     onLoadMore: () -> Unit,
     onClearDirectoryCache: () -> Unit,
+    onOpenUpdate: () -> Unit,
     onScopeClick: () -> Unit
 ) {
     pageStates.SaveableStateProvider(page) {
@@ -237,9 +298,11 @@ private fun pageContent(
                 isCar = isCar,
                 settings = settings,
                 refreshing = directoryRefreshing,
+                updateSubtitle = updateSubtitle,
                 onSettingsChange = onSettingsChange,
                 onRefreshDirectory = onRefreshFromSettings,
-                onClearDirectoryCache = onClearDirectoryCache
+                onClearDirectoryCache = onClearDirectoryCache,
+                onOpenUpdate = onOpenUpdate
             )
         }
     }

@@ -24,10 +24,15 @@ android {
         versionCode = 5
         versionName = "1.0.0"
         testInstrumentationRunner = "com.meowv.tune.TuneTestRunner"
+
+        // 版本清单地址与发布渠道属于客户端配置，换渠道/换域名只需改这两行。
+        buildConfigField("String", "UPDATE_MANIFEST_URL", "\"https://studio.meowv.com/data/meowvtune/stable.json\"")
+        buildConfigField("String", "UPDATE_CHANNEL", "\"stable\"")
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     compileOptions {
