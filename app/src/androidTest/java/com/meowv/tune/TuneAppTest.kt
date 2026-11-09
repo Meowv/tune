@@ -52,7 +52,10 @@ class TuneAppTest {
         awaitCompose()
         app.mockNetwork.value = NetworkState(NetworkType.WIFI, metered = false)
         runBlocking {
-            app.userSettings.update { TuneSettings(scope = RadioScope(ScopeMode.GLOBAL)) }
+            // 相邻台站断言依赖顺序模式；随机默认值由专门用例覆盖。
+            app.userSettings.update {
+                TuneSettings(scope = RadioScope(ScopeMode.GLOBAL), playbackOrder = PlaybackOrder.SEQUENTIAL)
+            }
         }
         compose.onNodeWithTag("station_list").performScrollToIndex(0)
         awaitScope("收听范围，不限区域，切换地区")
@@ -130,8 +133,33 @@ class TuneAppTest {
     }
 
     @Test
-    fun shuffleTogglePersistsAndSwipesToAnotherStation() {
+    fun orderDefaultsToShuffleAndTogglePersists() {
         compose.waitUntil(5000) { app.playerController.connected.value }
+        runBlocking { app.userSettings.update { TuneSettings(scope = RadioScope(ScopeMode.GLOBAL)) } }
+        compose.waitUntil(3000) { order() == PlaybackOrder.SHUFFLE }
+        compose.waitUntil(3000) {
+            compose.onAllNodesWithContentDescription("随机播放").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("player_order").assertContentDescriptionEquals("随机播放").performClick()
+        compose.waitUntil(3000) { order() == PlaybackOrder.SEQUENTIAL }
+        compose.waitUntil(3000) {
+            compose.onAllNodesWithContentDescription("顺序播放").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("player_order").assertContentDescriptionEquals("顺序播放")
+
+        compose.activityRule.scenario.recreate()
+        compose.waitUntil(5000) { app.playerController.connected.value }
+        compose.waitUntil(5000) { order() == PlaybackOrder.SEQUENTIAL }
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithContentDescription("顺序播放").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("player_order").assertContentDescriptionEquals("顺序播放")
+    }
+
+    @Test
+    fun shuffleSwipePlaysAnotherStation() {
+        compose.waitUntil(5000) { app.playerController.connected.value }
+        runBlocking { app.userSettings.update { it.copy(playbackOrder = PlaybackOrder.SHUFFLE) } }
         val first = "station_${UUID(0, 1)}"
         compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(first))
         compose.onNodeWithTag(first).performClick()
@@ -140,20 +168,11 @@ class TuneAppTest {
                 app.playerController.state.value.phase == PlaybackPhase.PLAYING
         }
 
-        compose.onNodeWithTag("player_order").assertContentDescriptionEquals("顺序播放").performClick()
-        compose.waitUntil(3000) { order() == PlaybackOrder.SHUFFLE }
-        compose.onNodeWithTag("player_order").assertContentDescriptionEquals("随机播放")
-
         compose.onNodeWithTag("player_info").performTouchInput { swipeLeft() }
         compose.waitUntil(8000) {
             val state = app.playerController.state.value
             state.station?.uuid != UUID(0, 1) && state.phase == PlaybackPhase.PLAYING
         }
-
-        compose.activityRule.scenario.recreate()
-        compose.waitUntil(5000) { app.playerController.connected.value }
-        compose.waitUntil(5000) { order() == PlaybackOrder.SHUFFLE }
-        compose.onNodeWithTag("player_order").assertContentDescriptionEquals("随机播放")
         runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
     }
 

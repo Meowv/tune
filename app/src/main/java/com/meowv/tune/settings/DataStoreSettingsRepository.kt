@@ -66,7 +66,7 @@ internal class DataStoreSettingsRepository(private val store: DataStore<Preferen
             displayMode = RadioDisplayMode.entries.firstOrNull { it.name == prefs.read(DisplayMode) }
                 ?: RadioDisplayMode.LIST,
             playbackOrder = PlaybackOrder.entries.firstOrNull { it.name == prefs.read(Order) }
-                ?: PlaybackOrder.SEQUENTIAL
+                ?: PlaybackOrder.SHUFFLE
         )
     }
 

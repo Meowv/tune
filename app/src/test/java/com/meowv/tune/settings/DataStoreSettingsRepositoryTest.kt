@@ -25,12 +25,13 @@ class DataStoreSettingsRepositoryTest {
         val uuid = UUID.randomUUID()
         open(file) { repository ->
             assertEquals(TuneSettings(), repository.settings.first())
+            assertEquals(PlaybackOrder.SHUFFLE, repository.settings.first().playbackOrder)
             coroutineScope {
                 launch(Dispatchers.Default) { repository.update { it.copy(scope = japan) } }
                 launch(Dispatchers.Default) { repository.update { it.copy(autoPlay = true) } }
                 launch(Dispatchers.Default) {
                     repository.update {
-                        it.copy(displayMode = RadioDisplayMode.CARD, playbackOrder = PlaybackOrder.SHUFFLE)
+                        it.copy(displayMode = RadioDisplayMode.CARD, playbackOrder = PlaybackOrder.SEQUENTIAL)
                     }
                 }
             }
@@ -40,7 +41,7 @@ class DataStoreSettingsRepositoryTest {
             assertEquals(
                 TuneSettings(
                     scope = japan, autoPlay = true, lastSuccessfulStation = uuid,
-                    displayMode = RadioDisplayMode.CARD, playbackOrder = PlaybackOrder.SHUFFLE
+                    displayMode = RadioDisplayMode.CARD, playbackOrder = PlaybackOrder.SEQUENTIAL
                 ),
                 repository.settings.first()
             )
@@ -53,7 +54,7 @@ class DataStoreSettingsRepositoryTest {
             assertNull(settings.lastSuccessfulStation)
             assertEquals(ScopeMode.GLOBAL, settings.scope.mode)
             assertEquals(RadioDisplayMode.CARD, settings.displayMode)
-            assertEquals(PlaybackOrder.SHUFFLE, settings.playbackOrder)
+            assertEquals(PlaybackOrder.SEQUENTIAL, settings.playbackOrder)
             repository.update { it.copy(autoPlay = true, lastSuccessfulStation = uuid) }
             assertNull(repository.settings.first().lastSuccessfulStation)
         }
