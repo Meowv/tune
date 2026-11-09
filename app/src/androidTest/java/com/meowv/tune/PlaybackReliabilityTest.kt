@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.meowv.tune.domain.PlaybackOrder
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.NetworkState
 import com.meowv.tune.domain.NetworkType
@@ -152,7 +153,9 @@ class PlaybackReliabilityTest {
         nextOffset: Int? = null,
         block: suspend () -> Unit
     ) {
-        app.userSettings.update { it.copy(scope = RadioScope(ScopeMode.COUNTRY, app.country)) }
+        app.userSettings.update {
+            it.copy(scope = RadioScope(ScopeMode.COUNTRY, app.country), playbackOrder = PlaybackOrder.SEQUENTIAL)
+        }
         app.resolveCalls.clear()
         app.resolveFailures.clear()
         app.latePlaybackDelays.clear()

@@ -5,6 +5,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.meowv.tune.domain.CountryCode
+import com.meowv.tune.domain.PlaybackOrder
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.domain.RadioScope
@@ -129,7 +130,9 @@ class RadioQueueIntegrationTest {
     }
 
     private suspend fun launchReady(block: suspend () -> Unit) {
-        app.userSettings.update { it.copy(scope = RadioScope(ScopeMode.COUNTRY, app.country)) }
+        app.userSettings.update {
+            it.copy(scope = RadioScope(ScopeMode.COUNTRY, app.country), playbackOrder = PlaybackOrder.SEQUENTIAL)
+        }
         // 同进程其他用例可能留下故障注入或延迟，先清空再进入用例。
         app.resolveFailures.clear()
         app.playbackDelays.clear()

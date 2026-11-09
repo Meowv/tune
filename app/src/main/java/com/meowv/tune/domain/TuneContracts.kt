@@ -19,6 +19,10 @@ interface RadioQueue {
     val canNext: StateFlow<Boolean>
     val activeScope: StateFlow<ResolvedRadioScope?>
 
+    // 用户选择的播放顺序：随机模式下 next/previous 都随机取台，且只要存在当前台就允许返回；
+    // 顺序模式沿用列表与历史。
+    fun setPlaybackOrder(order: PlaybackOrder)
+
     fun updateDirectory(scope: ResolvedRadioScope, page: StationPage)
     fun clearScope()
     fun select(scope: ResolvedRadioScope, uuid: UUID): QueueSelection?

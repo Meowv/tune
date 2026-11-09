@@ -38,7 +38,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -89,6 +91,10 @@ internal class RadioPlayback(
         }
         scope.launch {
             network.collect(::reactToNetworkChange)
+        }
+        // 顺序/随机同时决定队列的 next/previous 取台方式与可返回能力，设置变化即时同步。
+        scope.launch {
+            settings.settings.map { it.playbackOrder }.distinctUntilChanged().collect(queue::setPlaybackOrder)
         }
     }
 
@@ -224,6 +230,7 @@ internal class RadioPlayback(
                 resolveAndPlay(next, PlaybackPhase.RESOLVING)
             }
             Command.Next -> {
+                syncPlaybackOrder()
                 val activeScope = queue.activeScope.value ?: run {
                     fail(TuneError.PLAYBACK)
                     return
@@ -241,6 +248,7 @@ internal class RadioPlayback(
                 resolveAndPlay(next, PlaybackPhase.RESOLVING)
             }
             Command.Previous -> {
+                syncPlaybackOrder()
                 // 系统媒体键不感知按钮启用状态，无可返回项时保持当前播放而不报错。
                 val activeScope = queue.activeScope.value ?: return
                 val next = queue.previous(activeScope) ?: return
@@ -255,6 +263,11 @@ internal class RadioPlayback(
                 resolveAndPlay(next, PlaybackPhase.RESOLVING)
             }
         }
+    }
+
+    // 命令到达时再读一次设置，避免设置流首次发射晚于用户第一次切台。
+    private suspend fun syncPlaybackOrder() {
+        queue.setPlaybackOrder(settings.settings.first().playbackOrder)
     }
 
     private suspend fun togglePlayback() {

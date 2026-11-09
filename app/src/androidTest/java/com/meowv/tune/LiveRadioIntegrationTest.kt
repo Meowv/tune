@@ -5,6 +5,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.meowv.tune.domain.CountryCode
+import com.meowv.tune.domain.PlaybackOrder
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.domain.RadioScope
@@ -41,7 +42,12 @@ class LiveRadioIntegrationTest {
         assumeTrue("需要 -e liveRadio true", app.liveRadio)
         val batch = InstrumentationRegistry.getArguments().getString("batch")?.toIntOrNull() ?: 0
         val batchSize = InstrumentationRegistry.getArguments().getString("batchSize")?.toIntOrNull() ?: 10
-        app.userSettings.update { TuneSettings(scope = RadioScope(ScopeMode.COUNTRY, country("DE"))) }
+        app.userSettings.update {
+            TuneSettings(
+                scope = RadioScope(ScopeMode.COUNTRY, country("DE")),
+                playbackOrder = PlaybackOrder.SEQUENTIAL
+            )
+        }
 
         if (batch == 0) {
             val coldMs = measureFirstScreen(clearCache = true)
@@ -97,7 +103,12 @@ class LiveRadioIntegrationTest {
     fun liveQueueRulesOnRealData() = runBlocking {
         println("LIVE args=" + InstrumentationRegistry.getArguments().keySet() + " live=" + app.liveRadio)
         assumeTrue("需要 -e liveRadio true", app.liveRadio)
-        app.userSettings.update { TuneSettings(scope = RadioScope(ScopeMode.COUNTRY, country("DE"))) }
+        app.userSettings.update {
+            TuneSettings(
+                scope = RadioScope(ScopeMode.COUNTRY, country("DE")),
+                playbackOrder = PlaybackOrder.SEQUENTIAL
+            )
+        }
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             withTimeout(10_000) { connection.connected.first { it } }
             val scope = withTimeout(15_000) { app.radioQueue.activeScope.first { it != null } }!!

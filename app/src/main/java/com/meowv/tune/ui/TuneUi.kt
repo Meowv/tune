@@ -74,26 +74,23 @@ fun TuneApp(
         val index = list.indexOfFirst { it.uuid == target?.uuid }
         if (index < 0) null else list.getOrNull(index + offset)
     }
-    // 随机模式不按列表顺序，左右滑动都从当前范围随机取一台，并排除正在播放的台。
+    // 播放中的切台统一交给播放队列按当前顺序处理，底栏与系统媒体键走同一条路径；
+    // 暂停/空闲只换目标不起播，随机模式从当前范围随机取一台，并排除正在播放的台。
     val randomTarget: () -> Station? = {
         radioState.stations.filter { it.uuid != target?.uuid }.randomOrNull()
     }
     val next: () -> Unit = {
         when {
-            shuffle -> randomTarget()?.let { station ->
-                if (paused || idle) onSelectTarget(station) else onPlayback(PlayerCommand.Play(station))
-            }
-            paused || idle -> adjacent(1)?.let(onSelectTarget)
-            else -> onPlayback(PlayerCommand.Next)
+            !paused && !idle -> onPlayback(PlayerCommand.Next)
+            shuffle -> randomTarget()?.let(onSelectTarget)
+            else -> adjacent(1)?.let(onSelectTarget)
         }
     }
     val previous: () -> Unit = {
         when {
-            shuffle -> randomTarget()?.let { station ->
-                if (paused || idle) onSelectTarget(station) else onPlayback(PlayerCommand.Play(station))
-            }
-            paused || idle -> adjacent(-1)?.let(onSelectTarget)
-            else -> onPlayback(PlayerCommand.Previous)
+            !paused && !idle -> onPlayback(PlayerCommand.Previous)
+            shuffle -> randomTarget()?.let(onSelectTarget)
+            else -> adjacent(-1)?.let(onSelectTarget)
         }
     }
     val toggle: () -> Unit = {

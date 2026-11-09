@@ -12,6 +12,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.google.common.util.concurrent.ListenableFuture
+import com.meowv.tune.domain.PlaybackOrder
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.domain.RadioScope
@@ -42,7 +43,9 @@ class MediaSessionControlTest {
 
     @Before
     fun prepareQueue() = runBlocking<Unit> {
-        app.userSettings.update { it.copy(scope = RadioScope(ScopeMode.COUNTRY, app.country)) }
+        app.userSettings.update {
+            it.copy(scope = RadioScope(ScopeMode.COUNTRY, app.country), playbackOrder = PlaybackOrder.SEQUENTIAL)
+        }
     }
 
     @After
@@ -80,6 +83,35 @@ class MediaSessionControlTest {
 
             onMain { media.seekToPreviousMediaItem() }
             awaitStation(1)
+        }
+    }
+
+    @Test fun systemNextAndPreviousFollowShuffleOrder() = runBlocking {
+        app.userSettings.update { it.copy(playbackOrder = PlaybackOrder.SHUFFLE) }
+        try {
+            withPlayer {
+                playStation(1)
+                val media = connect()
+                // 随机模式下有当前台即可返回，同时确认顺序已同步到播放队列。
+                withTimeout(3000) { app.radioQueue.canPrevious.first { it } }
+
+                onMain { media.seekToNextMediaItem() }
+                val next = withTimeout(8000) {
+                    connection.state.first {
+                        it.phase == PlaybackPhase.PLAYING && it.station?.uuid != UUID(0, 1)
+                    }
+                }
+                assertTrue("随机下一台必须留在当前目录", next.station?.uuid == UUID(0, 2) || next.station?.uuid == UUID(0, 3))
+
+                onMain { media.seekToPreviousMediaItem() }
+                withTimeout(8000) {
+                    connection.state.first {
+                        it.phase == PlaybackPhase.PLAYING && it.station?.uuid != next.station?.uuid
+                    }
+                }
+            }
+        } finally {
+            app.userSettings.update { it.copy(playbackOrder = PlaybackOrder.SEQUENTIAL) }
         }
     }
 

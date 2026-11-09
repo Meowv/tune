@@ -167,6 +167,8 @@ class TuneAppTest {
             app.playerController.state.value.station?.uuid == UUID(0, 1) &&
                 app.playerController.state.value.phase == PlaybackPhase.PLAYING
         }
+        // 随机模式下有当前台即可返回，借此确认设置已同步到播放队列再滑动。
+        compose.waitUntil(3000) { app.radioQueue.canPrevious.value }
 
         compose.onNodeWithTag("player_info").performTouchInput { swipeLeft() }
         compose.waitUntil(8000) {

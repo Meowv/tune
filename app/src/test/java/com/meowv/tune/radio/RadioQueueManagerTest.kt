@@ -1,6 +1,7 @@
 package com.meowv.tune.radio
 
 import com.meowv.tune.domain.CountryCode
+import com.meowv.tune.domain.PlaybackOrder
 import com.meowv.tune.domain.RadioScope
 import com.meowv.tune.domain.ResolvedRadioScope
 import com.meowv.tune.domain.ScopeMode
@@ -11,6 +12,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -104,6 +106,39 @@ class RadioQueueManagerTest {
         assertTrue(queue.recordSuccessfulPlayback(repeatedOutsideWindow))
         assertEquals(newStation, queue.next(global, null)?.station)
         assertEquals(1, calls)
+    }
+
+    @Test fun shuffleModeRandomizesBothDirectionsAndRestoresHistoryWhenSwitchingBack() = runBlocking {
+        val stations = (1L..6L).map { testStation(it) }
+        val queue = RadioQueueManager(StubRadioRepository())
+        queue.updateDirectory(japan, StationPage(stations))
+        assertTrue(queue.recordSuccessfulPlayback(requireNotNull(queue.select(japan, stations.first().uuid))))
+        assertFalse("顺序模式没有历史时不可返回", queue.canPrevious.value)
+
+        queue.setPlaybackOrder(PlaybackOrder.SHUFFLE)
+        assertTrue("随机模式有当前台即可返回", queue.canPrevious.value)
+
+        val next = requireNotNull(queue.next(japan, null))
+        assertNotEquals(stations.first(), next.station)
+        assertTrue(queue.recordSuccessfulPlayback(next))
+
+        val previous = requireNotNull(queue.previous(japan))
+        assertNotEquals(next.station, previous.station)
+        assertTrue(queue.recordSuccessfulPlayback(previous))
+
+        queue.setPlaybackOrder(PlaybackOrder.SEQUENTIAL)
+        assertEquals("切回顺序后按历史返回", next.station, queue.previous(japan)?.station)
+    }
+
+    @Test fun shuffleModeWithSingleStationReplaysIt() = runBlocking {
+        val only = testStation(1)
+        val queue = RadioQueueManager(StubRadioRepository())
+        queue.setPlaybackOrder(PlaybackOrder.SHUFFLE)
+        queue.updateDirectory(japan, StationPage(listOf(only)))
+        assertTrue(queue.recordSuccessfulPlayback(requireNotNull(queue.select(japan, only.uuid))))
+        assertTrue(queue.canPrevious.value)
+        assertEquals(only, requireNotNull(queue.next(japan, null)).station)
+        assertEquals(only, requireNotNull(queue.previous(japan)).station)
     }
 
     @Test fun scopeChangeClearsHistoryAndIgnoresLatePageEvenAfterReturningToSameScope() = runBlocking {

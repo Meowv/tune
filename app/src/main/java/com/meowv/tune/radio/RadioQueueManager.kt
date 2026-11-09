@@ -1,5 +1,6 @@
 package com.meowv.tune.radio
 
+import com.meowv.tune.domain.PlaybackOrder
 import com.meowv.tune.domain.QueueSelection
 import com.meowv.tune.domain.RadioQueue
 import com.meowv.tune.domain.RadioRepository
@@ -17,12 +18,22 @@ import kotlinx.coroutines.sync.withLock
 class RadioQueueManager(private val repository: RadioRepository) : RadioQueue {
     private val stateLock = Any()
     private var session: Session? = null
+    // 实际顺序由播放引擎按用户设置同步，这里只作为引擎就绪前的初始值。
+    private var order = PlaybackOrder.SEQUENTIAL
     private val previousAvailable = MutableStateFlow(false)
     private val nextAvailable = MutableStateFlow(false)
     private val currentScope = MutableStateFlow<ResolvedRadioScope?>(null)
     override val canPrevious = previousAvailable.asStateFlow()
     override val canNext = nextAvailable.asStateFlow()
     override val activeScope = currentScope.asStateFlow()
+
+    override fun setPlaybackOrder(order: PlaybackOrder) {
+        synchronized(stateLock) {
+            if (this.order == order) return
+            this.order = order
+            refreshAvailability(session)
+        }
+    }
 
     override fun clearScope() {
         synchronized(stateLock) {
@@ -48,7 +59,7 @@ class RadioQueueManager(private val repository: RadioRepository) : RadioQueue {
                 active.page = filtered
                 if (scope.country == null) active.preview = filtered.stations
             }
-            nextAvailable.value = active.page.stations.isNotEmpty()
+            refreshAvailability(active)
         }
     }
 
@@ -70,6 +81,10 @@ class RadioQueueManager(private val repository: RadioRepository) : RadioQueue {
 
     override fun previous(scope: ResolvedRadioScope): QueueSelection? = synchronized(stateLock) {
         val active = session?.takeIf { it.scope == scope } ?: return@synchronized null
+        if (order == PlaybackOrder.SHUFFLE) {
+            val station = pickShuffle(active, active.current?.uuid) ?: return@synchronized null
+            return@synchronized active.select(station)
+        }
         val station = active.history.lastOrNull() ?: return@synchronized null
         active.select(station, fromHistory = true)
     }
@@ -86,13 +101,20 @@ class RadioQueueManager(private val repository: RadioRepository) : RadioQueue {
                     cursor = cursor ?: active.current?.uuid,
                     page = active.page,
                     preview = active.preview.also { active.preview = emptyList() },
-                    excluded = active.recent.toSet() + listOfNotNull(cursor, active.current?.uuid)
+                    excluded = active.recent.toSet() + listOfNotNull(cursor, active.current?.uuid),
+                    shuffle = order == PlaybackOrder.SHUFFLE
                 )
             }
             val country = scope.country
             if (country == null) {
                 active.random.offer(request.preview)
                 val station = active.random.take(request.excluded)
+                currentCoroutineContext().ensureActive()
+                synchronized(stateLock) {
+                    if (!isCurrent(active, request)) null else station?.let { active.select(it) }
+                }
+            } else if (request.shuffle) {
+                val station = synchronized(stateLock) { pickShuffle(active, request.cursor) }
                 currentCoroutineContext().ensureActive()
                 synchronized(stateLock) {
                     if (!isCurrent(active, request)) null else station?.let { active.select(it) }
@@ -122,12 +144,11 @@ class RadioQueueManager(private val repository: RadioRepository) : RadioQueue {
         if (pending.fromHistory) active.history.removeLast()
         else active.current?.takeIf { it.uuid != station.uuid }?.let(active.history::addLast)
         active.current = station
-        if (active.scope.country == null) {
-            active.recent.remove(station.uuid)
-            active.recent.addLast(station.uuid)
-            if (active.recent.size > RECENT_LIMIT) active.recent.removeFirst()
-        }
-        previousAvailable.value = active.history.isNotEmpty()
+        // 随机模式用最近记录避开刚播过的台，顺序模式不读它。
+        active.recent.remove(station.uuid)
+        active.recent.addLast(station.uuid)
+        if (active.recent.size > RECENT_LIMIT) active.recent.removeFirst()
+        refreshAvailability(active)
         true
     }
 
@@ -136,6 +157,25 @@ class RadioQueueManager(private val repository: RadioRepository) : RadioQueue {
 
     private fun after(page: StationPage, cursor: UUID?): Station? =
         page.stations.getOrNull(page.stations.indexOfFirst { it.uuid == cursor } + 1)
+
+    // 先避开当前台与最近播放，候选耗尽后退回“非当前台”，单台目录则重播自己。
+    private fun pickShuffle(active: Session, cursor: UUID?): Station? {
+        val stations = active.page.stations
+        val recent = active.recent.toSet()
+        val fresh = stations.filter { it.uuid != cursor && it.uuid !in recent }
+        val others = stations.filter { it.uuid != cursor }
+        return (fresh.ifEmpty { others }.ifEmpty { stations }).randomOrNull()
+    }
+
+    private fun refreshAvailability(active: Session?) {
+        val stations = active?.page?.stations.orEmpty()
+        nextAvailable.value = stations.isNotEmpty()
+        previousAvailable.value = when {
+            active == null -> false
+            order == PlaybackOrder.SHUFFLE -> active.current != null && stations.isNotEmpty()
+            else -> active.history.isNotEmpty()
+        }
+    }
 
     private inner class Session(val scope: ResolvedRadioScope) {
         var page = StationPage(nextOffset = if (scope.country != null) 0 else null)
@@ -161,7 +201,8 @@ class RadioQueueManager(private val repository: RadioRepository) : RadioQueue {
         val cursor: UUID?,
         val page: StationPage,
         val preview: List<Station>,
-        val excluded: Set<UUID>
+        val excluded: Set<UUID>,
+        val shuffle: Boolean
     )
 
     private companion object {

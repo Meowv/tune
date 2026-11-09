@@ -306,9 +306,9 @@ internal fun MeowvMiniPlayer(
     val thresholdPx = with(LocalDensity.current) { 64.dp.toPx() }
     val currentNext by rememberUpdatedState(onNext)
     val currentPrevious by rememberUpdatedState(onPrevious)
-    // 随机模式下左右滑动始终可用，由上层随机取台；顺序模式才受队列边界限制。
-    val currentCanNext by rememberUpdatedState(if (shuffle) station != null else state.canNext)
-    val currentCanPrevious by rememberUpdatedState(if (shuffle) station != null else state.canPrevious)
+    // 可切台能力由播放队列按当前顺序给出（随机模式下有当前台即可返回）。
+    val currentCanNext by rememberUpdatedState(state.canNext)
+    val currentCanPrevious by rememberUpdatedState(state.canPrevious)
     val name = station?.name?.ifBlank { stringResource(R.string.station_unnamed) }
         ?: stringResource(R.string.player_unselected)
     val pauseLabel = stringResource(R.string.action_pause)
