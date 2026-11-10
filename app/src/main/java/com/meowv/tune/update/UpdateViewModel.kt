@@ -280,6 +280,7 @@ class UpdateViewModel internal constructor(
     }
 
     private companion object {
-        const val POLL_INTERVAL_MS = 800L
+        // 进度条不需要 800ms 粒度；放慢一半减少 DownloadManager 的跨进程查询与重组。
+        const val POLL_INTERVAL_MS = 1500L
     }
 }

@@ -48,7 +48,6 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.meowv.tune.R
 import com.meowv.tune.domain.*
 import com.meowv.tune.radio.CountryOptions
@@ -60,14 +59,12 @@ import com.meowv.tune.ui.theme.TuneTextStyle
 import kotlinx.coroutines.delay
 import java.text.Collator
 import java.util.Locale
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 
 @Composable
 internal fun RadioScreen(
     isCar: Boolean,
-    radio: StateFlow<RadioUiState>,
+    state: RadioUiState,
     playback: PlayerUiState,
     connected: Boolean,
     displayMode: RadioDisplayMode,
@@ -78,7 +75,6 @@ internal fun RadioScreen(
     onRefresh: () -> Unit,
     onScopeClick: () -> Unit
 ) {
-    val state by radio.collectAsStateWithLifecycle()
     key(state.scope, state.resolvedCountryCode) {
         RadioDirectory(
             isCar, state, playback, connected, displayMode, onDisplayModeChange,
@@ -153,13 +149,16 @@ private fun StationList(
     onRefresh: () -> Unit
 ) {
     val loadMore by rememberUpdatedState(onLoadMore)
-    LaunchedEffect(listState, state.stations.size, state.hasMore, state.isLoading, state.error) {
-        if (state.hasMore && !state.isLoading && state.error == null) {
-            snapshotFlow {
-                val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-                last > 0 && last >= state.stations.size - 3
-            }.filter { it }.collect { loadMore() }
-        }
+    val stationsSize by rememberUpdatedState(state.stations.size)
+    val hasMore by rememberUpdatedState(state.hasMore)
+    val loading by rememberUpdatedState(state.isLoading)
+    val error by rememberUpdatedState(state.error)
+    // 只启动一次：分页完成不应重启 snapshotFlow，否则短列表会在底部连续触发多页。
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            hasMore && !loading && error == null && last > 0 && last >= stationsSize - 3
+        }.filter { it }.collect { loadMore() }
     }
     // 列表始终存在（用例与滚动位置都依赖它）；首次加载/切换区域时在内容区正中叠一个状态位。
     Box(Modifier.fillMaxSize()) {
@@ -229,8 +228,7 @@ private fun StationRow(
     val title = station.name.ifBlank { stringResource(R.string.station_unnamed) }
     val isCurrent = playback.station?.uuid == station.uuid
     val phase = playback.phase
-    val buffering = isCurrent &&
-        phase in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING, PlaybackPhase.BUFFERING)
+    val buffering = isCurrent && phase in BufferingPhases
     val playing = isCurrent && phase == PlaybackPhase.PLAYING
     // 整行与右侧播放键共用同一个动作，子按钮消费点击，不会重复触发：
     // 当前台是暂停/继续，其他台是换台起播。连接/缓冲中重复点击只会把正在起播的流推倒重来，一并禁用。
@@ -377,12 +375,7 @@ private fun CardMode(
     val currentOnPlayback by rememberUpdatedState(onPlayback)
     val currentOnSelectTarget by rememberUpdatedState(onSelectTarget)
     // 播放中（含连接/缓冲/重试）滑动后自动续播；暂停或空闲只换目标，不主动起播。
-    val currentPlaying by rememberUpdatedState(
-        playback.phase in setOf(
-            PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING,
-            PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING
-        )
-    )
+    val currentPlaying by rememberUpdatedState(playback.phase in ActivePhases)
     LaunchedEffect(pagerState.settledPage) {
         val page = pagerState.settledPage
         val station = queue.getOrNull(page) ?: return@LaunchedEffect
@@ -764,3 +757,8 @@ private fun ScopeOption(tag: String, label: String, selected: Boolean, onSelect:
 }
 
 private const val CARD_AUTOPLAY_DEBOUNCE_MS = 300L
+
+private val BufferingPhases = setOf(PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING, PlaybackPhase.BUFFERING)
+private val ActivePhases = setOf(
+    PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING, PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING
+)

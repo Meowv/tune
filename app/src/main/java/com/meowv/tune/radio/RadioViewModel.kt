@@ -91,7 +91,7 @@ class RadioViewModel(
     fun loadCountries(force: Boolean = false) {
         if (optionsLoad?.isActive == true) return
         options.value = options.value.copy(isLoading = true, failed = false)
-        optionsLoad = viewModelScope.launch {
+        optionsLoad = viewModelScope.launch(Dispatchers.Default) {
             options.value = try {
                 val result = countryOptions(force)
                 ensureActive()
@@ -177,7 +177,8 @@ class RadioViewModel(
 
     private fun startLoad(block: suspend CoroutineScope.() -> Unit) {
         directory.value = directory.value.copy(isLoading = true, error = null)
-        load = viewModelScope.launch {
+        // 目录请求的 JSON 解析与列表映射都在这条协程里，放到 Default 避免占用主线程。
+        load = viewModelScope.launch(Dispatchers.Default) {
             try {
                 block()
             } catch (failure: TuneFailure) {

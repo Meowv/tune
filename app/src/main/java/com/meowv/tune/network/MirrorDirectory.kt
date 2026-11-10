@@ -57,8 +57,9 @@ internal class MirrorDirectory(
             }
             val discovered = withTimeoutOrNull(DISCOVERY_TIMEOUT) { discover() }.orEmpty()
             val initial = (listOfNotNull(lastGood) + discovered + pool + seeds).distinct()
+            // 已有可用节点时跳过服务器列表请求：发现结果够用，省掉一次最长 2s 的串行等待。
             // 每个刷新周期最多请求两个节点的服务器列表，元数据失败不阻断目录请求。
-            val reported = initial.take(2).firstNotNullOfOrNull { host ->
+            val reported = if (lastGood != null) emptyList() else initial.take(2).firstNotNullOfOrNull { host ->
                 try {
                     parseServers(serverList(host)).takeIf { it.isNotEmpty() }
                 } catch (_: TuneFailure) {

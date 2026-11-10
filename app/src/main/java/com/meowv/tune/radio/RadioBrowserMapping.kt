@@ -11,6 +11,9 @@ import kotlinx.serialization.json.*
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 internal object RadioBrowserMapping {
+    // 目录每页几十条，Regex 提到常量避免每条 station 都重新编译 pattern。
+    private val CONTROL_CHARS = Regex("[\\p{Cc}\\p{Cf}\\p{Z}]+")
+
     fun countries(body: String): List<RadioCountry> = rows(body).mapNotNull { row ->
         val item = row as? JsonObject ?: return@mapNotNull null
         val code = CountryCode.parse(item.text("name")) ?: return@mapNotNull null
@@ -46,7 +49,7 @@ internal object RadioBrowserMapping {
     }
 
     private fun cleanName(name: String): String = name
-        .replace(Regex("[\\p{Cc}\\p{Cf}\\p{Z}]+"), " ").trim().take(200)
+        .replace(CONTROL_CHARS, " ").trim().take(200)
 
     private fun safeIcon(value: String?): String? = value?.toHttpUrlOrNull()?.takeIf {
         it.isHttps && it.username.isEmpty() && it.password.isEmpty()

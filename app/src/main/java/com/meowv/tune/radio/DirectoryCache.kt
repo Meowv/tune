@@ -11,6 +11,7 @@ import com.meowv.tune.domain.StationPage
 import com.meowv.tune.domain.TuneError
 import com.meowv.tune.domain.TuneFailure
 import java.io.IOException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -38,7 +39,11 @@ class DirectoryCache internal constructor(
             try {
                 val cached = previous?.let {
                     try {
-                        DirectoryValue(RadioBrowserMapping.countries(it.body), it.stale(COUNTRY_TTL))
+                        // 快照最多 256KB，JSON 解析放到 Default，避免冷启动卡首帧。
+                        val countries = withContext(Dispatchers.Default) {
+                            RadioBrowserMapping.countries(it.body)
+                        }
+                        DirectoryValue(countries, it.stale(COUNTRY_TTL))
                     } catch (_: TuneFailure) {
                         null
                     }
@@ -50,12 +55,7 @@ class DirectoryCache internal constructor(
                     if (cached == null || !mutex.withLock { writes[COUNTRIES] === ticket }) throw failure
                     return@withLock cached.copy(stale = true, error = failure.kind)
                 }
-                val body = JsonArray(countries.map {
-                    buildJsonObject {
-                        put("name", it.code.value)
-                        put("stationcount", it.stationCount)
-                    }
-                }).toString()
+                val body = withContext(Dispatchers.Default) { encodeCountries(countries) }
                 save(COUNTRIES, ticket, body)
                 DirectoryValue(countries, false)
             } finally {
@@ -66,13 +66,10 @@ class DirectoryCache internal constructor(
     suspend fun stations(scope: ResolvedRadioScope): DirectoryValue<StationPage>? = mutex.withLock {
         val record = read(key(scope)) ?: return@withLock null
         val page = try {
-            val json = Json.parseToJsonElement(record.body) as? JsonObject ?: return@withLock null
-            val rows = json["stations"] as? JsonArray ?: return@withLock null
-            val next = (json["nextOffset"] as? JsonPrimitive)?.intOrNull?.takeIf { it > 0 }
-            StationPage(rows.mapNotNull(RadioBrowserMapping::station), next)
+            withContext(Dispatchers.Default) { parseStations(record.body) }
         } catch (_: SerializationException) {
-            return@withLock null
-        }
+            null
+        } ?: return@withLock null
         DirectoryValue(page, record.stale(STATION_TTL))
     }
 
@@ -81,10 +78,7 @@ class DirectoryCache internal constructor(
         val ticket = mutex.withLock { Any().also { writes[key] = it } }
         try {
             val page = fetch()
-            val body = buildJsonObject {
-                put("stations", JsonArray(page.stations.map(::directoryFields)))
-                page.nextOffset?.let { put("nextOffset", it) }
-            }.toString()
+            val body = withContext(Dispatchers.Default) { encodePage(page) }
             save(key, ticket, body)
             return page
         } finally {
@@ -136,7 +130,8 @@ class DirectoryCache internal constructor(
                     // 自动范围离线恢复仍需要国家目录，容量淘汰只针对台站快照。
                     val others = prefs.asMap().entries.filter { it.key != entry && it.key.name != COUNTRIES }
                     val pinned = if (key != COUNTRIES && prefs.contains(stringPreferencesKey(COUNTRIES))) 1 else 0
-                    others.sortedByDescending { decode(it.value as? String)?.timestamp }
+                    // 排序只取时间戳，避免对每条 256KB 的 body 做 split 复制。
+                    others.sortedByDescending { timestampOf(it.value as? String) }
                         .drop(MAX_ENTRIES - 1 - pinned).forEach { prefs.remove(it.key) }
                 }
             } catch (_: IOException) {
@@ -155,6 +150,25 @@ class DirectoryCache internal constructor(
     private fun key(scope: ResolvedRadioScope): String =
         "stations_${scope.scope.mode.name}_${scope.country?.value.orEmpty()}"
 
+    private fun parseStations(body: String): StationPage? {
+        val json = Json.parseToJsonElement(body) as? JsonObject ?: return null
+        val rows = json["stations"] as? JsonArray ?: return null
+        val next = (json["nextOffset"] as? JsonPrimitive)?.intOrNull?.takeIf { it > 0 }
+        return StationPage(rows.mapNotNull(RadioBrowserMapping::station), next)
+    }
+
+    private fun encodePage(page: StationPage): String = buildJsonObject {
+        put("stations", JsonArray(page.stations.map(::directoryFields)))
+        page.nextOffset?.let { put("nextOffset", it) }
+    }.toString()
+
+    private fun encodeCountries(countries: List<RadioCountry>): String = JsonArray(countries.map {
+        buildJsonObject {
+            put("name", it.code.value)
+            put("stationcount", it.stationCount)
+        }
+    }).toString()
+
     private fun directoryFields(station: Station) = buildJsonObject {
         put("stationuuid", station.uuid.toString())
         put("name", station.name)
@@ -167,10 +181,26 @@ class DirectoryCache internal constructor(
     }
 
     private fun decode(value: String?): Record? {
-        val parts = value?.split('|', limit = 3) ?: return null
-        if (parts.size != 3 || parts[0] != VERSION || parts[2].length > MAX_CHARS) return null
-        val timestamp = parts[1].toLongOrNull()?.takeIf { it >= 0 } ?: return null
-        return Record(timestamp, parts[2])
+        if (value == null) return null
+        val versionEnd = value.indexOf('|')
+        if (versionEnd <= 0) return null
+        val timestampEnd = value.indexOf('|', versionEnd + 1)
+        if (timestampEnd < 0) return null
+        if (value.substring(0, versionEnd) != VERSION) return null
+        val timestamp = value.substring(versionEnd + 1, timestampEnd).toLongOrNull()?.takeIf { it >= 0 }
+            ?: return null
+        if (value.length - timestampEnd - 1 > MAX_CHARS) return null
+        return Record(timestamp, value.substring(timestampEnd + 1))
+    }
+
+    // 只解析头部时间戳，不复制 body；用于容量淘汰排序。
+    private fun timestampOf(value: String?): Long? {
+        if (value == null) return null
+        val versionEnd = value.indexOf('|')
+        if (versionEnd <= 0 || value.substring(0, versionEnd) != VERSION) return null
+        val timestampEnd = value.indexOf('|', versionEnd + 1)
+        if (timestampEnd < 0) return null
+        return value.substring(versionEnd + 1, timestampEnd).toLongOrNull()?.takeIf { it >= 0 }
     }
 
     private inner class Record(val timestamp: Long, val body: String) {

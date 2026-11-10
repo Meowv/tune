@@ -74,20 +74,13 @@ internal class RadioPlayback(
     private var state = PlayerUiState()
     private var lastProgressPosition = -1L
     private var lastProgressAt = 0L
+    private var stallJob: Job? = null
 
     init {
         player.addListener(this)
         scope.launch {
-            combine(queue.canPrevious, queue.canNext) { previous, next -> previous to next }
-                .collect { (previous, next) ->
-                    publish(decorate(state.copy(canPrevious = previous, canNext = next)))
-                }
-        }
-        scope.launch {
-            while (true) {
-                delay(PlaybackStallDetector.CHECK_INTERVAL_MS)
-                watchStall()
-            }
+            combine(queue.canPrevious, queue.canNext) { _, _ -> Unit }
+                .collect { publish(decorate(state)) }
         }
         scope.launch {
             network.collect(::reactToNetworkChange)
@@ -174,6 +167,7 @@ internal class RadioPlayback(
         resumeAfterFocusGain = false
         resetRetryBudget()
         update(PlayerUiState())
+        syncStallWatch()
     }
 
     fun close() {
@@ -185,8 +179,9 @@ internal class RadioPlayback(
     }
 
     override fun onEvents(player: Player, events: Player.Events) {
+        syncStallWatch()
         val currentSelection = selection ?: return
-        if (state.phase in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING, PlaybackPhase.ERROR)) return
+        if (state.phase in SettlingPhases) return
         when {
             player.isPlaying -> {
                 if (!committed) {
@@ -388,6 +383,7 @@ internal class RadioPlayback(
         player.setMediaItem(item.build())
         player.prepare()
         player.play()
+        syncStallWatch()
     }
 
     private fun scheduleRecovery(failure: TuneFailure) {
@@ -479,6 +475,24 @@ internal class RadioPlayback(
         ?.trim()
         ?.takeIf { it.startsWith("https://", ignoreCase = true) }
         ?.let { runCatching { Uri.parse(it) }.getOrNull() }
+
+    // 卡死检测只在「已选台且 playWhenReady」时运行；暂停/空闲时不再每 5s 唤醒一次。
+    private fun syncStallWatch() {
+        val needed = selection != null && player.playWhenReady && state.phase != PlaybackPhase.ERROR
+        if (needed) {
+            if (stallJob?.isActive == true) return
+            stallJob = scope.launch {
+                while (true) {
+                    delay(PlaybackStallDetector.CHECK_INTERVAL_MS)
+                    watchStall()
+                }
+            }
+        } else {
+            stallJob?.cancel()
+            stallJob = null
+            lastProgressAt = 0L
+        }
+    }
 
     // 直播源静默卡死时按超时进入既有恢复预算，避免界面长期停在缓冲中。
     private fun watchStall() {
@@ -598,11 +612,16 @@ internal class RadioPlayback(
     }
 
     private fun fail(kind: TuneError, status: Int? = null, station: Station? = state.station) {
+        stallJob?.cancel()
+        stallJob = null
+        lastProgressAt = 0L
         audioFocus.abandon()
         update(state.copy(phase = PlaybackPhase.ERROR, station = station, error = kind, statusCode = status))
     }
 
     private fun update(value: PlayerUiState) {
+        // ExoPlayer 的 onEvents 可能在状态未变时重复回调；相同快照不再写 StateFlow。
+        if (state == value) return
         state = value
         publish(decorate(value))
     }
@@ -614,8 +633,7 @@ internal class RadioPlayback(
 
     private fun isNetworkError(error: TuneError?) = error == TuneError.NETWORK_OFFLINE
 
-    private sealed interface Command {
-        data class Play(val station: Station) : Command
+    private sealed interface Command {        data class Play(val station: Station) : Command
         data object Next : Command
         data object Previous : Command
         data object Toggle : Command
@@ -629,3 +647,6 @@ internal class RadioPlayback(
         }
     }
 }
+
+// onEvents 高频回调，相位集合提为常量避免每次构造。
+private val SettlingPhases = setOf(PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING, PlaybackPhase.ERROR)

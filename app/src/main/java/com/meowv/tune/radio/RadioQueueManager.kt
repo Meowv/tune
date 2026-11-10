@@ -45,16 +45,17 @@ class RadioQueueManager(private val repository: RadioRepository) : RadioQueue {
     }
 
     override fun updateDirectory(scope: ResolvedRadioScope, page: StationPage) {
+        // 过滤与去重放在锁外：调用方在后台线程，避免阻塞 UI 线程的 select/next。
+        val filtered = StationPage(
+            page.stations.filter { scope.country == null || it.countryCode == scope.country }.distinctBy { it.uuid },
+            page.nextOffset.takeIf { scope.country != null }
+        )
         synchronized(stateLock) {
             val active = session?.takeIf { it.scope == scope } ?: Session(scope).also {
                 session = it
                 previousAvailable.value = false
                 currentScope.value = scope
             }
-            val filtered = StationPage(
-                page.stations.filter { scope.country == null || it.countryCode == scope.country }.distinctBy { it.uuid },
-                page.nextOffset.takeIf { scope.country != null }
-            )
             if (active.page != filtered) {
                 active.page = filtered
                 if (scope.country == null) active.preview = filtered.stations

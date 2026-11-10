@@ -6,6 +6,11 @@ import com.meowv.tune.domain.TuneFailure
 import com.meowv.tune.network.RadioBrowserClient
 import com.meowv.tune.radio.RadioBrowserMapping
 import java.util.UUID
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
@@ -53,6 +58,8 @@ internal class PlaybackIntent(val station: Station) {
 internal class RadioStreamResolver(
     private val click: suspend (UUID) -> String,
     private val details: suspend (UUID) -> Station?,
+    // 点击计数走独立 scope：不阻塞已知地址探测，也不因起播完成而取消计数请求。
+    private val clickScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     private val probe: suspend (HttpUrl) -> MediaProbeResult
 ) {
     constructor(client: RadioBrowserClient, media: MediaProbe) : this(
@@ -61,7 +68,7 @@ internal class RadioStreamResolver(
             RadioBrowserMapping.rows(client.get("/json/stations/byuuid/$uuid"))
                 .firstNotNullOfOrNull { RadioBrowserMapping.station(it)?.takeIf { station -> station.uuid == uuid } }
         },
-        media::get
+        probe = media::get
     )
 
     suspend fun resolve(intent: PlaybackIntent): ResolvedRadioStream =
@@ -70,10 +77,18 @@ internal class RadioStreamResolver(
     private suspend fun resolveCandidates(intent: PlaybackIntent): ResolvedRadioStream {
         val station = intent.station
         val lookup = Lookup()
-        val first = listOf(intent.clickedUrl(click), station.resolvedStreamUrl, station.streamUrl)
-        for (candidate in first) {
+        val clicked = CompletableDeferred<String?>()
+        clickScope.launch {
+            clicked.complete(runCatching { intent.clickedUrl(click) }.getOrNull())
+        }
+        // 给点击计数一个很短的优先窗口：正常网络下它仍是最新地址；超时后先用已知地址起播。
+        val preferred = withTimeoutOrNull(CLICK_HEAD_START_MS) { clicked.await() }
+        for (candidate in listOf(preferred, station.resolvedStreamUrl, station.streamUrl)) {
             lookup.tryUrl(MediaUrlPolicy.parse(candidate))?.let { return it }
         }
+        // 已知地址都不可用时，再等点击计数的最终结果（最多到它自己的 3.5s 预算）。
+        val late = if (preferred == null) clicked.await() else null
+        lookup.tryUrl(MediaUrlPolicy.parse(late))?.let { return it }
         val extra = try {
             details(station.uuid)
         } catch (failure: TuneFailure) {
@@ -121,6 +136,7 @@ internal class RadioStreamResolver(
     }
 
     private companion object {
+        const val CLICK_HEAD_START_MS = 200L
         val PLS_FILE = Regex("File\\d+\\s*=\\s*(.+)", RegexOption.IGNORE_CASE)
         val ASX_REF = Regex("""<ref\b[^>]*?\bhref\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
     }

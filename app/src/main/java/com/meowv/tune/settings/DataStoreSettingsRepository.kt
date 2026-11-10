@@ -45,14 +45,16 @@ internal class DataStoreSettingsRepository(private val store: DataStore<Preferen
     }
 
     private fun decode(prefs: Preferences): TuneSettings {
-        val country = CountryCode.parse(prefs.read(Country))
-        val scope = when (prefs.read(Scope)) {
+        // 一次取快照，避免每个字段都重新 asMap()。
+        val values = prefs.asMap()
+        val country = CountryCode.parse(values[Country] as? String)
+        val scope = when (values[Scope] as? String) {
             ScopeMode.COUNTRY.name -> if (country == null) RadioScope() else RadioScope(ScopeMode.COUNTRY, country)
             ScopeMode.GLOBAL.name -> RadioScope(ScopeMode.GLOBAL)
             else -> RadioScope()
         }
-        val autoPlay = prefs.read(AutoPlay) ?: false
-        val last = prefs.read(LastStation)?.let { value ->
+        val autoPlay = values[AutoPlay] as? Boolean ?: false
+        val last = (values[LastStation] as? String)?.let { value ->
             try {
                 UUID.fromString(value).takeIf { it.toString().equals(value, ignoreCase = true) }
             } catch (_: IllegalArgumentException) {
@@ -63,9 +65,9 @@ internal class DataStoreSettingsRepository(private val store: DataStore<Preferen
             scope = scope,
             autoPlay = autoPlay,
             lastSuccessfulStation = if (autoPlay) last else null,
-            displayMode = RadioDisplayMode.entries.firstOrNull { it.name == prefs.read(DisplayMode) }
+            displayMode = RadioDisplayMode.entries.firstOrNull { it.name == values[DisplayMode] }
                 ?: RadioDisplayMode.LIST,
-            playbackOrder = PlaybackOrder.entries.firstOrNull { it.name == prefs.read(Order) }
+            playbackOrder = PlaybackOrder.entries.firstOrNull { it.name == values[Order] }
                 ?: PlaybackOrder.SHUFFLE
         )
     }

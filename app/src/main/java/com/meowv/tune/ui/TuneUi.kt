@@ -97,6 +97,7 @@ fun TuneApp(
     }
 
     val selectedId = radioState.selectedStationUuid ?: playbackState.station?.uuid
+    // 只按 uuid 线性查找，比 remember(List) 的深比较更便宜。
     val target = radioState.stations.firstOrNull { it.uuid == selectedId } ?: playbackState.station
     val paused = playbackState.phase == PlaybackPhase.PAUSED
     val idle = playbackState.phase == PlaybackPhase.IDLE
@@ -168,7 +169,7 @@ fun TuneApp(
                         MeowvNavigationRail(page) { page = it }
                         TunePager(
                             pagerState, Modifier.weight(1f).fillMaxHeight(), pageStates, isCar,
-                            settings, radio, playbackState, connected, directoryRefreshing,
+                            settings, radioState, playbackState, connected, directoryRefreshing,
                             updateSubtitle, onPlayback, onSelectTarget, onDisplayModeChange,
                             onSettingsChange, onRefreshRadio, onRefreshFromSettings, onLoadMore,
                             onClearDirectoryCache, { showUpdate = true }, { showScopePicker = true }
@@ -177,7 +178,7 @@ fun TuneApp(
                 } else {
                     TunePager(
                         pagerState, Modifier.weight(1f).fillMaxWidth(), pageStates, isCar,
-                        settings, radio, playbackState, connected, directoryRefreshing,
+                        settings, radioState, playbackState, connected, directoryRefreshing,
                         updateSubtitle, onPlayback, onSelectTarget, onDisplayModeChange,
                         onSettingsChange, onRefreshRadio, onRefreshFromSettings, onLoadMore,
                         onClearDirectoryCache, { showUpdate = true }, { showScopePicker = true }
@@ -287,7 +288,7 @@ private fun TunePager(
     pageStates: androidx.compose.runtime.saveable.SaveableStateHolder,
     isCar: Boolean,
     settings: TuneSettings,
-    radio: StateFlow<RadioUiState>,
+    radioState: RadioUiState,
     playback: PlayerUiState,
     connected: Boolean,
     directoryRefreshing: Boolean,
@@ -307,7 +308,7 @@ private fun TunePager(
         val target = TunePage.entries[index]
         Box(Modifier.fillMaxSize()) {
             pageContent(
-                target, pageStates, isCar, settings, radio, playback, connected,
+                target, pageStates, isCar, settings, radioState, playback, connected,
                 directoryRefreshing, updateSubtitle, onPlayback, onSelectTarget,
                 onDisplayModeChange, onSettingsChange, onRefreshRadio,
                 onRefreshFromSettings, onLoadMore, onClearDirectoryCache,
@@ -323,7 +324,7 @@ private fun pageContent(
     pageStates: androidx.compose.runtime.saveable.SaveableStateHolder,
     isCar: Boolean,
     settings: TuneSettings,
-    radio: StateFlow<RadioUiState>,
+    radioState: RadioUiState,
     playback: PlayerUiState,
     connected: Boolean,
     directoryRefreshing: Boolean,
@@ -343,7 +344,7 @@ private fun pageContent(
         when (page) {
             TunePage.Radio -> RadioScreen(
                 isCar = isCar,
-                radio = radio,
+                state = radioState,
                 playback = playback,
                 connected = connected,
                 displayMode = settings.displayMode,
