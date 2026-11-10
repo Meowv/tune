@@ -33,6 +33,7 @@ import com.meowv.tune.radio.CountryOptions
 import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.update.LocalVersion
 import com.meowv.tune.update.UpdateUiState
+import com.meowv.tune.update.install.InstallState
 import kotlinx.coroutines.flow.StateFlow
 
 @Composable
@@ -46,7 +47,12 @@ fun TuneApp(
     directoryRefreshing: Boolean,
     localVersion: LocalVersion,
     update: UpdateUiState,
+    install: InstallState,
+    upgradedTo: String?,
     onCheckUpdate: () -> Unit,
+    onDownloadUpdate: () -> Unit,
+    onCancelDownload: () -> Unit,
+    onInstallUpdate: () -> Unit,
     onPlayback: (PlayerCommand) -> Unit,
     onSelectTarget: (Station) -> Unit,
     onDisplayModeChange: (RadioDisplayMode) -> Unit,
@@ -197,8 +203,13 @@ fun TuneApp(
                     isCar = isCar,
                     local = localVersion,
                     state = update,
+                    install = install,
+                    upgradedTo = upgradedTo,
                     onBack = { showUpdate = false },
                     onCheck = onCheckUpdate,
+                    onDownload = onDownloadUpdate,
+                    onCancelDownload = onCancelDownload,
+                    onInstall = onInstallUpdate,
                     modifier = Modifier.fillMaxSize()
                         .background(TuneColors.Background)
                         .windowInsetsPadding(

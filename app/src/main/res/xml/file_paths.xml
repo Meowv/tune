@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- DownloadManager 写入的更新包目录，只暴露给系统安装器读取。 -->
+    <external-files-path name="downloads" path="Download/" />
+</paths>

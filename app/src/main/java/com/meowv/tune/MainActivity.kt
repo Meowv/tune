@@ -69,10 +69,22 @@ class MainActivity : ComponentActivity() {
     private val updateModel by viewModels<UpdateViewModel> {
         viewModelFactory {
             initializer {
-                UpdateViewModel(tuneApp.updateRepository, UpdateChecker(), localVersion())
+                UpdateViewModel(
+                    repository = tuneApp.updateRepository,
+                    checker = UpdateChecker(),
+                    localVersion = ::localVersion,
+                    downloader = tuneApp.apkDownloader,
+                    verifier = tuneApp.apkVerifier,
+                    installer = tuneApp.apkInstaller,
+                    store = tuneApp.installStore,
+                    installedVersionCode = ::currentVersionCode
+                )
             }
         }
     }
+
+    private fun currentVersionCode(): Long =
+        packageManager.getPackageInfo(packageName, 0).longVersionCode
 
     private fun localVersion(): LocalVersion {
         val info = packageManager.getPackageInfo(packageName, 0)
@@ -123,6 +135,9 @@ class MainActivity : ComponentActivity() {
             val countries by radioModel.countries.collectAsStateWithLifecycle()
             val refresh by radioModel.refreshState.collectAsStateWithLifecycle()
             val update by updateModel.state.collectAsStateWithLifecycle()
+            val local by updateModel.local.collectAsStateWithLifecycle()
+            val install by updateModel.installState.collectAsStateWithLifecycle()
+            val upgradedTo by updateModel.upgradedTo.collectAsStateWithLifecycle()
             TuneTheme {
                 TuneApp(
                     settings = settings ?: TuneSettings(),
@@ -132,9 +147,14 @@ class MainActivity : ComponentActivity() {
                     playbackConnected = tuneApp.playerController.connected,
                     snackbar = snackbar,
                     directoryRefreshing = refresh == DirectoryRefresh.Running,
-                    localVersion = updateModel.local,
+                    localVersion = local,
                     update = update,
+                    install = install,
+                    upgradedTo = upgradedTo,
                     onCheckUpdate = updateModel::check,
+                    onDownloadUpdate = updateModel::download,
+                    onCancelDownload = updateModel::cancelDownload,
+                    onInstallUpdate = updateModel::installApk,
                     onPlayback = ::dispatchPlayback,
                     onSelectTarget = radioModel::selectTarget,
                     onDisplayModeChange = { mode ->
@@ -195,6 +215,12 @@ class MainActivity : ComponentActivity() {
         if (notificationRequested) return
         notificationRequested = true
         notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 从系统安装器/授权页返回时补查真实结果，不依赖 Activity 一直存活。
+        updateModel.onResume()
     }
 
     override fun onStart() {

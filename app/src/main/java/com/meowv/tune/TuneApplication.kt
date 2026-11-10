@@ -31,6 +31,10 @@ import com.meowv.tune.settings.settingsRepository
 import com.meowv.tune.update.HttpUpdateRepository
 import com.meowv.tune.update.UpdateClient
 import com.meowv.tune.update.UpdateRepository
+import com.meowv.tune.update.install.ApkDownloader
+import com.meowv.tune.update.install.ApkInstaller
+import com.meowv.tune.update.install.ApkVerifier
+import com.meowv.tune.update.install.InstallStore
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.StateFlow
 import com.meowv.tune.domain.NetworkState
@@ -41,6 +45,10 @@ private val Context.mirrorPreferences by preferencesDataStore(
 )
 private val Context.directoryPreferences by preferencesDataStore(
     name = "radio_directory_cache",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
+)
+private val Context.installPreferences by preferencesDataStore(
+    name = "meowvtune_install",
     corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
 )
 private val LastMirror = stringPreferencesKey("last_good_host")
@@ -71,6 +79,12 @@ open class TuneApplication : Application(), SingletonImageLoader.Factory {
     }
 
     internal val updateChannel: String get() = BuildConfig.UPDATE_CHANNEL
+
+    // 下载、校验、安装三件套；下载由系统 DownloadManager 承担，安装由系统安装器承担。
+    internal open val apkDownloader by lazy { ApkDownloader(this) }
+    internal open val apkVerifier by lazy { ApkVerifier(this) }
+    internal open val apkInstaller by lazy { ApkInstaller(this) }
+    internal open val installStore by lazy { InstallStore(installPreferences) }
 
     internal fun appVersionName(): String =
         packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown"

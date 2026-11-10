@@ -1,5 +1,10 @@
 package com.meowv.tune.ui
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import android.text.format.Formatter
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -8,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -16,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -31,6 +38,8 @@ import com.meowv.tune.update.LocalVersion
 import com.meowv.tune.update.UpdateFailure
 import com.meowv.tune.update.UpdateInfo
 import com.meowv.tune.update.UpdateUiState
+import com.meowv.tune.update.install.InstallFailure
+import com.meowv.tune.update.install.InstallState
 import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.ui.theme.TuneShapes
 import com.meowv.tune.ui.theme.TuneSpacing
@@ -45,8 +54,13 @@ internal fun UpdateScreen(
     isCar: Boolean,
     local: LocalVersion,
     state: UpdateUiState,
+    install: InstallState,
+    upgradedTo: String?,
     onBack: () -> Unit,
     onCheck: () -> Unit,
+    onDownload: () -> Unit,
+    onCancelDownload: () -> Unit,
+    onInstall: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     BackHandler(onBack = onBack)
@@ -63,7 +77,16 @@ internal fun UpdateScreen(
             Column(Modifier.widthIn(max = 720.dp).fillMaxWidth()) {
                 BrandHeader(isCar, local)
                 Spacer(Modifier.height(if (isCar) 20.dp else 16.dp))
-                StatusCard(isCar, state, onCheck)
+                StatusCard(
+                    isCar = isCar,
+                    state = state,
+                    install = install,
+                    upgradedTo = upgradedTo,
+                    onCheck = onCheck,
+                    onDownload = onDownload,
+                    onCancelDownload = onCancelDownload,
+                    onInstall = onInstall
+                )
                 Spacer(Modifier.height(if (isCar) 16.dp else 12.dp))
                 VersionCard(isCar, local, state.latest)
                 Spacer(Modifier.height(if (isCar) 16.dp else 12.dp))
@@ -138,51 +161,34 @@ private fun BrandHeader(isCar: Boolean, local: LocalVersion) {
 }
 
 @Composable
-private fun StatusCard(isCar: Boolean, state: UpdateUiState, onCheck: () -> Unit) {
-    val title: String
-    val body: String
-    when (state) {
-        UpdateUiState.Idle -> {
-            title = stringResource(R.string.update_status_idle_title)
-            body = stringResource(R.string.update_status_idle_body)
-        }
-        UpdateUiState.Checking -> {
-            title = stringResource(R.string.update_status_checking_title)
-            body = stringResource(R.string.update_status_checking_body)
-        }
-        is UpdateUiState.UpToDate -> {
-            title = stringResource(R.string.update_status_latest_title)
-            body = stringResource(R.string.update_status_latest_body)
-        }
-        is UpdateUiState.UpdateAvailable -> {
-            title = stringResource(R.string.update_status_available_title, state.info.versionName)
-            body = stringResource(R.string.update_status_available_body)
-        }
-        is UpdateUiState.Downgrade -> {
-            title = stringResource(R.string.update_status_downgrade_title)
-            body = stringResource(R.string.update_status_downgrade_body)
-        }
-        is UpdateUiState.Error -> {
-            title = stringResource(R.string.update_status_error_title)
-            body = updateFailureText(state.failure)
-        }
-    }
+private fun StatusCard(
+    isCar: Boolean,
+    state: UpdateUiState,
+    install: InstallState,
+    upgradedTo: String?,
+    onCheck: () -> Unit,
+    onDownload: () -> Unit,
+    onCancelDownload: () -> Unit,
+    onInstall: () -> Unit
+) {
+    val context = LocalContext.current
+    val presentation = statusPresentation(state, install, upgradedTo)
     UpdateCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            StatusIcon(isCar, state)
+            StatusIcon(isCar, state, install)
             Spacer(Modifier.width(TuneSpacing.Medium))
             Column(Modifier.weight(1f)) {
                 Text(
-                    title,
+                    presentation.title,
                     modifier = Modifier.testTag("update_status_title"),
-                    color = statusTitleColor(state),
+                    color = presentation.tint,
                     fontSize = if (isCar) 19.sp else 17.sp,
                     fontWeight = FontWeight.SemiBold,
                     style = TuneTextStyle
                 )
                 Spacer(Modifier.height(TuneSpacing.Hairline))
                 Text(
-                    body,
+                    presentation.body,
                     color = TuneColors.Muted,
                     fontSize = if (isCar) 14.sp else 13.sp,
                     lineHeight = if (isCar) 20.sp else 19.sp,
@@ -190,56 +196,306 @@ private fun StatusCard(isCar: Boolean, state: UpdateUiState, onCheck: () -> Unit
                 )
             }
         }
+        if (install is InstallState.Downloading) {
+            Spacer(Modifier.height(TuneSpacing.Large))
+            DownloadProgress(isCar, install)
+        }
         Spacer(Modifier.height(TuneSpacing.Large))
-        CheckButton(isCar, state.isChecking, onCheck)
+        InstallAction(
+            isCar = isCar,
+            state = state,
+            install = install,
+            onCheck = onCheck,
+            onDownload = onDownload,
+            onCancelDownload = onCancelDownload,
+            onInstall = onInstall,
+            onGrantPermission = { openInstallPermission(context) }
+        )
     }
 }
 
 @Composable
-private fun StatusIcon(isCar: Boolean, state: UpdateUiState) {
+private fun DownloadProgress(isCar: Boolean, download: InstallState.Downloading) {
+    val context = LocalContext.current
+    val total = download.totalBytes
+    val downloaded = download.downloadedBytes
+    if (download.indeterminate) {
+        LinearProgressIndicator(
+            modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
+            color = TuneColors.Primary,
+            trackColor = TuneColors.Primary.copy(alpha = .18f)
+        )
+    } else {
+        LinearProgressIndicator(
+            progress = { download.percent / 100f },
+            modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape)
+                .testTag("update_progress"),
+            color = TuneColors.Primary,
+            trackColor = TuneColors.Primary.copy(alpha = .18f)
+        )
+    }
+    Spacer(Modifier.height(TuneSpacing.Small))
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            if (total > 0) "${download.percent}%" else "",
+            color = TuneColors.Primary,
+            fontSize = if (isCar) 15.sp else 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            style = TuneTextStyle
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            if (total > 0) {
+                stringResource(
+                    R.string.update_download_size,
+                    Formatter.formatShortFileSize(context, downloaded),
+                    Formatter.formatShortFileSize(context, total)
+                )
+            } else {
+                Formatter.formatShortFileSize(context, downloaded)
+            },
+            color = TuneColors.Muted,
+            fontSize = if (isCar) 14.sp else 12.sp,
+            style = TuneTextStyle
+        )
+    }
+}
+
+@Composable
+private fun InstallAction(
+    isCar: Boolean,
+    state: UpdateUiState,
+    install: InstallState,
+    onCheck: () -> Unit,
+    onDownload: () -> Unit,
+    onCancelDownload: () -> Unit,
+    onInstall: () -> Unit,
+    onGrantPermission: () -> Unit
+) {
+    val checking = state is UpdateUiState.Checking
+    val available = state is UpdateUiState.UpdateAvailable
+    when {
+        install is InstallState.Downloading -> PrimaryButton(
+            label = stringResource(R.string.update_cancel_download),
+            enabled = true,
+            primary = false,
+            isCar = isCar,
+            tag = "update_cancel",
+            onClick = onCancelDownload
+        )
+        install is InstallState.Verifying -> PrimaryButton(
+            label = stringResource(R.string.update_verifying_action),
+            enabled = false,
+            primary = true,
+            isCar = isCar,
+            tag = "update_check",
+            onClick = {}
+        )
+        install is InstallState.Downloaded -> PrimaryButton(
+            label = stringResource(R.string.update_install_now),
+            enabled = true,
+            primary = true,
+            isCar = isCar,
+            tag = "update_install",
+            onClick = onInstall
+        )
+        install is InstallState.InstallPermissionRequired -> PrimaryButton(
+            label = stringResource(R.string.update_grant_permission),
+            enabled = true,
+            primary = true,
+            isCar = isCar,
+            tag = "update_permission",
+            onClick = onGrantPermission
+        )
+        install is InstallState.Installing -> PrimaryButton(
+            label = stringResource(R.string.update_installing_action),
+            enabled = false,
+            primary = true,
+            isCar = isCar,
+            tag = "update_check",
+            onClick = {}
+        )
+        available -> PrimaryButton(
+            label = stringResource(
+                if (install is InstallState.Failed || install is InstallState.Cancelled) {
+                    R.string.update_retry_download
+                } else {
+                    R.string.update_download
+                }
+            ),
+            enabled = true,
+            primary = true,
+            isCar = isCar,
+            tag = "update_download",
+            onClick = onDownload
+        )
+        else -> PrimaryButton(
+            label = stringResource(if (checking) R.string.update_checking else R.string.update_check),
+            enabled = !checking,
+            primary = true,
+            isCar = isCar,
+            tag = "update_check",
+            onClick = onCheck
+        )
+    }
+}
+
+@Composable
+private fun PrimaryButton(
+    label: String,
+    enabled: Boolean,
+    primary: Boolean,
+    isCar: Boolean,
+    tag: String,
+    onClick: () -> Unit
+) {
+    val background = when {
+        !primary -> TuneColors.Raised
+        enabled -> TuneColors.Primary
+        else -> TuneColors.Primary.copy(alpha = .16f)
+    }
+    val textColor = when {
+        !primary -> TuneColors.Text
+        enabled -> TuneColors.Background
+        else -> TuneColors.Primary
+    }
+    Box(
+        Modifier.fillMaxWidth().height(if (isCar) 52.dp else 48.dp)
+            .clip(TuneShapes.Control)
+            .background(background)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .testTag(tag)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            label,
+            color = textColor,
+            fontSize = if (isCar) 16.sp else 15.sp,
+            fontWeight = FontWeight.SemiBold,
+            style = TuneTextStyle
+        )
+    }
+}
+
+@Composable
+private fun StatusIcon(isCar: Boolean, state: UpdateUiState, install: InstallState) {
     val size = if (isCar) 30.dp else 28.dp
     Box(Modifier.size(size), contentAlignment = Alignment.Center) {
-        when (state) {
-            UpdateUiState.Checking -> CircularProgressIndicator(
+        val spinning = state is UpdateUiState.Checking ||
+            install is InstallState.Verifying ||
+            install is InstallState.Installing
+        if (spinning) {
+            CircularProgressIndicator(
                 Modifier.size(if (isCar) 24.dp else 22.dp),
                 color = TuneColors.Primary,
                 strokeWidth = 2.dp,
                 trackColor = TuneColors.Primary.copy(alpha = .22f),
                 strokeCap = StrokeCap.Round
             )
-            is UpdateUiState.UpToDate -> TuneIcon(R.drawable.ic_ui_check, Modifier.size(size), TuneColors.Primary)
-            is UpdateUiState.UpdateAvailable -> TuneIcon(R.drawable.ic_update, Modifier.size(size), TuneColors.Primary)
-            is UpdateUiState.Error -> TuneIcon(R.drawable.ic_ui_info, Modifier.size(size), TuneColors.Error)
-            is UpdateUiState.Downgrade -> TuneIcon(R.drawable.ic_ui_info, Modifier.size(size), TuneColors.Muted)
-            UpdateUiState.Idle -> TuneIcon(R.drawable.ic_update, Modifier.size(size), TuneColors.Muted)
+        } else {
+            when {
+                install is InstallState.Failed -> TuneIcon(R.drawable.ic_ui_info, Modifier.size(size), TuneColors.Error)
+                state is UpdateUiState.Error -> TuneIcon(R.drawable.ic_ui_info, Modifier.size(size), TuneColors.Error)
+                state is UpdateUiState.UpToDate -> TuneIcon(R.drawable.ic_ui_check, Modifier.size(size), TuneColors.Primary)
+                state is UpdateUiState.UpdateAvailable ->
+                    TuneIcon(R.drawable.ic_update, Modifier.size(size), TuneColors.Primary)
+                state is UpdateUiState.Downgrade ->
+                    TuneIcon(R.drawable.ic_ui_info, Modifier.size(size), TuneColors.Muted)
+                else -> TuneIcon(R.drawable.ic_update, Modifier.size(size), TuneColors.Muted)
+            }
         }
     }
 }
 
-private fun statusTitleColor(state: UpdateUiState): Color = when (state) {
-    is UpdateUiState.UpdateAvailable -> TuneColors.Primary
-    is UpdateUiState.Error -> TuneColors.Error
-    else -> TuneColors.Text
-}
+private data class StatusPresentation(val title: String, val body: String, val tint: Color)
 
 @Composable
-private fun CheckButton(isCar: Boolean, checking: Boolean, onCheck: () -> Unit) {
-    val label = stringResource(if (checking) R.string.update_checking else R.string.update_check)
-    Box(
-        Modifier.fillMaxWidth().height(if (isCar) 52.dp else 48.dp)
-            .clip(TuneShapes.Control)
-            .background(if (checking) TuneColors.Primary.copy(alpha = .16f) else TuneColors.Primary)
-            .clickable(enabled = !checking, role = Role.Button, onClick = onCheck)
-            .testTag("update_check")
-            .semantics { contentDescription = label },
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            label,
-            color = if (checking) TuneColors.Primary else TuneColors.Background,
-            fontSize = if (isCar) 16.sp else 15.sp,
-            fontWeight = FontWeight.SemiBold,
-            style = TuneTextStyle
+private fun statusPresentation(
+    state: UpdateUiState,
+    install: InstallState,
+    upgradedTo: String?
+): StatusPresentation {
+    // 下载/安装过程优先于「发现新版本」这类静态文案。
+    when (install) {
+        is InstallState.Downloading -> return StatusPresentation(
+            stringResource(R.string.update_status_downloading_title),
+            if (install.indeterminate) {
+                stringResource(R.string.update_status_downloading_unknown)
+            } else {
+                stringResource(R.string.update_status_downloading_body)
+            },
+            TuneColors.Text
+        )
+        is InstallState.Verifying -> return StatusPresentation(
+            stringResource(R.string.update_status_verifying_title),
+            stringResource(R.string.update_status_verifying_body),
+            TuneColors.Text
+        )
+        is InstallState.Downloaded -> return StatusPresentation(
+            stringResource(R.string.update_status_downloaded_title),
+            stringResource(R.string.update_status_downloaded_body),
+            TuneColors.Primary
+        )
+        is InstallState.InstallPermissionRequired -> return StatusPresentation(
+            stringResource(R.string.update_status_permission_title),
+            stringResource(R.string.update_status_permission_body),
+            TuneColors.Text
+        )
+        is InstallState.Installing -> return StatusPresentation(
+            stringResource(R.string.update_status_installing_title),
+            stringResource(R.string.update_status_installing_body),
+            TuneColors.Text
+        )
+        is InstallState.Failed -> return StatusPresentation(
+            stringResource(R.string.update_status_failed_title),
+            installFailureText(install.failure),
+            TuneColors.Error
+        )
+        is InstallState.Cancelled -> return StatusPresentation(
+            stringResource(R.string.update_status_cancelled_title),
+            stringResource(R.string.update_status_cancelled_body),
+            TuneColors.Muted
+        )
+        InstallState.Idle -> Unit
+    }
+    if (state is UpdateUiState.UpToDate && upgradedTo != null) {
+        return StatusPresentation(
+            stringResource(R.string.update_installed_title, upgradedTo),
+            stringResource(R.string.update_installed_body),
+            TuneColors.Primary
+        )
+    }
+    return when (state) {
+        UpdateUiState.Idle -> StatusPresentation(
+            stringResource(R.string.update_status_idle_title),
+            stringResource(R.string.update_status_idle_body),
+            TuneColors.Text
+        )
+        UpdateUiState.Checking -> StatusPresentation(
+            stringResource(R.string.update_status_checking_title),
+            stringResource(R.string.update_status_checking_body),
+            TuneColors.Text
+        )
+        is UpdateUiState.UpToDate -> StatusPresentation(
+            stringResource(R.string.update_status_latest_title),
+            stringResource(R.string.update_status_latest_body),
+            TuneColors.Text
+        )
+        is UpdateUiState.UpdateAvailable -> StatusPresentation(
+            stringResource(R.string.update_status_available_title, state.info.versionName),
+            stringResource(R.string.update_status_available_body),
+            TuneColors.Primary
+        )
+        is UpdateUiState.Downgrade -> StatusPresentation(
+            stringResource(R.string.update_status_downgrade_title),
+            stringResource(R.string.update_status_downgrade_body),
+            TuneColors.Text
+        )
+        is UpdateUiState.Error -> StatusPresentation(
+            stringResource(R.string.update_status_error_title),
+            updateFailureText(state.failure),
+            TuneColors.Error
         )
     }
 }
@@ -365,3 +621,27 @@ private fun updateFailureText(failure: UpdateFailure): String = stringResource(
         UpdateFailure.INCOMPATIBLE -> R.string.update_failure_incompatible
     }
 )
+
+@Composable
+private fun installFailureText(failure: InstallFailure): String = stringResource(
+    when (failure) {
+        InstallFailure.DOWNLOAD_FAILED -> R.string.update_fail_download
+        InstallFailure.FILE_MISSING -> R.string.update_fail_file_missing
+        InstallFailure.SIZE_MISMATCH -> R.string.update_fail_size
+        InstallFailure.CHECKSUM_MISMATCH -> R.string.update_fail_checksum
+        InstallFailure.PACKAGE_MISMATCH -> R.string.update_fail_package
+        InstallFailure.VERSION_MISMATCH -> R.string.update_fail_version
+        InstallFailure.SIGNATURE_MISMATCH -> R.string.update_fail_signature
+        InstallFailure.INCOMPATIBLE -> R.string.update_fail_incompatible
+        InstallFailure.INSTALL_FAILED -> R.string.update_fail_install
+        InstallFailure.INSTALL_CANCELLED -> R.string.update_fail_install_cancelled
+    }
+)
+
+private fun openInstallPermission(context: Context) {
+    val intent = Intent(
+        Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+        Uri.parse("package:${context.packageName}")
+    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { context.startActivity(intent) }
+}

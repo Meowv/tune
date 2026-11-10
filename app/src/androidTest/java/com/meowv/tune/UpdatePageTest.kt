@@ -43,6 +43,8 @@ class UpdatePageTest {
         compose.waitUntil(8000) {
             compose.onAllNodesWithTag("page_update").fetchSemanticsNodes().isNotEmpty()
         }
+        // 覆盖层刚组合时首帧可能还没完成布局，等一帧再断言可见。
+        compose.waitForIdle()
         compose.onNodeWithTag("update_status_title").assertIsDisplayed()
         compose.onNodeWithText("发现新版本 1.1.0").assertIsDisplayed()
         compose.onNodeWithText("MeowvTune 1.1.0").assertIsDisplayed()
