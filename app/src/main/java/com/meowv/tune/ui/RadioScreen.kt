@@ -18,6 +18,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PageSize
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -52,6 +53,7 @@ import com.meowv.tune.domain.*
 import com.meowv.tune.radio.CountryOptions
 import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.ui.theme.TuneShapes
+import com.meowv.tune.ui.theme.TuneSizes
 import com.meowv.tune.ui.theme.TuneSpacing
 import com.meowv.tune.ui.theme.TuneTextStyle
 import kotlinx.coroutines.delay
@@ -108,10 +110,15 @@ private fun RadioDirectory(
                 top = if (isCar) 16.dp else 12.dp,
                 bottom = 12.dp
             ),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            RegionChip(scopeName(state, locale), isCar, Modifier.testTag("scope_selector"), onScopeClick)
-            Spacer(Modifier.weight(1f))
+            // 胶囊按内容宽度收缩，最多让出右侧切换控件的位置；长国家名在内部省略而不是挤压右边。
+            RegionChip(
+                scopeName(state, locale), isCar,
+                Modifier.weight(1f, fill = false).padding(end = 12.dp).testTag("scope_selector"),
+                onScopeClick
+            )
             LayoutSwitcher(displayMode, onDisplayModeChange, isCar)
         }
         // 列表/卡片必须拿到“头部之外”的剩余高度，否则会画到播放器下面。
@@ -203,33 +210,40 @@ private fun StationRow(
     val title = station.name.ifBlank { stringResource(R.string.station_unnamed) }
     val isCurrent = playback.station?.uuid == station.uuid
     val phase = playback.phase
+    val buffering = isCurrent &&
+        phase in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING, PlaybackPhase.BUFFERING)
+    val playing = isCurrent && phase == PlaybackPhase.PLAYING
+    // 整行与右侧播放键共用同一个动作，子按钮消费点击，不会重复触发：
+    // 当前台是暂停/继续，其他台是换台起播。连接/缓冲中重复点击只会把正在起播的流推倒重来，一并禁用。
     val action: (() -> Unit)? = when {
-        onPlayback == null -> null
-        // 连接/缓冲中重复点击只会把正在起播的流推倒重来，热区保持禁用。
-        isCurrent && phase in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING, PlaybackPhase.BUFFERING) -> null
-        isCurrent && phase == PlaybackPhase.PLAYING -> null
-        isCurrent && phase == PlaybackPhase.PAUSED -> ({ onPlayback(PlayerCommand.TogglePause) })
-        isCurrent && phase == PlaybackPhase.ERROR -> ({ onPlayback(PlayerCommand.TogglePause) })
+        onPlayback == null || buffering -> null
+        isCurrent && phase == PlaybackPhase.ERROR -> ({ onPlayback(PlayerCommand.Play(station)) })
+        isCurrent -> ({ onPlayback(PlayerCommand.TogglePause) })
         else -> ({
             onSelectTarget(station)
             onPlayback(PlayerCommand.Play(station))
         })
     }
     val stateDescription = when {
-        isCurrent && phase == PlaybackPhase.PLAYING -> stringResource(R.string.playback_live)
+        isCurrent && playing -> stringResource(R.string.playback_live)
         isCurrent && phase == PlaybackPhase.PAUSED -> stringResource(R.string.playback_paused)
         isCurrent && phase == PlaybackPhase.ERROR -> stringResource(R.string.directory_retry)
         else -> null
     }
+    val actionLabel = when {
+        buffering -> stringResource(R.string.playback_buffering)
+        isCurrent && phase == PlaybackPhase.ERROR -> stringResource(R.string.directory_retry)
+        isCurrent && playing -> stringResource(R.string.action_pause)
+        else -> stringResource(R.string.action_play)
+    }
     val shape = TuneShapes.Station
     // 选中背景平滑过渡：普通透明 → 淡紫高亮，左缘细紫色指示条保持不变。
     val rowBackground by animateColorAsState(
-        if (selected) TuneColors.Primary.copy(alpha = .14f) else Color.Transparent,
+        if (selected) TuneColors.Primary.copy(alpha = .10f) else Color.Transparent,
         animationSpec = tween(220), label = "station_row_background"
     )
-    val buffering = isCurrent &&
-        phase in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING, PlaybackPhase.BUFFERING)
-    val playing = isCurrent && phase == PlaybackPhase.PLAYING
+    val tint = if (selected) TuneColors.Primary else TuneColors.Muted
+    val glyph = if (isCar) TuneSizes.IconMd else TuneSizes.IconSm
     Row(
         Modifier.fillMaxWidth().height(if (isCar) 72.dp else 78.dp)
             .clip(shape)
@@ -254,7 +268,7 @@ private fun StationRow(
             )
             .testTag("station_${station.uuid}")
             .semantics { stateDescription?.let { this.stateDescription = it } }
-            .padding(horizontal = if (isCar) 12.dp else 10.dp),
+            .padding(start = if (isCar) 12.dp else 10.dp, end = if (isCar) 8.dp else 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(if (isCar) 16.dp else 12.dp)
     ) {
@@ -265,13 +279,24 @@ private fun StationRow(
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
             style = TuneTextStyle
         )
-        // 播放状态与选中状态分离：波形只在真正播放时出现，缓冲转小圈，失败给重试键，其余一律播放键。
+        // 播放状态与选中状态分离：缓冲转小圈，失败给重试键，播放中给暂停键，其余一律播放键。
+        // 图标不带底色，48dp 热区独立响应，涟漪只落在按钮范围内，不铺满整行。
         Box(
-            Modifier.size(if (isCar) 26.dp else 24.dp),
+            Modifier.size(if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
+                .clip(CircleShape)
+                .then(
+                    if (action != null) Modifier.clickable(role = Role.Button, onClick = action)
+                    else Modifier
+                )
+                .testTag("station_action_${station.uuid}")
+                .semantics {
+                    role = Role.Button
+                    contentDescription = actionLabel
+                    if (action == null) disabled()
+                },
             contentAlignment = Alignment.Center
         ) {
             when {
-                playing -> PlayingWaveBars(Modifier.size(if (isCar) 24.dp else 22.dp), TuneColors.Primary)
                 buffering -> CircularProgressIndicator(
                     Modifier.size(if (isCar) 20.dp else 18.dp),
                     color = TuneColors.Primary,
@@ -280,14 +305,14 @@ private fun StationRow(
                     strokeCap = StrokeCap.Round
                 )
                 isCurrent && phase == PlaybackPhase.ERROR -> TuneIcon(
-                    R.drawable.ic_refresh,
-                    Modifier.size(if (isCar) 22.dp else 20.dp),
-                    TuneColors.Error
+                    R.drawable.ic_refresh, Modifier.size(glyph), TuneColors.Error
+                )
+                isCurrent && playing -> TuneIcon(
+                    R.drawable.ic_pause, Modifier.size(glyph), TuneColors.Primary
                 )
                 else -> TuneIcon(
-                    R.drawable.ic_play,
-                    Modifier.size(if (isCar) 24.dp else 22.dp),
-                    if (selected) TuneColors.Primary else TuneColors.Muted
+                    R.drawable.ic_play, Modifier.size(glyph),
+                    if (action == null) tint.copy(alpha = TuneColors.DisabledAlpha) else tint
                 )
             }
         }
@@ -423,37 +448,54 @@ private fun StationCard(
 private fun RegionChip(name: String, isCar: Boolean, modifier: Modifier, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val description = stringResource(R.string.scope_picker_description, name)
+    // 描边压到 BorderSoft：胶囊只是入口，不该比里面的国家名更显眼。
     Surface(
         onClick = onClick,
         color = TuneColors.Surface,
         shape = TuneShapes.Chip,
-        border = BorderStroke(if (focused) 2.dp else 1.dp, if (focused) TuneColors.Primary else TuneColors.Border),
+        border = BorderStroke(
+            if (focused) 2.dp else 1.dp,
+            if (focused) TuneColors.Primary else TuneColors.BorderSoft
+        ),
         modifier = modifier.height(if (isCar) 52.dp else 48.dp)
             .onFocusChanged { focused = it.isFocused }
             .semantics { contentDescription = description }
     ) {
         Row(
-            Modifier.padding(horizontal = if (isCar) 16.dp else 12.dp).clearAndSetSemantics { },
+            Modifier
+                .padding(start = if (isCar) 16.dp else 14.dp, end = if (isCar) 14.dp else 10.dp)
+                .clearAndSetSemantics { },
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(if (isCar) 8.dp else 6.dp)
         ) {
-            TuneIcon(R.drawable.ic_region, Modifier.size(if (isCar) 20.dp else 18.dp))
+            TuneIcon(
+                R.drawable.ic_region,
+                Modifier.size(if (isCar) TuneSizes.IconMd else TuneSizes.IconSm),
+                TuneColors.Primary
+            )
+            // fill=false：名字短时胶囊跟着收，名字长时让位给右侧箭头并省略，不挤压视图切换。
             Text(
                 name, color = TuneColors.Text, fontSize = if (isCar) 17.sp else 13.sp,
-                fontWeight = FontWeight.SemiBold, maxLines = 1, style = TuneTextStyle
+                fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                style = TuneTextStyle, modifier = Modifier.weight(1f, fill = false)
             )
-            TuneIcon(R.drawable.ic_chevron_down, Modifier.size(16.dp), TuneColors.Muted)
+            TuneIcon(
+                R.drawable.ic_chevron_down,
+                Modifier.size(if (isCar) 18.dp else TuneSizes.IconXs),
+                TuneColors.Muted
+            )
         }
     }
 }
 
 @Composable
 private fun LayoutSwitcher(mode: RadioDisplayMode, onChange: (RadioDisplayMode) -> Unit, isCar: Boolean) {
-    // 触控格 48/52dp，内部视觉块 40/44dp：外观不变，热区达到最小触控尺寸。
-    val cell = if (isCar) 52.dp else 48.dp
-    val tile = if (isCar) 44.dp else 40.dp
+    // 触控格保持 48/52dp，选中块从 40/44dp 收到 32/34dp：热区不变，视觉面积小一截。
+    val cell = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch
+    val tile = if (isCar) 34.dp else 32.dp
+    val icon = if (isCar) TuneSizes.IconMd else TuneSizes.IconSm
     Row(
-        Modifier.clip(TuneShapes.Navigation).background(TuneColors.Surface, TuneShapes.Navigation),
+        Modifier.clip(TuneShapes.Navigation).background(TuneColors.Raised, TuneShapes.Navigation),
         verticalAlignment = Alignment.CenterVertically
     ) {
         listOf(RadioDisplayMode.LIST, RadioDisplayMode.CARD).forEach { value ->
@@ -462,7 +504,7 @@ private fun LayoutSwitcher(mode: RadioDisplayMode, onChange: (RadioDisplayMode) 
                 if (value == RadioDisplayMode.LIST) R.string.layout_list else R.string.layout_card
             )
             val itemBackground by animateColorAsState(
-                if (selected) TuneColors.Selected else Color.Transparent,
+                if (selected) TuneColors.Segment else Color.Transparent,
                 animationSpec = tween(180), label = "layout_item_background"
             )
             val iconColor by animateColorAsState(
@@ -485,7 +527,7 @@ private fun LayoutSwitcher(mode: RadioDisplayMode, onChange: (RadioDisplayMode) 
                 ) {
                     TuneIcon(
                         if (value == RadioDisplayMode.LIST) R.drawable.ic_list_mode else R.drawable.ic_card_mode,
-                        Modifier.size(if (isCar) 24.dp else 20.dp),
+                        Modifier.size(icon),
                         iconColor
                     )
                 }

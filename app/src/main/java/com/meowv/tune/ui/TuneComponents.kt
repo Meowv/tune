@@ -1,16 +1,12 @@
 package com.meowv.tune.ui
 
-import android.provider.Settings
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -31,21 +27,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.ScaleFactor
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -70,7 +65,9 @@ import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.Station
 import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.ui.theme.TuneShapes
+import com.meowv.tune.ui.theme.TuneSizes
 import com.meowv.tune.ui.theme.TuneTextStyle
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun TuneIcon(@DrawableRes resource: Int, modifier: Modifier = Modifier, tint: Color = TuneColors.Primary) {
@@ -82,50 +79,6 @@ internal fun BrandLogo(modifier: Modifier = Modifier) {
     Image(painterResource(R.drawable.ic_meowvtune_logo), contentDescription = null, modifier = modifier)
 }
 
-/**
- * 播放中的动态音频波形：4 根竖条以不同周期低幅起伏。
- * 系统关闭动画（Animator duration scale = 0）时退化为静态条，避免无谓消耗。
- */
-@Composable
-internal fun PlayingWaveBars(modifier: Modifier = Modifier, color: Color = TuneColors.Primary) {
-    val context = LocalContext.current
-    val motionEnabled = remember {
-        Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f
-    }
-    val fractions: List<androidx.compose.runtime.State<Float>> = if (motionEnabled) {
-        val transition = rememberInfiniteTransition(label = "playing_wave")
-        List(WAVE_BAR_COUNT) { index ->
-            transition.animateFloat(
-                initialValue = .28f, targetValue = .96f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(durationMillis = 560 + index * 130, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "wave_bar_$index"
-            )
-        }
-    } else {
-        WAVE_STATIC_LEVELS.map { remember { mutableStateOf(it) } }
-    }
-    Canvas(modifier) {
-        val gap = size.width / (WAVE_BAR_COUNT * 2f + 1f)
-        val barWidth = gap
-        fractions.forEachIndexed { index, state ->
-            val height = (size.height * state.value).coerceIn(size.height * .2f, size.height)
-            val left = gap + index * (barWidth + gap)
-            drawRoundRect(
-                color = color,
-                topLeft = Offset(left, (size.height - height) / 2f),
-                size = Size(barWidth, height),
-                cornerRadius = CornerRadius(barWidth / 2f)
-            )
-        }
-    }
-}
-
-private const val WAVE_BAR_COUNT = 4
-private val WAVE_STATIC_LEVELS = listOf(.42f, .78f, .55f, .9f)
-
 private enum class PlayerButtonVisual { Play, Pause, Loading, Retry, Unavailable }
 
 /** 底部播放器操作按钮的通用热区：48dp（车机 56dp），内容由调用方决定。 */
@@ -136,10 +89,12 @@ private fun MiniPlayerAction(
     enabled: Boolean,
     isCar: Boolean,
     onClick: () -> Unit,
+    surface: Color = Color.Transparent,
+    surfaceSize: Dp = if (isCar) 48.dp else 44.dp,
     content: @Composable () -> Unit
 ) {
     Box(
-        Modifier.size(if (isCar) 56.dp else 48.dp)
+        Modifier.size(if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
             .clip(CircleShape)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .testTag(tag)
@@ -150,13 +105,18 @@ private fun MiniPlayerAction(
             },
         contentAlignment = Alignment.Center
     ) {
-        content()
+        Box(
+            Modifier.size(surfaceSize).background(surface, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            content()
+        }
     }
 }
 
 /**
- * 播放器主操作按钮：48dp 热区（车机 56dp），视觉只有图标本身，不铺底色。
- * 与随机键、列表行保持同一套无底色图标语言；状态靠图形与颜色区分：
+ * 播放器主操作按钮：48dp 热区（车机 56dp），用极低对比度的圆形底承载主操作。
+ * 与随机键、列表行保持同一套图标语言；状态靠图形与颜色区分：
  * 播放/暂停为品牌紫，缓冲是品牌紫加载环，失败转错误色重试键，未选台为灰色。
  */
 @Composable
@@ -167,15 +127,22 @@ private fun PlayerActionButton(
     isCar: Boolean,
     onClick: () -> Unit
 ) {
-    // 主操作图标比次级图标大一档，去掉底色后仍能拉开层级。
-    val glyph = if (isCar) 26.dp else 24.dp
+    // 主操作图标比次级图标大一档，靠尺寸和底色拉开层级，不用高饱和实心圆。
+    val glyph = if (isCar) TuneSizes.IconXl else TuneSizes.IconLg
     val tint = when (visual) {
         PlayerButtonVisual.Play, PlayerButtonVisual.Pause -> TuneColors.Primary
         PlayerButtonVisual.Loading -> TuneColors.Primary
         PlayerButtonVisual.Retry -> TuneColors.Error
-        PlayerButtonVisual.Unavailable -> TuneColors.Muted
+        PlayerButtonVisual.Unavailable -> TuneColors.Muted.copy(alpha = TuneColors.DisabledAlpha)
     }
-    MiniPlayerAction("player_pause", label, enabled, isCar, onClick) {
+    val surface = when (visual) {
+        PlayerButtonVisual.Play, PlayerButtonVisual.Pause -> TuneColors.Primary.copy(alpha = .14f)
+        else -> Color.Transparent
+    }
+    MiniPlayerAction(
+        "player_pause", label, enabled, isCar, onClick,
+        surface = surface, surfaceSize = if (isCar) 48.dp else 44.dp
+    ) {
         Crossfade(visual, animationSpec = tween(160), label = "player_action_glyph") { state ->
             when (state) {
                 PlayerButtonVisual.Loading -> CircularProgressIndicator(
@@ -271,8 +238,9 @@ internal fun MeowvTopBar(isCar: Boolean) {
 
 @Composable
 internal fun MeowvNavigationBar(page: TunePage, onPage: (TunePage) -> Unit) {
+    // 64dp 只是让出上下呼吸位；条目本身仍是 56dp，热区不缩水。
     Row(
-        Modifier.fillMaxWidth().height(68.dp).background(TuneColors.Background)
+        Modifier.fillMaxWidth().height(64.dp).background(TuneColors.Background)
             .focusGroup().testTag("bottom_navigation"),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -322,32 +290,43 @@ private fun NavigationItem(
         TunePage.Settings -> R.drawable.ic_settings
     }
     Box(
-        modifier.height(if (isCar) 64.dp else 56.dp).padding(horizontal = if (isCar) 0.dp else 8.dp)
+        modifier.height(if (isCar) 64.dp else 56.dp)
+            .then(if (isCar) Modifier.fillMaxWidth() else Modifier.padding(horizontal = 6.dp))
             .clip(shape)
-            .background(background)
-            .then(if (focused) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .selectable(selected, role = Role.Tab, onClick = { onPage(page) })
             .testTag("nav_${page.name.lowercase()}")
-            .semantics { contentDescription = label }
-            .padding(horizontal = if (isCar) 16.dp else 0.dp),
+            .semantics { contentDescription = label },
         contentAlignment = Alignment.Center
     ) {
-        val icon = @Composable { TuneIcon(resource, Modifier.size(if (isCar) 24.dp else 22.dp), color) }
-        val text = @Composable {
-            Text(
-                label, color = color, fontSize = if (isCar) 17.sp else 11.sp, style = TuneTextStyle,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                maxLines = 1, modifier = Modifier.clearAndSetSemantics { }
-            )
-        }
-        if (isCar) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                icon(); text()
+        // 选中底只包住图标与文字，宽度比整格小一截；外框仍是完整的 56/64dp 热区。
+        Box(
+            Modifier.then(if (isCar) Modifier.fillMaxWidth() else Modifier)
+                .clip(shape)
+                .background(background)
+                .then(if (focused) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)
+                .padding(
+                    horizontal = if (isCar) 16.dp else 12.dp,
+                    vertical = if (isCar) 10.dp else 4.dp
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            val icon = @Composable { TuneIcon(resource, Modifier.size(TuneSizes.IconLg), color) }
+            val text = @Composable {
+                Text(
+                    label, color = color, fontSize = if (isCar) 17.sp else 11.sp, style = TuneTextStyle,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    maxLines = 1, modifier = Modifier.clearAndSetSemantics { }
+                )
             }
-        } else {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                icon(); Spacer(Modifier.height(4.dp)); text()
+            if (isCar) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    icon(); text()
+                }
+            } else {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                    icon(); Spacer(Modifier.height(3.dp)); text()
+                }
             }
         }
     }
@@ -425,24 +404,34 @@ internal fun MeowvMiniPlayer(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             StationBadge(station, if (isCar) 52.dp else 46.dp)
-            var drag by remember { mutableStateOf(0f) }
+            // 横滑只作用在信息区：位移画在文字层，热区不动，避免和右侧按钮抢手势。
+            val dragOffset = remember { Animatable(0f) }
+            // 位移上限必须大于换台阈值，否则快速滑动会被夹住而永远达不到阈值。
+            val dragLimit = with(LocalDensity.current) { 96.dp.toPx() }
+            val scope = rememberCoroutineScope()
             Row(
                 Modifier.weight(1f).fillMaxHeight()
                     .testTag("player_info")
                     .pointerInput(station?.uuid) {
                         detectHorizontalDragGestures(
-                            onDragStart = { drag = 0f },
                             onHorizontalDrag = { change, amount ->
-                                drag += amount
                                 change.consume()
+                                // 越界即夹住，松手后回弹到原位；位移只读 layer，不触发重组。
+                                scope.launch {
+                                    dragOffset.snapTo(
+                                        (dragOffset.value + amount).coerceIn(-dragLimit, dragLimit)
+                                    )
+                                }
                             },
                             onDragEnd = {
+                                val settled = dragOffset.value
                                 when {
-                                    drag < -thresholdPx && currentCanNext -> currentNext()
-                                    drag > thresholdPx && currentCanPrevious -> currentPrevious()
+                                    settled < -thresholdPx && currentCanNext -> currentNext()
+                                    settled > thresholdPx && currentCanPrevious -> currentPrevious()
                                 }
-                                drag = 0f
-                            }
+                                scope.launch { dragOffset.animateTo(0f, DragSpring) }
+                            },
+                            onDragCancel = { scope.launch { dragOffset.animateTo(0f, DragSpring) } }
                         )
                     }
                     .semantics {
@@ -460,14 +449,15 @@ internal fun MeowvMiniPlayer(
                 Text(
                     name, color = TuneColors.Text, fontSize = if (isCar) 18.sp else 16.sp,
                     fontWeight = FontWeight.SemiBold, maxLines = 1,
-                    overflow = TextOverflow.Ellipsis, style = TuneTextStyle
+                    overflow = TextOverflow.Ellipsis, style = TuneTextStyle,
+                    modifier = Modifier.graphicsLayer { translationX = dragOffset.value }
                 )
             }
-            // 顺序开关保持扁平图标；播放键是实心圆主操作，状态只由图标表达。
+            // 顺序开关是模式开关：关=次级色，开=品牌紫；播放键是主操作，用低对比度圆底承载。
             MiniPlayerAction("player_order", orderLabel, enabled = true, isCar = isCar, onClick = onToggleOrder) {
                 TuneIcon(
                     if (shuffle) R.drawable.ic_order_shuffle else R.drawable.ic_order_sequential,
-                    Modifier.size(if (isCar) 24.dp else 22.dp),
+                    Modifier.size(if (isCar) TuneSizes.IconLg else TuneSizes.IconMd),
                     if (shuffle) TuneColors.Primary else TuneColors.Muted
                 )
             }
@@ -509,3 +499,9 @@ internal fun PreviewControl(
         }
     }
 }
+
+/** 底栏横滑松手后的回弹：略带回弹但不来回摆动，避免干扰正在看的台名。 */
+private val DragSpring = spring<Float>(
+    dampingRatio = .85f,
+    stiffness = Spring.StiffnessMediumLow
+)

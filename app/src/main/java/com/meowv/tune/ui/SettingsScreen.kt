@@ -43,8 +43,9 @@ import androidx.compose.ui.unit.sp
 import com.meowv.tune.R
 import com.meowv.tune.domain.TuneSettings
 import com.meowv.tune.ui.theme.TuneColors
-import com.meowv.tune.ui.theme.TuneSpacing
 import com.meowv.tune.ui.theme.TuneShapes
+import com.meowv.tune.ui.theme.TuneSizes
+import com.meowv.tune.ui.theme.TuneSpacing
 import com.meowv.tune.ui.theme.TuneTextStyle
 
 @Composable
@@ -64,7 +65,7 @@ internal fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(if (isCar) 8.dp else 12.dp)) {
         item(key = "playback_settings") {
             SettingsGroup {
-                SettingRow(R.drawable.ic_ui_play, R.string.setting_autoplay, isCar, checked = settings.autoPlay) {
+                SettingRow(R.drawable.ic_ui_autoplay, R.string.setting_autoplay, isCar, checked = settings.autoPlay) {
                     onSettingsChange { current -> current.copy(autoPlay = !current.autoPlay) }
                 }
             }
@@ -79,23 +80,23 @@ internal fun SettingsScreen(
                     onClick = onRefreshDirectory
                 )
                 SettingsDivider()
-                SettingRow(R.drawable.ic_ui_close, R.string.setting_cache, isCar, onClick = onClearDirectoryCache)
+                SettingRow(R.drawable.ic_ui_trash, R.string.setting_cache, isCar, onClick = onClearDirectoryCache)
                 SettingsDivider()
                 SettingRow(
-                    R.drawable.ic_ui_info, R.string.setting_source, isCar,
+                    R.drawable.ic_ui_database, R.string.setting_source, isCar,
                     trailing = { Chevron(isCar) },
                     onClick = { dialog = SettingsDialog.SOURCE }
                 )
                 SettingsDivider()
                 SettingRow(
-                    R.drawable.ic_ui_check, R.string.setting_licenses, isCar,
+                    R.drawable.ic_ui_scroll, R.string.setting_licenses, isCar,
                     trailing = { Chevron(isCar) },
                     onClick = { dialog = SettingsDialog.LICENSES }
                 )
                 SettingsDivider()
                 // 版本与更新：副标题跟随检查状态，入口只在设置页，不新增主菜单。
                 SettingRow(
-                    R.drawable.ic_update, R.string.setting_update, isCar,
+                    R.drawable.ic_ui_arrow_up_circle, R.string.setting_update, isCar,
                     subtitle = updateSubtitle,
                     trailing = { Chevron(isCar) },
                     onClick = onOpenUpdate
@@ -183,7 +184,7 @@ private fun SettingRow(
         animationSpec = tween(180), label = "setting_row_background"
     )
     val iconBackground by animateColorAsState(
-        if (pressed || focused) TuneColors.Primary.copy(alpha = .18f) else TuneColors.Raised,
+        if (pressed || focused) TuneColors.Primary.copy(alpha = .16f) else TuneColors.Primary.copy(alpha = .10f),
         animationSpec = tween(180), label = "setting_row_icon"
     )
     val contentAlpha = if (enabled) 1f else .55f
@@ -216,7 +217,7 @@ private fun SettingRow(
         horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Medium)
     ) {
         Box(Modifier.size(40.dp).background(iconBackground, TuneShapes.Control), contentAlignment = Alignment.Center) {
-            TuneIcon(resource, Modifier.size(22.dp), TuneColors.Primary.copy(alpha = contentAlpha))
+            TuneIcon(resource, Modifier.size(TuneSizes.IconLg), TuneColors.Primary.copy(alpha = contentAlpha))
         }
         Column(Modifier.weight(1f)) {
             Text(
