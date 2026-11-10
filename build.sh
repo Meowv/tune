@@ -23,15 +23,17 @@ usage() {
 
   debug       构建 Debug APK（默认）
   release     构建 Release APK（R8 + 资源压缩；有 keystore.properties 时自动签名）
-              versionCode 自动 +1（构建失败会回滚），versionName 仍由人工维护
               产物同时发布到 app/build/meowvtune/：MeowvTune-<版本>.apk + stable.json
 
-  --no-bump   本次不递增 versionCode，用于验证签名/产物，避免触发完整 R8 重建
+  --bump      把 versionCode +1 后构建（构建失败自动回滚），用于正式发版
+              默认不递增，沿用当前 versionCode，避免只涨号不出包
+
+versionName 始终由人工维护。
 
 示例：
   ./build.sh
   ./build.sh release
-  ./build.sh release --no-bump
+  ./build.sh release --bump
   ./build.sh release --offline
 
 可覆盖的环境变量：
@@ -42,13 +44,13 @@ EOF
 }
 
 MODE=debug
-BUMP=1
+BUMP=0
 GRADLE_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         release|--release|-r) MODE=release ;;
         debug|--debug|-d) MODE=debug ;;
-        --no-bump) BUMP=0 ;;
+        --bump) BUMP=1 ;;
         -h|--help) usage; exit 0 ;;
         -*) GRADLE_ARGS+=("$1") ;;  # 其余选项原样交给 Gradle，如 -q、--offline
         *)
@@ -91,7 +93,7 @@ write_version_code() {
     rm -f "$VERSION_FILE.bak"
 }
 
-# 每次发布构建把 versionCode +1；versionName 仍由人工按语义化版本调整。
+# 仅当显式传入 --bump 时把 versionCode +1；versionName 始终由人工按语义化版本调整。
 # 构建失败时回滚，避免只涨号不出包。
 bump_version_code() {
     local current next
@@ -127,7 +129,7 @@ if [[ "$MODE" == "release" ]]; then
         trap rollback_version_code EXIT
         bump_version_code
     else
-        printf '跳过 versionCode 自增（--no-bump），沿用 %s\n' "$(read_version_code)"
+        printf '未指定 --bump，沿用 versionCode %s\n' "$(read_version_code)"
     fi
 else
     TASK=":app:assembleDebug"
