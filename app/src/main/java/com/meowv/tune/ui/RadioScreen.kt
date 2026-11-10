@@ -1,5 +1,6 @@
 package com.meowv.tune.ui
 
+import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
@@ -160,39 +161,57 @@ private fun StationList(
             }.filter { it }.collect { loadMore() }
         }
     }
-    LazyColumn(
-        Modifier.fillMaxSize().testTag("station_list"),
-        state = listState,
-        contentPadding = PaddingValues(
-            start = if (isCar) 24.dp else 16.dp,
-            end = if (isCar) 24.dp else 16.dp,
-            bottom = 12.dp
-        )
-    ) {
-        if (state.error != null) item(key = "directory_error") {
-            DirectoryFeedback(R.string.directory_error, onRefresh)
-        }
-        itemsIndexed(state.stations, key = { _, station -> station.uuid.toString() }) { index, station ->
-            StationRow(
-                station = station,
-                isCar = isCar,
-                selected = station.uuid == selectedId,
-                playback = playback,
-                onPlayback = onPlayback,
-                onSelectTarget = onSelectTarget
+    // 列表始终存在（用例与滚动位置都依赖它）；首次加载/切换区域时在内容区正中叠一个状态位。
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize().testTag("station_list"),
+            state = listState,
+            contentPadding = PaddingValues(
+                start = if (isCar) 24.dp else 16.dp,
+                end = if (isCar) 24.dp else 16.dp,
+                bottom = 12.dp
             )
-            if (index < state.stations.lastIndex) {
-                // 分割线与台名左缘对齐（行内边距 + 台标 + 间距），不压在台标下方。
-                HorizontalDivider(
-                    modifier = Modifier.padding(start = 76.dp),
-                    color = TuneColors.Divider.copy(alpha = .55f), thickness = .5.dp
+        ) {
+            // 已有缓存行时失败只做顶部提示，不能盖住还能播的台。
+            if (state.error != null && state.stations.isNotEmpty()) item(key = "directory_error") {
+                DirectoryFeedback(R.string.directory_error, onRefresh)
+            }
+            itemsIndexed(state.stations, key = { _, station -> station.uuid.toString() }) { index, station ->
+                StationRow(
+                    station = station,
+                    isCar = isCar,
+                    selected = station.uuid == selectedId,
+                    playback = playback,
+                    onPlayback = onPlayback,
+                    onSelectTarget = onSelectTarget
                 )
+                if (index < state.stations.lastIndex) {
+                    // 分割线与台名左缘对齐（行内边距 + 台标 + 间距），不压在台标下方。
+                    HorizontalDivider(
+                        modifier = Modifier.padding(start = 76.dp),
+                        color = TuneColors.Divider.copy(alpha = .55f), thickness = .5.dp
+                    )
+                }
+            }
+            // 翻页加载沿用列表底部的小环，不打断已加载内容。
+            if (state.isLoading && state.stations.isNotEmpty()) item(key = "directory_loading") {
+                DirectoryLoading(Modifier.fillMaxWidth().padding(vertical = 20.dp), size = 22.dp)
             }
         }
-        when {
-            state.isLoading -> item(key = "directory_loading") { DirectoryFeedback(R.string.directory_loading) }
-            state.error == null && state.stations.isEmpty() -> item(key = "directory_empty") {
-                DirectoryFeedback(R.string.directory_empty)
+        if (state.stations.isEmpty()) {
+            when {
+                state.isLoading -> DirectoryLoading(Modifier.fillMaxSize())
+                state.error != null -> DirectoryMessage(
+                    R.drawable.ic_ui_info, TuneColors.Error, R.string.directory_error,
+                    Modifier.fillMaxSize()
+                ) {
+                    TextButton(onClick = onRefresh) {
+                        Text(stringResource(R.string.directory_retry), color = TuneColors.Primary)
+                    }
+                }
+                else -> DirectoryMessage(
+                    R.drawable.ic_radio, TuneColors.Muted, R.string.directory_empty, Modifier.fillMaxSize()
+                )
             }
         }
     }
@@ -331,9 +350,17 @@ private fun CardMode(
 ) {
     if (state.stations.isEmpty()) {
         when {
-            state.isLoading -> DirectoryFeedback(R.string.directory_loading)
-            state.error != null -> DirectoryFeedback(R.string.directory_error, onRefresh)
-            else -> DirectoryFeedback(R.string.directory_empty)
+            state.isLoading -> DirectoryLoading(Modifier.fillMaxSize())
+            state.error != null -> DirectoryMessage(
+                R.drawable.ic_ui_info, TuneColors.Error, R.string.directory_error, Modifier.fillMaxSize()
+            ) {
+                TextButton(onClick = onRefresh) {
+                    Text(stringResource(R.string.directory_retry), color = TuneColors.Primary)
+                }
+            }
+            else -> DirectoryMessage(
+                R.drawable.ic_radio, TuneColors.Muted, R.string.directory_empty, Modifier.fillMaxSize()
+            )
         }
         return
     }
@@ -535,6 +562,47 @@ private fun LayoutSwitcher(mode: RadioDisplayMode, onChange: (RadioDisplayMode) 
                     )
                 }
             }
+        }
+    }
+}
+
+/** 目录加载中：只给一个品牌紫加载环，由调用方决定铺满内容区还是作为列表底部的小环。 */
+@Composable
+private fun DirectoryLoading(modifier: Modifier = Modifier, size: Dp = 28.dp) {
+    Box(modifier.testTag("directory_loading"), contentAlignment = Alignment.Center) {
+        CircularProgressIndicator(
+            Modifier.size(size),
+            color = TuneColors.Primary,
+            strokeWidth = 2.5.dp,
+            trackColor = TuneColors.Primary.copy(alpha = .22f),
+            strokeCap = StrokeCap.Round
+        )
+    }
+}
+
+/** 内容区为空时的整屏状态位：图标 + 一句话 + 可选操作，垂直居中。 */
+@Composable
+private fun DirectoryMessage(
+    @DrawableRes icon: Int,
+    tint: Color,
+    @StringRes message: Int,
+    modifier: Modifier = Modifier,
+    action: (@Composable () -> Unit)? = null
+) {
+    Column(
+        modifier.padding(horizontal = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        TuneIcon(icon, Modifier.size(30.dp), tint)
+        Spacer(Modifier.height(12.dp))
+        Text(
+            stringResource(message), color = TuneColors.Muted, fontSize = 14.sp,
+            textAlign = TextAlign.Center, style = TuneTextStyle
+        )
+        if (action != null) {
+            Spacer(Modifier.height(4.dp))
+            action()
         }
     }
 }
