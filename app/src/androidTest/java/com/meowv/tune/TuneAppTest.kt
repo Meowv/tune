@@ -464,7 +464,7 @@ class TuneAppTest {
     }
 
     @Test
-    fun pausedSwipeChangesTargetWithoutPlaying() {
+    fun pausedSwipeStartsPlaybackOnTheNextStation() {
         compose.waitUntil(5000) { app.playerController.connected.value }
         val first = "station_${UUID(0, 1)}"
         compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(first))
@@ -476,16 +476,13 @@ class TuneAppTest {
         compose.onNodeWithTag("player_pause").performClick()
         compose.waitUntil(3000) { app.playerController.state.value.phase == PlaybackPhase.PAUSED }
 
+        // 暂停时滑动换台即起播：滑到的台就是用户想听的台，不再停在暂停态。
         compose.onNodeWithTag("player_info").performTouchInput { swipeLeft() }
-        compose.waitUntil(3000) { radioState().selectedStationUuid == UUID(0, 2) }
-        assertEquals("暂停时滑动不能换音频", UUID(0, 1), app.playerController.state.value.station?.uuid)
-        assertEquals(PlaybackPhase.PAUSED, app.playerController.state.value.phase)
-
-        compose.onNodeWithTag("player_pause").performClick()
         compose.waitUntil(8000) {
             app.playerController.state.value.station?.uuid == UUID(0, 2) &&
                 app.playerController.state.value.phase == PlaybackPhase.PLAYING
         }
+        assertEquals(UUID(0, 2), radioState().selectedStationUuid)
         runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
     }
 

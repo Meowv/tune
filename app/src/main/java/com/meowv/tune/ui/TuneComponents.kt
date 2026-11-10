@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.ScaleFactor
 import androidx.compose.ui.platform.LocalContext
@@ -77,6 +78,7 @@ import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.ui.theme.TuneShapes
 import com.meowv.tune.ui.theme.TuneSizes
 import com.meowv.tune.ui.theme.TuneTextStyle
+import kotlin.math.abs
 import kotlinx.coroutines.launch
 
 @Composable
@@ -393,7 +395,6 @@ internal fun MeowvMiniPlayer(
     val playing = phase == PlaybackPhase.PLAYING
     val failed = phase == PlaybackPhase.ERROR
     val canToggle = connected && station != null && !buffering
-    val thresholdPx = with(LocalDensity.current) { 64.dp.toPx() }
     val currentNext by rememberUpdatedState(onNext)
     val currentPrevious by rememberUpdatedState(onPrevious)
     // 可切台能力由播放队列按当前顺序给出（随机模式下有当前台即可返回）。
@@ -433,6 +434,8 @@ internal fun MeowvMiniPlayer(
                     top = if (isCar) 0.dp else 8.dp, bottom = if (isCar) 0.dp else 8.dp
                 )
                 .height(if (isCar) 80.dp else 68.dp)
+                // 裁到播放器轮廓：横滑时台标和台名可以滑出边缘，但不会画到播放器外面。
+                .clip(if (isCar) RoundedCornerShape(0.dp) else TuneShapes.Player)
                 .background(
                     TuneColors.Player,
                     if (isCar) RoundedCornerShape(0.dp) else TuneShapes.Player
@@ -442,55 +445,80 @@ internal fun MeowvMiniPlayer(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            StationBadge(station, if (isCar) 52.dp else 46.dp)
-            // 横滑只作用在信息区：位移画在文字层，热区不动，避免和右侧按钮抢手势。
+            // 台标 + 台名整体横滑换台。手势挂在静止的外层，位移只写 layer，既不触发重组，
+            // 也不会让节点跟着手指移动而把拖动增量抵消掉。
             val dragOffset = remember { Animatable(0f) }
-            // 位移上限必须大于换台阈值，否则快速滑动会被夹住而永远达不到阈值。
-            val dragLimit = with(LocalDensity.current) { 96.dp.toPx() }
-            val scope = rememberCoroutineScope()
-            Row(
+            val dragScope = rememberCoroutineScope()
+            val velocity = remember { VelocityTracker() }
+            val density = LocalDensity.current
+            val dragLimit = with(density) { 120.dp.toPx() }
+            val commitPx = with(density) { 56.dp.toPx() }
+            val flingPx = with(density) { 420.dp.toPx() }
+            // 没有当前台时也算「可切」：滑一下直接从列表头/尾起播。
+            val canSwipeNext = currentCanNext || station == null
+            val canSwipePrevious = currentCanPrevious || station == null
+            Box(
                 Modifier.weight(1f).fillMaxHeight()
                     .testTag("player_info")
                     .pointerInput(station?.uuid) {
                         detectHorizontalDragGestures(
+                            onDragStart = { velocity.resetTracking() },
                             onHorizontalDrag = { change, amount ->
                                 change.consume()
-                                // 越界即夹住，松手后回弹到原位；位移只读 layer，不触发重组。
-                                scope.launch {
+                                velocity.addPosition(change.uptimeMillis, change.position)
+                                // 该方向没有下一台时给强阻尼，拉起来像橡皮筋，而不是撞到硬墙。
+                                val available = if (amount < 0) canSwipeNext else canSwipePrevious
+                                val delta = if (available) amount else amount * .3f
+                                dragScope.launch {
                                     dragOffset.snapTo(
-                                        (dragOffset.value + amount).coerceIn(-dragLimit, dragLimit)
+                                        (dragOffset.value + delta).coerceIn(-dragLimit, dragLimit)
                                     )
                                 }
                             },
                             onDragEnd = {
+                                // 位移够远或者甩得够快都算提交，快速轻扫不会没反应。
+                                val flung = velocity.calculateVelocity().x
                                 val settled = dragOffset.value
                                 when {
-                                    settled < -thresholdPx && currentCanNext -> currentNext()
-                                    settled > thresholdPx && currentCanPrevious -> currentPrevious()
+                                    (settled < -commitPx || flung < -flingPx) && canSwipeNext -> currentNext()
+                                    (settled > commitPx || flung > flingPx) && canSwipePrevious -> currentPrevious()
                                 }
-                                scope.launch { dragOffset.animateTo(0f, DragSpring) }
+                                dragScope.launch { dragOffset.animateTo(0f, SwipeSpring) }
                             },
-                            onDragCancel = { scope.launch { dragOffset.animateTo(0f, DragSpring) } }
+                            onDragCancel = { dragScope.launch { dragOffset.animateTo(0f, SwipeSpring) } }
                         )
                     }
                     .semantics {
+                        // 无障碍动作与横滑同源：没有当前台时也能「下一个」起播。
                         customActions = listOf(
                             CustomAccessibilityAction(nextLabel) {
-                                if (currentCanNext) { onNext(); true } else false
+                                if (canSwipeNext) { onNext(); true } else false
                             },
                             CustomAccessibilityAction(previousLabel) {
-                                if (currentCanPrevious) { onPrevious(); true } else false
+                                if (canSwipePrevious) { onPrevious(); true } else false
                             }
                         )
                     },
-                verticalAlignment = Alignment.CenterVertically
+                contentAlignment = Alignment.CenterStart
             ) {
-                Text(
-                    name, color = TuneColors.Text, fontSize = if (isCar) 18.sp else 16.sp,
-                    fontWeight = FontWeight.SemiBold, maxLines = 1,
-                    overflow = TextOverflow.Ellipsis, style = TuneTextStyle,
-                    modifier = Modifier.graphicsLayer { translationX = dragOffset.value }
-                )
+                Row(
+                    Modifier.fillMaxWidth()
+                        .graphicsLayer {
+                            translationX = dragOffset.value
+                            // 拉得越远越淡，提示「松手就换台」，同时不遮挡底下的播放器底色。
+                            alpha = 1f - (abs(dragOffset.value) / dragLimit).coerceIn(0f, 1f) * .35f
+                        },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    StationBadge(station, if (isCar) 52.dp else 46.dp)
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        name, color = TuneColors.Text, fontSize = if (isCar) 18.sp else 16.sp,
+                        fontWeight = FontWeight.SemiBold, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis, style = TuneTextStyle,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
             // 顺序/随机是模式开关：两种模式都按「选中」呈现，模式由图标本身区分，不做灰化。
             MiniPlayerAction("player_order", orderLabel, enabled = true, isCar = isCar, onClick = onToggleOrder) {
@@ -539,8 +567,8 @@ internal fun PreviewControl(
     }
 }
 
-/** 底栏横滑松手后的回弹：略带回弹但不来回摆动，避免干扰正在看的台名。 */
-private val DragSpring = spring<Float>(
-    dampingRatio = .85f,
-    stiffness = Spring.StiffnessMediumLow
+/** 底栏横滑松手后的回弹：阻尼接近临界，只留一点点回弹，不来回摆动。 */
+private val SwipeSpring = spring<Float>(
+    dampingRatio = .88f,
+    stiffness = Spring.StiffnessMedium
 )

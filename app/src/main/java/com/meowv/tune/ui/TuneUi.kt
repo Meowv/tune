@@ -92,27 +92,33 @@ fun TuneApp(
     val shuffle = settings.playbackOrder == PlaybackOrder.SHUFFLE
     val adjacent: (Int) -> Station? = { offset ->
         val list = radioState.stations
-        val index = list.indexOfFirst { it.uuid == target?.uuid }
-        if (index < 0) null else list.getOrNull(index + offset)
+        val current = target
+        if (current == null) {
+            // 还没有当前台时，第一下滑动直接从列表头/尾起播，而不是毫无反应。
+            if (offset > 0) list.firstOrNull() else list.lastOrNull()
+        } else {
+            val index = list.indexOfFirst { it.uuid == current.uuid }
+            if (index < 0) null else list.getOrNull(index + offset)
+        }
     }
     // 播放中的切台统一交给播放队列按当前顺序处理，底栏与系统媒体键走同一条路径；
-    // 暂停/空闲只换目标不起播，随机模式从当前范围随机取一台，并排除正在播放的台。
+    // 暂停/空闲时换台即起播：滑动或媒体键换到的台，用户意图就是「听这个」。
     val randomTarget: () -> Station? = {
         radioState.stations.filter { it.uuid != target?.uuid }.randomOrNull()
     }
-    val next: () -> Unit = {
-        when {
-            !paused && !idle -> onPlayback(PlayerCommand.Next)
-            shuffle -> randomTarget()?.let(onSelectTarget)
-            else -> adjacent(1)?.let(onSelectTarget)
+    val playTarget: (Station?) -> Unit = { station ->
+        station?.let {
+            onSelectTarget(it)
+            onPlayback(PlayerCommand.Play(it))
         }
     }
+    val next: () -> Unit = {
+        if (!paused && !idle) onPlayback(PlayerCommand.Next)
+        else playTarget(if (shuffle) randomTarget() else adjacent(1))
+    }
     val previous: () -> Unit = {
-        when {
-            !paused && !idle -> onPlayback(PlayerCommand.Previous)
-            shuffle -> randomTarget()?.let(onSelectTarget)
-            else -> adjacent(-1)?.let(onSelectTarget)
-        }
+        if (!paused && !idle) onPlayback(PlayerCommand.Previous)
+        else playTarget(if (shuffle) randomTarget() else adjacent(-1))
     }
     val toggle: () -> Unit = {
         val station = target
