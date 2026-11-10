@@ -157,6 +157,10 @@ class TuneAppTest {
         compose.waitUntil(5000) {
             compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isNotEmpty()
         }
+        val controlBefore = compose.onNodeWithTag("now_playing_play")
+            .getUnclippedBoundsInRoot()
+        val toolsBefore = compose.onNodeWithTag("now_playing_tools")
+            .getUnclippedBoundsInRoot()
 
         app.mockNetwork.value = NetworkState(NetworkType.OFFLINE, metered = false)
         compose.waitUntil(5000) {
@@ -167,6 +171,19 @@ class TuneAppTest {
             hasText("网络不可用") and hasAnyAncestor(hasTestTag("now_playing_screen"))
         ).assertIsDisplayed()
         compose.onNodeWithTag("now_playing_play").assertContentDescriptionEquals("重试")
+        compose.waitForIdle()
+        val controlAfter = compose.onNodeWithTag("now_playing_play")
+            .getUnclippedBoundsInRoot()
+        val toolsAfter = compose.onNodeWithTag("now_playing_tools")
+            .getUnclippedBoundsInRoot()
+        assertTrue(
+            "错误提示不应挤压主控",
+            kotlin.math.abs((controlAfter.top - controlBefore.top).value) <= 1f
+        )
+        assertTrue(
+            "错误提示不应挤压工具条",
+            kotlin.math.abs((toolsAfter.top - toolsBefore.top).value) <= 1f
+        )
 
         app.mockNetwork.value = NetworkState(NetworkType.WIFI, metered = false)
         compose.waitUntil(3000) {
@@ -675,6 +692,7 @@ class TuneAppTest {
         compose.waitUntil(5000) {
             compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isNotEmpty()
         }
+        val toolsBefore = compose.onNodeWithTag("now_playing_tools").getUnclippedBoundsInRoot()
         compose.onNodeWithTag("now_playing_sleep").performClick()
         compose.waitUntil(5000) {
             compose.onAllNodesWithTag("sleep_timer_panel").fetchSemanticsNodes().isNotEmpty()
@@ -688,6 +706,12 @@ class TuneAppTest {
             app.sleepTimer.state.value.durationMinutes == 15
         }
         compose.onNodeWithTag("now_playing_sleep").assertIsSelected()
+        val toolsAfter = compose.onNodeWithTag("now_playing_tools").getUnclippedBoundsInRoot()
+        assertTrue(
+            "睡眠定时状态不应改变工具条尺寸",
+            kotlin.math.abs((toolsAfter.top - toolsBefore.top).value) <= 1f &&
+                kotlin.math.abs((toolsAfter.bottom - toolsBefore.bottom).value) <= 1f
+        )
 
         compose.onNodeWithTag("now_playing_collapse").performClick()
         compose.waitUntil(5000) {

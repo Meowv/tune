@@ -19,12 +19,17 @@ import com.meowv.tune.domain.NetworkState
 import com.meowv.tune.domain.NetworkType
 import com.meowv.tune.domain.PlaybackOrder
 import com.meowv.tune.domain.PlaybackPhase
+import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.domain.RadioScope
 import com.meowv.tune.domain.ScopeMode
+import com.meowv.tune.domain.Station
+import com.meowv.tune.domain.StationPage
 import com.meowv.tune.domain.TuneSettings
 import com.meowv.tune.ui.isCarWindow
 import java.util.UUID
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -69,9 +74,19 @@ class NowPlayingCompatibilityTest {
         compose.waitForIdle()
 
         val root = compose.onRoot().getUnclippedBoundsInRoot()
+        val backdrop = compose.onNodeWithTag("now_playing_backdrop")
+            .assertIsDisplayed()
+            .getUnclippedBoundsInRoot()
+        assertTrue("背景必须覆盖完整窗口", (
+            kotlin.math.abs((backdrop.top - root.top).value) +
+                kotlin.math.abs((backdrop.bottom - root.bottom).value) +
+                kotlin.math.abs((backdrop.left - root.left).value) +
+                kotlin.math.abs((backdrop.right - root.right).value)
+            ) <= 2f)
         val config = compose.activity.resources.configuration
+        val car = isCarWindow(config.screenWidthDp.toFloat(), config.screenHeightDp.toFloat())
         val minimumTouch = if (
-            isCarWindow(config.screenWidthDp.toFloat(), config.screenHeightDp.toFloat())
+            car
         ) 56.dp else 48.dp
         listOf(
             "now_playing_collapse",
@@ -107,7 +122,56 @@ class NowPlayingCompatibilityTest {
                 hasText("Japan") and hasAnyAncestor(hasTestTag("now_playing_screen"))
             ).fetchSemanticsNodes().isEmpty()
         )
+        if (!car && (root.bottom - root.top).value >= 700f) {
+            val height = (root.bottom - root.top).value
+            val title = compose.onNodeWithTag("now_playing_title")
+                .getUnclippedBoundsInRoot()
+            val controls = compose.onNodeWithTag("now_playing_play")
+                .getUnclippedBoundsInRoot()
+            val tools = compose.onNodeWithTag("now_playing_tools")
+                .getUnclippedBoundsInRoot()
+            val titleRatio = (title.top - root.top).value / height
+            val controlsRatio = (controls.top - root.top).value / height
+            val toolsRatio = (tools.top - root.top).value / height
+            assertTrue("标题位置应位于 48%–55%：$titleRatio", titleRatio in .48f..0.55f)
+            assertTrue("主控位置应位于 58%–68%：$controlsRatio", controlsRatio in .58f..0.68f)
+            assertTrue("工具条位置应位于 78%–87%：$toolsRatio", toolsRatio in .78f..0.87f)
+        }
 
         runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
+    }
+
+    @Test
+    fun longStationTitleDoesNotOverlapControls() = runBlocking {
+        withTimeout(5000) { app.playerController.connected.first { it } }
+        val scope = withTimeout(5000) { app.radioQueue.activeScope.first { it != null } }!!
+        val station = Station(
+            uuid = UUID(0, 900),
+            name = "这是一个用于验证超长电台名称不会被裁切或覆盖主播放控制的测试电台",
+            countryCode = app.country
+        )
+        app.radioQueue.updateDirectory(scope, StationPage(listOf(station)))
+        app.playerController.dispatch(PlayerCommand.Play(station))
+        withTimeout(5000) {
+            app.playerController.state.first { it.station?.uuid == station.uuid }
+        }
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithTag("global_player").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("player_info").performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.waitForIdle()
+        val title = compose.onNodeWithTag("now_playing_title")
+            .assertIsDisplayed()
+            .getUnclippedBoundsInRoot()
+        val controls = compose.onNodeWithTag("now_playing_play")
+            .assertIsDisplayed()
+            .getUnclippedBoundsInRoot()
+        assertTrue("超长名称不得覆盖主控：$title / $controls", title.bottom <= controls.top)
+
+        app.playerController.dispatch(PlayerCommand.Stop)
+        app.radioQueue.clearScope()
     }
 }
