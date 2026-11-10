@@ -242,8 +242,9 @@ private fun StationRow(
         if (selected) TuneColors.Primary.copy(alpha = .10f) else Color.Transparent,
         animationSpec = tween(220), label = "station_row_background"
     )
-    val tint = if (selected) TuneColors.Primary else TuneColors.Muted
-    val glyph = if (isCar) TuneSizes.IconMd else TuneSizes.IconSm
+    // 未播放用灰紫实心三角，当前台用品牌紫实心暂停：实心比线性三角更有分量，车机上也能一眼看清。
+    val tint = if (selected) TuneColors.Primary else TuneColors.IconIdle
+    val glyph = TuneSizes.IconMd
     Row(
         Modifier.fillMaxWidth().height(if (isCar) 72.dp else 78.dp)
             .clip(shape)
@@ -279,7 +280,7 @@ private fun StationRow(
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
             style = TuneTextStyle
         )
-        // 播放状态与选中状态分离：缓冲转小圈，失败给重试键，播放中给暂停键，其余一律播放键。
+        // 播放状态与选中状态分离：播放中走波形，缓冲转小圈，失败给重试键，其余一律播放键。
         // 图标不带底色，48dp 热区独立响应，涟漪只落在按钮范围内，不铺满整行。
         Box(
             Modifier.size(if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
@@ -307,11 +308,9 @@ private fun StationRow(
                 isCurrent && phase == PlaybackPhase.ERROR -> TuneIcon(
                     R.drawable.ic_refresh, Modifier.size(glyph), TuneColors.Error
                 )
-                isCurrent && playing -> TuneIcon(
-                    R.drawable.ic_pause, Modifier.size(glyph), TuneColors.Primary
-                )
+                isCurrent && playing -> PlayingWaveBars(Modifier.size(glyph), TuneColors.Primary)
                 else -> TuneIcon(
-                    R.drawable.ic_play, Modifier.size(glyph),
+                    R.drawable.ic_radio_play, Modifier.size(glyph),
                     if (action == null) tint.copy(alpha = TuneColors.DisabledAlpha) else tint
                 )
             }
@@ -490,12 +489,16 @@ private fun RegionChip(name: String, isCar: Boolean, modifier: Modifier, onClick
 
 @Composable
 private fun LayoutSwitcher(mode: RadioDisplayMode, onChange: (RadioDisplayMode) -> Unit, isCar: Boolean) {
-    // 触控格保持 48/52dp，选中块从 40/44dp 收到 32/34dp：热区不变，视觉面积小一截。
+    // 触控格保持 48/52dp；选中块 40/44dp，四周留 4dp 内边距，两块之间自然形成分隔。
     val cell = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch
-    val tile = if (isCar) 34.dp else 32.dp
-    val icon = if (isCar) TuneSizes.IconMd else TuneSizes.IconSm
+    val tile = if (isCar) 44.dp else 40.dp
+    // 两个图标同尺寸：列表是横线+点，卡片是双层菱形，22dp 下视觉面积才对齐。
+    val icon = TuneSizes.IconMd
     Row(
-        Modifier.clip(TuneShapes.Navigation).background(TuneColors.Raised, TuneShapes.Navigation),
+        Modifier.clip(TuneShapes.Navigation)
+            .background(TuneColors.Raised, TuneShapes.Navigation)
+            // 未选中一侧只有图标，加一道极淡描边把控件边界交代清楚。
+            .border(1.dp, TuneColors.BorderSoft, TuneShapes.Navigation),
         verticalAlignment = Alignment.CenterVertically
     ) {
         listOf(RadioDisplayMode.LIST, RadioDisplayMode.CARD).forEach { value ->

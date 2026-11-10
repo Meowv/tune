@@ -99,6 +99,20 @@ class TuneAppTest {
     }
 
     @Test
+    fun rowPlayButtonFiresSinglePlaybackRequest() {
+        compose.waitUntil(5000) { app.playerController.connected.value }
+        val uuid = UUID(0, 1)
+        val row = "station_$uuid"
+        compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(row))
+        val before = app.resolveCalls[uuid]?.get() ?: 0
+        // 点行内播放键：按钮消费手势后不能再冒泡成整行点击，否则同一台会被请求两次。
+        compose.onNodeWithTag("station_action_$uuid", useUnmergedTree = true).performClick()
+        compose.waitUntil(8000) { app.playerController.state.value.phase == PlaybackPhase.PLAYING }
+        assertEquals("行内播放键只应发起一次播放", 1, (app.resolveCalls[uuid]?.get() ?: 0) - before)
+        runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
+    }
+
+    @Test
     fun cellularNetworkPlaysWithoutWarning() {
         app.mockNetwork.value = NetworkState(NetworkType.CELLULAR, metered = true)
         val first = "station_${UUID(0, 1)}"

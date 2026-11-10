@@ -1,12 +1,19 @@
 package com.meowv.tune.ui
 
+import android.provider.Settings
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -34,6 +41,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -41,6 +50,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.ScaleFactor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -79,7 +89,51 @@ internal fun BrandLogo(modifier: Modifier = Modifier) {
     Image(painterResource(R.drawable.ic_meowvtune_logo), contentDescription = null, modifier = modifier)
 }
 
-private enum class PlayerButtonVisual { Play, Pause, Loading, Retry, Unavailable }
+/**
+ * 播放中的动态音频波形：4 根竖条以不同周期低幅起伏。
+ * 系统关闭动画（Animator duration scale = 0）时退化为静态条，避免无谓消耗。
+ */
+@Composable
+internal fun PlayingWaveBars(modifier: Modifier = Modifier, color: Color = TuneColors.Primary) {
+    val context = LocalContext.current
+    val motionEnabled = remember {
+        Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f
+    }
+    val fractions: List<androidx.compose.runtime.State<Float>> = if (motionEnabled) {
+        val transition = rememberInfiniteTransition(label = "playing_wave")
+        List(WAVE_BAR_COUNT) { index ->
+            transition.animateFloat(
+                initialValue = .28f, targetValue = .96f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(durationMillis = 560 + index * 130, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "wave_bar_$index"
+            )
+        }
+    } else {
+        WAVE_STATIC_LEVELS.map { remember { mutableStateOf(it) } }
+    }
+    Canvas(modifier) {
+        val gap = size.width / (WAVE_BAR_COUNT * 2f + 1f)
+        val barWidth = gap
+        fractions.forEachIndexed { index, state ->
+            val height = (size.height * state.value).coerceIn(size.height * .2f, size.height)
+            val left = gap + index * (barWidth + gap)
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(left, (size.height - height) / 2f),
+                size = Size(barWidth, height),
+                cornerRadius = CornerRadius(barWidth / 2f)
+            )
+        }
+    }
+}
+
+private const val WAVE_BAR_COUNT = 4
+private val WAVE_STATIC_LEVELS = listOf(.42f, .78f, .55f, .9f)
+
+private enum class PlayerButtonVisual { Play, Playing, Loading, Retry, Unavailable }
 
 /** 底部播放器操作按钮的通用热区：48dp（车机 56dp），内容由调用方决定。 */
 @Composable
@@ -130,13 +184,13 @@ private fun PlayerActionButton(
     // 主操作图标比次级图标大一档，靠尺寸和底色拉开层级，不用高饱和实心圆。
     val glyph = if (isCar) TuneSizes.IconXl else TuneSizes.IconLg
     val tint = when (visual) {
-        PlayerButtonVisual.Play, PlayerButtonVisual.Pause -> TuneColors.Primary
+        PlayerButtonVisual.Play, PlayerButtonVisual.Playing -> TuneColors.Primary
         PlayerButtonVisual.Loading -> TuneColors.Primary
         PlayerButtonVisual.Retry -> TuneColors.Error
         PlayerButtonVisual.Unavailable -> TuneColors.Muted.copy(alpha = TuneColors.DisabledAlpha)
     }
     val surface = when (visual) {
-        PlayerButtonVisual.Play, PlayerButtonVisual.Pause -> TuneColors.Primary.copy(alpha = .14f)
+        PlayerButtonVisual.Play, PlayerButtonVisual.Playing -> TuneColors.Primary.copy(alpha = .14f)
         else -> Color.Transparent
     }
     MiniPlayerAction(
@@ -152,9 +206,8 @@ private fun PlayerActionButton(
                     trackColor = tint.copy(alpha = .22f),
                     strokeCap = StrokeCap.Round
                 )
-                PlayerButtonVisual.Pause -> TuneIcon(
-                    R.drawable.ic_radio_pause, Modifier.size(glyph), tint
-                )
+                // 播放中用波形表示「正在出声」，与列表行同一套状态语言。
+                PlayerButtonVisual.Playing -> PlayingWaveBars(Modifier.size(glyph), tint)
                 PlayerButtonVisual.Retry -> TuneIcon(
                     R.drawable.ic_refresh, Modifier.size(glyph), tint
                 )
@@ -370,11 +423,11 @@ internal fun MeowvMiniPlayer(
         station == null || !connected -> PlayerButtonVisual.Unavailable
         failed -> PlayerButtonVisual.Retry
         buffering -> PlayerButtonVisual.Loading
-        playing -> PlayerButtonVisual.Pause
+        playing -> PlayerButtonVisual.Playing
         else -> PlayerButtonVisual.Play
     }
     val buttonLabel = when (visual) {
-        PlayerButtonVisual.Pause -> pauseLabel
+        PlayerButtonVisual.Playing -> pauseLabel
         PlayerButtonVisual.Loading -> bufferingLabel
         PlayerButtonVisual.Retry -> retryLabel
         PlayerButtonVisual.Play, PlayerButtonVisual.Unavailable -> playLabel
@@ -453,12 +506,12 @@ internal fun MeowvMiniPlayer(
                     modifier = Modifier.graphicsLayer { translationX = dragOffset.value }
                 )
             }
-            // 顺序开关是模式开关：关=次级色，开=品牌紫；播放键是主操作，用低对比度圆底承载。
+            // 顺序/随机是模式开关：两种模式都按「选中」呈现，模式由图标本身区分，不做灰化。
             MiniPlayerAction("player_order", orderLabel, enabled = true, isCar = isCar, onClick = onToggleOrder) {
                 TuneIcon(
                     if (shuffle) R.drawable.ic_order_shuffle else R.drawable.ic_order_sequential,
                     Modifier.size(if (isCar) TuneSizes.IconLg else TuneSizes.IconMd),
-                    if (shuffle) TuneColors.Primary else TuneColors.Muted
+                    TuneColors.Primary
                 )
             }
             PlayerActionButton(visual, buttonLabel, canToggle, isCar, onToggle)

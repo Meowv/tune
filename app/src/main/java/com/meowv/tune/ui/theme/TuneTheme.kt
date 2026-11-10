@@ -19,6 +19,8 @@ object TuneColors {
     val Accent = Color(0xFF8B5CF6)
     val Text = Color(0xFFF4F5FB)
     val Muted = Color(0xFFA7B0C5)
+    // 列表播放键的未播放态：在次级灰里带一点紫，和纯文字灰区分开，又不抢当前台的品牌紫。
+    val IconIdle = Color(0xFF9B94B6)
     val Border = Color(0xFF2A3550)
     // 常驻胶囊/分段控件的外描边比 Border 再弱一档，避免控件边缘比内容更抢眼。
     val BorderSoft = Color(0xFF232D46)
