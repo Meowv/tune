@@ -257,6 +257,19 @@ class TuneAppTest {
     }
 
     @Test
+    fun swipingOnTheBottomBarSwitchesPages() {
+        compose.onNodeWithTag("nav_radio").assertIsSelected()
+        // 菜单条本身也能横滑：左滑下一个、右滑上一个。
+        compose.onNodeWithTag("bottom_navigation").performTouchInput { swipeLeft() }
+        compose.waitUntil(5000) { compose.onAllNodesWithTag("page_music").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("nav_music").assertIsSelected()
+        compose.onNodeWithTag("bottom_navigation").performTouchInput { swipeRight() }
+        compose.waitUntil(5000) { compose.onAllNodesWithTag("page_radio").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("nav_radio").assertIsSelected()
+        compose.onNodeWithTag("page_radio").assertIsDisplayed()
+    }
+
+    @Test
     fun swipingHorizontallySwitchesPages() {
         compose.onNodeWithTag("nav_radio").assertIsSelected()
         // 列表模式下横滑整页切到音乐，导航高亮跟着走。

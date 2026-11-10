@@ -8,6 +8,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -279,14 +280,53 @@ internal fun MeowvTopBar(isCar: Boolean) {
 
 @Composable
 internal fun MeowvNavigationBar(page: TunePage, onPage: (TunePage) -> Unit) {
-    // 64dp 只是让出上下呼吸位；条目本身仍是 56dp，热区不缩水。
-    Row(
+    val items = TunePage.entries
+    val index = items.indexOf(page).coerceAtLeast(0)
+    // 手势块只在首次组合时启动，页码要用 rememberUpdatedState 读最新值，否则滑一次后方向会算错。
+    val currentIndex by rememberUpdatedState(index)
+    val swipeThreshold = with(LocalDensity.current) { 40.dp.toPx() }
+    BoxWithConstraints(
         Modifier.fillMaxWidth().height(64.dp).background(TuneColors.Background)
-            .focusGroup().testTag("bottom_navigation"),
-        verticalAlignment = Alignment.CenterVertically
+            .focusGroup().testTag("bottom_navigation")
+            // 菜单条本身也能横滑：左滑下一个、右滑上一个，和内容区手势同向。
+            .pointerInput(Unit) {
+                var drag = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { drag = 0f },
+                    onHorizontalDrag = { change, amount ->
+                        drag += amount
+                        change.consume()
+                    },
+                    onDragEnd = {
+                        val target = when {
+                            drag <= -swipeThreshold -> items.getOrNull(currentIndex + 1)
+                            drag >= swipeThreshold -> items.getOrNull(currentIndex - 1)
+                            else -> null
+                        }
+                        target?.let(onPage)
+                        drag = 0f
+                    },
+                    onDragCancel = { drag = 0f }
+                )
+            }
     ) {
-        TunePage.entries.forEach { item ->
-            NavigationItem(item, item == page, isCar = false, Modifier.weight(1f), onPage)
+        val cell = maxWidth / items.size
+        // 选中块在三个格子之间滑动，代替每个条目各自淡入淡出的底色。
+        val indicatorX by animateDpAsState(
+            targetValue = cell * index + (cell - NavPillSize) / 2,
+            animationSpec = tween(260, easing = FastOutSlowInEasing),
+            label = "nav_indicator"
+        )
+        Box(
+            Modifier.offset(x = indicatorX, y = (64.dp - NavPillSize) / 2)
+                .size(NavPillSize)
+                .clip(TuneShapes.Navigation)
+                .background(TuneColors.NavSelected)
+        )
+        Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+            items.forEach { item ->
+                NavigationItem(item, item == page, isCar = false, Modifier.weight(1f), onPage)
+            }
         }
     }
 }
@@ -301,10 +341,13 @@ internal fun MeowvNavigationRail(page: TunePage, onPage: (TunePage) -> Unit) {
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         TunePage.entries.forEach { item ->
-            NavigationItem(item, item == page, isCar = true, Modifier.fillMaxWidth(), onPage)
+            NavigationItem(item, item == page, isCar = true, Modifier.fillMaxWidth(), onPage, showBackground = true)
         }
     }
 }
+
+/** 手机底栏选中块是固定方块，三个条目共用，滑动指示块与它严格同尺寸。 */
+private val NavPillSize = 48.dp
 
 @Composable
 private fun NavigationItem(
@@ -312,7 +355,8 @@ private fun NavigationItem(
     selected: Boolean,
     isCar: Boolean,
     modifier: Modifier,
-    onPage: (TunePage) -> Unit
+    onPage: (TunePage) -> Unit,
+    showBackground: Boolean = false
 ) {
     var focused by remember { mutableStateOf(false) }
     val label = stringResource(page.label)
@@ -321,7 +365,7 @@ private fun NavigationItem(
         animationSpec = tween(220), label = "nav_item_color"
     )
     val background by animateColorAsState(
-        if (selected) TuneColors.NavSelected else Color.Transparent,
+        if (selected && showBackground) TuneColors.NavSelected else Color.Transparent,
         animationSpec = tween(220), label = "nav_item_background"
     )
     val shape = TuneShapes.Navigation
@@ -340,15 +384,15 @@ private fun NavigationItem(
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center
     ) {
-        // 选中底只包住图标与文字，宽度比整格小一截；外框仍是完整的 56/64dp 热区。
+        // 车机侧栏各自铺底色；手机底栏的底色由外层滑动指示块统一画，条目只留焦点描边。
         Box(
-            Modifier.then(if (isCar) Modifier.fillMaxWidth() else Modifier)
+            Modifier.then(if (isCar) Modifier.fillMaxWidth() else Modifier.size(NavPillSize))
                 .clip(shape)
                 .background(background)
                 .then(if (focused) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)
                 .padding(
-                    horizontal = if (isCar) 16.dp else 12.dp,
-                    vertical = if (isCar) 10.dp else 4.dp
+                    horizontal = if (isCar) 16.dp else 0.dp,
+                    vertical = if (isCar) 10.dp else 0.dp
                 ),
             contentAlignment = Alignment.Center
         ) {
