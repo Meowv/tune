@@ -143,8 +143,6 @@ private fun MiniPlayerAction(
     enabled: Boolean,
     isCar: Boolean,
     onClick: () -> Unit,
-    surface: Color = Color.Transparent,
-    surfaceSize: Dp = if (isCar) 48.dp else 44.dp,
     content: @Composable () -> Unit
 ) {
     Box(
@@ -159,19 +157,14 @@ private fun MiniPlayerAction(
             },
         contentAlignment = Alignment.Center
     ) {
-        Box(
-            Modifier.size(surfaceSize).background(surface, CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            content()
-        }
+        content()
     }
 }
 
 /**
- * 播放器主操作按钮：48dp 热区（车机 56dp），用极低对比度的圆形底承载主操作。
- * 与随机键、列表行保持同一套图标语言；状态靠图形与颜色区分：
- * 播放/暂停为品牌紫，缓冲是品牌紫加载环，失败转错误色重试键，未选台为灰色。
+ * 播放器主操作按钮：48dp 热区（车机 56dp），不铺底色。
+ * 与顺序/随机键、列表行保持同一套无底色图标语言；状态靠图形与颜色区分：
+ * 播放/播放中为品牌紫，缓冲是品牌紫加载环，失败转错误色重试键，未选台为灰色。
  */
 @Composable
 private fun PlayerActionButton(
@@ -181,7 +174,7 @@ private fun PlayerActionButton(
     isCar: Boolean,
     onClick: () -> Unit
 ) {
-    // 主操作图标比次级图标大一档，靠尺寸和底色拉开层级，不用高饱和实心圆。
+    // 主操作图标比次级图标大一档，层级靠尺寸拉开，不额外铺底色。
     val glyph = if (isCar) TuneSizes.IconXl else TuneSizes.IconLg
     val tint = when (visual) {
         PlayerButtonVisual.Play, PlayerButtonVisual.Playing -> TuneColors.Primary
@@ -189,14 +182,7 @@ private fun PlayerActionButton(
         PlayerButtonVisual.Retry -> TuneColors.Error
         PlayerButtonVisual.Unavailable -> TuneColors.Muted.copy(alpha = TuneColors.DisabledAlpha)
     }
-    val surface = when (visual) {
-        PlayerButtonVisual.Play, PlayerButtonVisual.Playing -> TuneColors.Primary.copy(alpha = .14f)
-        else -> Color.Transparent
-    }
-    MiniPlayerAction(
-        "player_pause", label, enabled, isCar, onClick,
-        surface = surface, surfaceSize = if (isCar) 48.dp else 44.dp
-    ) {
+    MiniPlayerAction("player_pause", label, enabled, isCar, onClick) {
         Crossfade(visual, animationSpec = tween(160), label = "player_action_glyph") { state ->
             when (state) {
                 PlayerButtonVisual.Loading -> CircularProgressIndicator(
