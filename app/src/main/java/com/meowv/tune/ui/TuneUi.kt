@@ -1,9 +1,10 @@
 package com.meowv.tune.ui
 
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -80,6 +81,16 @@ fun TuneApp(
         if (page == TunePage.Settings && update is UpdateUiState.Idle) onCheckUpdate()
     }
     val pageStates = rememberSaveableStateHolder()
+    val pagerState = rememberPagerState(initialPage = page.ordinal) { TunePage.entries.size }
+    // 点菜单 → 滚到对应页；滑动停下 → 把页码写回 page，导航高亮与设置页副作用都跟着走。
+    LaunchedEffect(page) {
+        if (pagerState.currentPage != page.ordinal) pagerState.animateScrollToPage(page.ordinal)
+    }
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.settledPage }.collect { settled ->
+            TunePage.entries.getOrNull(settled)?.let { if (it != page) page = it }
+        }
+    }
     val errorText = playbackErrorText(playbackState.error, playbackState.statusCode)
     LaunchedEffect(playbackState.error) {
         if (errorText != null) snackbar.showSnackbar(errorText, duration = SnackbarDuration.Short)
@@ -155,30 +166,22 @@ fun TuneApp(
                 if (isCar) {
                     Row(Modifier.weight(1f)) {
                         MeowvNavigationRail(page) { page = it }
-                        Crossfade(page, Modifier.weight(1f).fillMaxHeight(), animationSpec = tween(220), label = "page_switch") { target ->
-                            Box(Modifier.fillMaxSize()) {
-                                pageContent(
-                                    target, pageStates, isCar, settings, radio, playbackState, connected,
-                                    directoryRefreshing, updateSubtitle, onPlayback, onSelectTarget,
-                                    onDisplayModeChange, onSettingsChange, onRefreshRadio,
-                                    onRefreshFromSettings, onLoadMore, onClearDirectoryCache,
-                                    { showUpdate = true }, { showScopePicker = true }
-                                )
-                            }
-                        }
+                        TunePager(
+                            pagerState, Modifier.weight(1f).fillMaxHeight(), pageStates, isCar,
+                            settings, radio, playbackState, connected, directoryRefreshing,
+                            updateSubtitle, onPlayback, onSelectTarget, onDisplayModeChange,
+                            onSettingsChange, onRefreshRadio, onRefreshFromSettings, onLoadMore,
+                            onClearDirectoryCache, { showUpdate = true }, { showScopePicker = true }
+                        )
                     }
                 } else {
-                    Crossfade(page, Modifier.weight(1f).fillMaxWidth(), animationSpec = tween(220), label = "page_switch") { target ->
-                        Box(Modifier.fillMaxSize()) {
-                            pageContent(
-                                target, pageStates, isCar, settings, radio, playbackState, connected,
-                                directoryRefreshing, updateSubtitle, onPlayback, onSelectTarget,
-                                onDisplayModeChange, onSettingsChange, onRefreshRadio,
-                                onRefreshFromSettings, onLoadMore, onClearDirectoryCache,
-                                { showUpdate = true }, { showScopePicker = true }
-                            )
-                        }
-                    }
+                    TunePager(
+                        pagerState, Modifier.weight(1f).fillMaxWidth(), pageStates, isCar,
+                        settings, radio, playbackState, connected, directoryRefreshing,
+                        updateSubtitle, onPlayback, onSelectTarget, onDisplayModeChange,
+                        onSettingsChange, onRefreshRadio, onRefreshFromSettings, onLoadMore,
+                        onClearDirectoryCache, { showUpdate = true }, { showScopePicker = true }
+                    )
                 }
                 MeowvMiniPlayer(
                     isCar = isCar,
@@ -271,6 +274,47 @@ private fun playbackErrorText(error: TuneError?, statusCode: Int?): String? = wh
     TuneError.CONNECTION -> stringResource(R.string.playback_connection)
     TuneError.UNSUPPORTED_MEDIA -> stringResource(R.string.playback_format)
     else -> stringResource(R.string.playback_unavailable)
+}
+
+/**
+ * 三个主页面横向分页：点菜单滚到目标页，左右滑动切页，两者共用同一个 PagerState。
+ * 页面里的纵向列表、电台卡片横滑各管一个方向，冲突交给 Compose 的嵌套滚动处理。
+ */
+@Composable
+private fun TunePager(
+    state: PagerState,
+    modifier: Modifier,
+    pageStates: androidx.compose.runtime.saveable.SaveableStateHolder,
+    isCar: Boolean,
+    settings: TuneSettings,
+    radio: StateFlow<RadioUiState>,
+    playback: PlayerUiState,
+    connected: Boolean,
+    directoryRefreshing: Boolean,
+    updateSubtitle: String,
+    onPlayback: (PlayerCommand) -> Unit,
+    onSelectTarget: (Station) -> Unit,
+    onDisplayModeChange: (RadioDisplayMode) -> Unit,
+    onSettingsChange: ((TuneSettings) -> TuneSettings) -> Unit,
+    onRefreshRadio: () -> Unit,
+    onRefreshFromSettings: () -> Unit,
+    onLoadMore: () -> Unit,
+    onClearDirectoryCache: () -> Unit,
+    onOpenUpdate: () -> Unit,
+    onScopeClick: () -> Unit
+) {
+    HorizontalPager(state = state, modifier = modifier, key = { TunePage.entries[it].name }) { index ->
+        val target = TunePage.entries[index]
+        Box(Modifier.fillMaxSize()) {
+            pageContent(
+                target, pageStates, isCar, settings, radio, playback, connected,
+                directoryRefreshing, updateSubtitle, onPlayback, onSelectTarget,
+                onDisplayModeChange, onSettingsChange, onRefreshRadio,
+                onRefreshFromSettings, onLoadMore, onClearDirectoryCache,
+                onOpenUpdate, onScopeClick
+            )
+        }
+    }
 }
 
 @Composable
