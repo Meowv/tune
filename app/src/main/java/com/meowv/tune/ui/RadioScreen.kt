@@ -626,6 +626,9 @@ private fun DirectoryFeedback(@StringRes message: Int, onRetry: (() -> Unit)? = 
 
 private val CountryLocale = Locale.SIMPLIFIED_CHINESE
 
+/** 中国相关地区在区域列表里固定置顶：大陆、香港、澳门、台湾。 */
+private val ChinaRegionOrder = listOf("CN", "HK", "MO", "TW")
+
 @Composable
 private fun scopeName(state: RadioUiState, locale: Locale): String = when (state.scope.mode) {
     ScopeMode.AUTO -> state.resolvedCountryCode?.let { stringResource(R.string.scope_auto_country, it.displayName(locale)) }
@@ -680,7 +683,17 @@ private fun ScopeOptions(
     val sorted = remember(countries.countries, locale) {
         val collator = Collator.getInstance(locale)
         countries.countries.map { it.code to it.displayName(locale) }
-            .sortedWith { a, b -> collator.compare(a.second, b.second) }
+            .sortedWith { a, b ->
+                // 中国相关地区固定置顶，其余按中文排序；按国家码判定，不受 ICU 显示名写法影响。
+                val rankA = ChinaRegionOrder.indexOf(a.first.value)
+                val rankB = ChinaRegionOrder.indexOf(b.first.value)
+                when {
+                    rankA >= 0 && rankB >= 0 -> rankA.compareTo(rankB)
+                    rankA >= 0 -> -1
+                    rankB >= 0 -> 1
+                    else -> collator.compare(a.second, b.second)
+                }
+            }
     }
     Column(
         Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 12.dp).testTag("scope_picker")

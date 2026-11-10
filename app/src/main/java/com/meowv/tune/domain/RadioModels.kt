@@ -5,10 +5,16 @@ import java.util.UUID
 
 @JvmInline
 value class CountryCode private constructor(val value: String) {
-    fun displayName(locale: Locale): String = Locale("", value).getDisplayCountry(locale).ifBlank { value }
+    fun displayName(locale: Locale): String {
+        val name = Locale("", value).getDisplayCountry(locale).ifBlank { value }
+        // 港澳台在中文下补齐「中国」前缀：界面里不出现孤立地名；ICU 已带前缀时不重复添加。
+        val needsPrefix = locale.language == "zh" && value in chinaRegions && !name.startsWith("中国")
+        return if (needsPrefix) "中国$name" else name
+    }
 
     companion object {
         private val validCodes = Locale.getISOCountries().toSet()
+        private val chinaRegions = setOf("HK", "MO", "TW")
 
         fun parse(value: String?): CountryCode? =
             value?.trim()?.uppercase(Locale.ROOT)?.takeIf(validCodes::contains)?.let(::CountryCode)
