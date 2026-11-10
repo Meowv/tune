@@ -49,7 +49,7 @@
   <string name="setting_update">版本与更新</string>
   <string name="update_title">版本与更新</string>
   <string name="update_back">返回</string>
-  <string name="update_tagline">好歌不断，喵趣随行。</string>
+  <string name="update_tagline">音乐不断，喵趣随行。</string>
   <string name="update_subtitle_idle">%1$s</string>
   <string name="update_subtitle_checking">%1$s · 正在检查…</string>
   <string name="update_subtitle_latest">%1$s · 已是最新版本</string>
