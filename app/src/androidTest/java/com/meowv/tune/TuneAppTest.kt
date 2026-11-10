@@ -55,6 +55,7 @@ class TuneAppTest {
             runCatching {
                 app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop)
             }
+            app.sleepTimer.cancel()
             // 相邻台站断言依赖顺序模式；随机默认值由专门用例覆盖。
             app.userSettings.update {
                 TuneSettings(scope = RadioScope(ScopeMode.GLOBAL), playbackOrder = PlaybackOrder.SEQUENTIAL)
@@ -171,7 +172,7 @@ class TuneAppTest {
         compose.waitUntil(3000) {
             app.playerController.state.value.error == null
         }
-        compose.onNodeWithTag("now_playing_play").assertContentDescriptionEquals("播放")
+        compose.onNodeWithTag("now_playing_play").assertContentDescriptionEquals("继续播放")
         runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
     }
 
@@ -192,11 +193,13 @@ class TuneAppTest {
             compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithTag("now_playing_shuffle")
-            .assertContentDescriptionEquals("播放顺序：不限区域随机")
+            .assertContentDescriptionEquals("随机播放")
+            .assertIsSelected()
             .performClick()
         compose.waitUntil(3000) { order() == PlaybackOrder.SEQUENTIAL }
         compose.onNodeWithTag("now_playing_shuffle")
-            .assertContentDescriptionEquals("播放顺序：顺序播放")
+            .assertContentDescriptionEquals("随机播放")
+            .assertIsNotSelected()
 
         compose.activityRule.scenario.recreate()
         compose.waitUntil(5000) { app.playerController.connected.value }
@@ -205,7 +208,8 @@ class TuneAppTest {
             compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithTag("now_playing_shuffle")
-            .assertContentDescriptionEquals("播放顺序：顺序播放")
+            .assertContentDescriptionEquals("随机播放")
+            .assertIsNotSelected()
         runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
     }
 
@@ -600,6 +604,28 @@ class TuneAppTest {
     }
 
     @Test
+    fun centerWaveformTogglesPlaybackWithAccessibleLabels() {
+        playFirstStation()
+        compose.onNodeWithTag("player_info").performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("now_playing_play")
+            .assertContentDescriptionEquals("暂停播放")
+            .performClick()
+        compose.waitUntil(3000) {
+            app.playerController.state.value.phase == PlaybackPhase.PAUSED
+        }
+        compose.onNodeWithTag("now_playing_play")
+            .assertContentDescriptionEquals("继续播放")
+            .performClick()
+        compose.waitUntil(5000) {
+            app.playerController.state.value.phase == PlaybackPhase.PLAYING
+        }
+        runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
+    }
+
+    @Test
     fun swipeUpAndArtworkGesturesUseTheSharedQueue() {
         playFirstStation()
         compose.onNodeWithTag("player_info").performTouchInput { swipeUp() }
@@ -635,6 +661,62 @@ class TuneAppTest {
         }
         assertEquals(UUID(0, 1), app.playerController.state.value.station?.uuid)
         assertEquals(PlaybackPhase.PLAYING, app.playerController.state.value.phase)
+        runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
+    }
+
+    @Test
+    fun sleepTimerStartsSurvivesCollapseAndCanBeCancelled() {
+        playFirstStation()
+        compose.onNodeWithTag("player_info").performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("now_playing_sleep").performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithTag("sleep_timer_panel").fetchSemanticsNodes().isNotEmpty()
+        }
+        listOf(15, 30, 45, 60).forEach { minutes ->
+            compose.onNodeWithTag("sleep_timer_$minutes").assertIsDisplayed()
+        }
+        compose.onNodeWithTag("sleep_timer_custom").assertIsDisplayed()
+        compose.onNodeWithTag("sleep_timer_15").performClick()
+        compose.waitUntil(3000) {
+            app.sleepTimer.state.value.durationMinutes == 15
+        }
+        compose.onNodeWithTag("now_playing_sleep").assertIsSelected()
+
+        compose.onNodeWithTag("now_playing_collapse").performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isEmpty() &&
+                compose.onAllNodesWithTag("global_player").fetchSemanticsNodes().isNotEmpty()
+        }
+        assertTrue("收起播放页不应取消睡眠定时", app.sleepTimer.state.value.isActive)
+
+        compose.onNodeWithTag("player_info").performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("now_playing_sleep").performClick()
+        compose.onNodeWithTag("sleep_timer_cancel").performClick()
+        compose.waitUntil(3000) { !app.sleepTimer.state.value.isActive }
+        runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
+    }
+
+    @Test
+    fun customSleepTimerAcceptsValidMinutes() {
+        playFirstStation()
+        compose.onNodeWithTag("player_info").performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("now_playing_sleep").performClick()
+        compose.onNodeWithTag("sleep_timer_custom").performClick()
+        compose.onNodeWithTag("sleep_timer_custom_input").performTextInput("12")
+        compose.onNodeWithTag("sleep_timer_custom_confirm").performClick()
+        compose.waitUntil(3000) {
+            app.sleepTimer.state.value.durationMinutes == 12
+        }
+        app.sleepTimer.cancel()
         runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
     }
 

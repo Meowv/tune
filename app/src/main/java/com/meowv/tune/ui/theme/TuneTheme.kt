@@ -16,6 +16,7 @@ object TuneColors {
     val Surface = Color(0xFF141B30)
     val Raised = Color(0xFF1B2540)
     val Primary = Color(0xFFA78BFA)
+    val PrimaryLight = Color(0xFFD7B7FF)
     val Accent = Color(0xFF8B5CF6)
     val Text = Color(0xFFF4F5FB)
     val Muted = Color(0xFFA7B0C5)

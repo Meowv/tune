@@ -17,6 +17,7 @@ import com.meowv.tune.radio.RadioQueueManager
 import com.meowv.tune.domain.RadioQueue
 import com.meowv.tune.domain.RadioRepository
 import com.meowv.tune.domain.SettingsRepository
+import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.playback.MediaProbe
 import com.meowv.tune.playback.PlaybackIntent
 import com.meowv.tune.playback.PlaybackRetryPolicy
@@ -24,6 +25,7 @@ import com.meowv.tune.playback.MediaUrlPolicy
 import com.meowv.tune.playback.NetworkMonitor
 import com.meowv.tune.playback.RadioMediaConnection
 import com.meowv.tune.playback.RadioStreamResolver
+import com.meowv.tune.playback.SleepTimerController
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
@@ -95,6 +97,11 @@ open class TuneApplication : Application(), SingletonImageLoader.Factory {
     private val streamResolver by lazy { RadioStreamResolver(radioBrowser, MediaProbe(mediaHttp)) }
     internal open suspend fun resolveStream(intent: PlaybackIntent) = streamResolver.resolve(intent)
     internal val playerController by lazy { RadioMediaConnection(this) }
+    internal val sleepTimer by lazy {
+        SleepTimerController(onExpired = {
+            runCatching { playerController.dispatch(PlayerCommand.Stop) }
+        })
+    }
 
     override fun newImageLoader(context: Context): ImageLoader = ImageLoader.Builder(context)
         .components { add(OkHttpNetworkFetcherFactory(MediaUrlPolicy.client(httpsOnly = true))) }

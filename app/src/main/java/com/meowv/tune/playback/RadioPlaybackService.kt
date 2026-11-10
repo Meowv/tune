@@ -110,9 +110,12 @@ class RadioPlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         scope.cancel()
-        (application as TuneApplication).playerController.apply {
-            engine?.close()
-            engine = null
+        (application as TuneApplication).apply {
+            sleepTimer.cancel()
+            playerController.apply {
+                engine?.close()
+                engine = null
+            }
         }
         session?.let {
             val player = it.player

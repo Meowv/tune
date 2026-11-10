@@ -4,7 +4,9 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
@@ -39,6 +41,7 @@ class NowPlayingCompatibilityTest {
     fun prepare() = runBlocking<Unit> {
         app.mockNetwork.value = NetworkState(NetworkType.WIFI, metered = false)
         runCatching { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
+        app.sleepTimer.cancel()
         app.userSettings.update {
             TuneSettings(
                 scope = RadioScope(ScopeMode.GLOBAL),
@@ -75,7 +78,7 @@ class NowPlayingCompatibilityTest {
             "now_playing_play",
             "now_playing_next",
             "now_playing_shuffle",
-            "now_playing_volume"
+            "now_playing_sleep"
         ).forEach { tag ->
             val node = compose.onNodeWithTag(tag)
             node.assertIsDisplayed().assertHasClickAction()
@@ -96,6 +99,14 @@ class NowPlayingCompatibilityTest {
         ) <= 1.5f)
         compose.onNodeWithTag("now_playing_artwork")
             .assertContentDescriptionEquals("电台台标：Test station 1")
+        compose.onNodeWithTag("now_playing_brand").assertIsDisplayed()
+        compose.onNodeWithTag("now_playing_volume").assertDoesNotExist()
+        assertTrue(
+            "Now Playing 不应展示地区副标题",
+            compose.onAllNodes(
+                hasText("Japan") and hasAnyAncestor(hasTestTag("now_playing_screen"))
+            ).fetchSemanticsNodes().isEmpty()
+        )
 
         runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
     }

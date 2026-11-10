@@ -1,13 +1,18 @@
 package com.meowv.tune.ui
 
-import android.media.AudioManager
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,33 +32,46 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -62,10 +80,13 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.focused
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -76,33 +97,34 @@ import com.meowv.tune.R
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.Station
+import com.meowv.tune.playback.SleepTimerState
+import com.meowv.tune.playback.sleepTimerRemainingMinutes
 import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.ui.theme.TuneShapes
 import com.meowv.tune.ui.theme.TuneSizes
 import com.meowv.tune.ui.theme.TuneTextStyle
+import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.sin
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun NowPlayingScreen(
     isCar: Boolean,
     connected: Boolean,
     state: PlayerUiState,
     station: Station,
-    countryName: String?,
-    randomRangeName: String?,
     shuffle: Boolean,
+    sleepTimer: SleepTimerState,
     onCollapse: () -> Unit,
     onToggle: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
     onToggleShuffle: () -> Unit,
+    onSetSleepTimer: (Int?) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-    val audioManager = remember(context) {
-        context.getSystemService(AudioManager::class.java)
-    }
     val motionEnabled = rememberMotionEnabled()
     val animationMillis = if (motionEnabled) 220 else 0
     val phase = state.phase
@@ -112,21 +134,10 @@ internal fun NowPlayingScreen(
     val canChangeStation = connected && !controlsLocked
     val onNextCurrent by rememberUpdatedState(onNext)
     val onPreviousCurrent by rememberUpdatedState(onPrevious)
+    var sleepPanelOpen by rememberSaveable { mutableStateOf(false) }
+    var customSleepOpen by rememberSaveable { mutableStateOf(false) }
 
-    Box(
-        modifier.fillMaxSize().background(TuneColors.Background)
-    ) {
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.verticalGradient(
-                    listOf(
-                        TuneColors.Accent.copy(alpha = .13f),
-                        TuneColors.Surface.copy(alpha = .72f),
-                        TuneColors.Background
-                    )
-                )
-            )
-        )
+    Box(modifier.fillMaxSize()) {
         BoxWithConstraints(
             Modifier.fillMaxSize().windowInsetsPadding(
                 if (isCar) WindowInsets.displayCutout else WindowInsets.safeDrawing
@@ -135,10 +146,11 @@ internal fun NowPlayingScreen(
             val availableWidth = maxWidth
             val availableHeight = maxHeight
             val wide = isCar || isNowPlayingWide(availableWidth.value, availableHeight.value)
+            NowPlayingBackdrop(wide)
             val contentPadding = if (wide) {
                 Modifier.padding(horizontal = if (isCar) 32.dp else 24.dp)
             } else {
-                Modifier.padding(horizontal = 20.dp)
+                Modifier.padding(horizontal = if (availableWidth < 360.dp) 16.dp else 22.dp)
             }
             Column(Modifier.fillMaxSize().then(contentPadding)) {
                 NowPlayingTopBar(
@@ -153,55 +165,172 @@ internal fun NowPlayingScreen(
                         maxHeight = availableHeight,
                         state = state,
                         station = station,
-                        countryName = countryName,
-                        randomRangeName = randomRangeName,
                         connected = connected,
                         buffering = buffering,
                         animationMillis = animationMillis,
                         canNext = connected && state.canNext && !controlsLocked,
                         canPrevious = connected && state.canPrevious && !controlsLocked,
                         shuffle = shuffle,
+                        sleepTimer = sleepTimer,
                         onToggle = onToggle,
                         onNext = { if (canChangeStation) onNextCurrent() },
                         onPrevious = { if (canChangeStation) onPreviousCurrent() },
                         onToggleShuffle = onToggleShuffle,
-                        onVolume = {
-                            audioManager?.adjustStreamVolume(
-                                AudioManager.STREAM_MUSIC,
-                                AudioManager.ADJUST_SAME,
-                                AudioManager.FLAG_SHOW_UI
-                            )
-                        },
+                        onSleepTimer = { sleepPanelOpen = true },
                         onCollapse = onCollapse
                     )
                 } else {
                     PhoneNowPlayingContent(
                         state = state,
                         station = station,
-                        countryName = countryName,
-                        randomRangeName = randomRangeName,
                         connected = connected,
                         buffering = buffering,
                         animationMillis = animationMillis,
                         canNext = connected && state.canNext && !controlsLocked,
                         canPrevious = connected && state.canPrevious && !controlsLocked,
                         shuffle = shuffle,
+                        sleepTimer = sleepTimer,
                         onToggle = onToggle,
                         onNext = { if (canChangeStation) onNextCurrent() },
                         onPrevious = { if (canChangeStation) onPreviousCurrent() },
                         onToggleShuffle = onToggleShuffle,
-                        onVolume = {
-                            audioManager?.adjustStreamVolume(
-                                AudioManager.STREAM_MUSIC,
-                                AudioManager.ADJUST_SAME,
-                                AudioManager.FLAG_SHOW_UI
-                            )
-                        },
+                        onSleepTimer = { sleepPanelOpen = true },
                         onCollapse = onCollapse
                     )
                 }
             }
         }
+    }
+
+    if (sleepPanelOpen) {
+        SleepTimerPanel(
+            isCar = isCar,
+            timer = sleepTimer,
+            onDismiss = { sleepPanelOpen = false },
+            onPreset = {
+                onSetSleepTimer(it)
+                sleepPanelOpen = false
+            },
+            onCustom = {
+                sleepPanelOpen = false
+                customSleepOpen = true
+            },
+            onCancelTimer = {
+                onSetSleepTimer(null)
+                sleepPanelOpen = false
+            }
+        )
+    }
+    if (customSleepOpen) {
+        CustomSleepTimerDialog(
+            onDismiss = { customSleepOpen = false },
+            onConfirm = {
+                onSetSleepTimer(it)
+                customSleepOpen = false
+            }
+        )
+    }
+}
+
+@Composable
+private fun NowPlayingBackdrop(wide: Boolean) {
+    Canvas(Modifier.fillMaxSize()) {
+        val center = Offset(
+            x = size.width * if (wide) .31f else .5f,
+            y = size.height * if (wide) .5f else .39f
+        )
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    Color(0xFF2A214F),
+                    Color(0xFF151A34),
+                    TuneColors.Background
+                ),
+                center = center,
+                radius = size.maxDimension * .78f
+            )
+        )
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    TuneColors.Primary.copy(alpha = .19f),
+                    TuneColors.Accent.copy(alpha = .07f),
+                    Color.Transparent
+                ),
+                center = center,
+                radius = size.minDimension * if (wide) .43f else .58f
+            ),
+            radius = size.minDimension * if (wide) .43f else .58f,
+            center = center
+        )
+
+        val topWave = Path().apply {
+            moveTo(0f, size.height * .24f)
+            cubicTo(
+                size.width * .18f, size.height * .18f,
+                size.width * .38f, size.height * .04f,
+                size.width * .64f, size.height * .12f
+            )
+            cubicTo(
+                size.width * .81f, size.height * .17f,
+                size.width * .91f, size.height * .09f,
+                size.width, size.height * .07f
+            )
+            lineTo(size.width, 0f)
+            lineTo(0f, 0f)
+            close()
+        }
+        drawPath(
+            topWave,
+            Brush.linearGradient(
+                listOf(
+                    Color(0xFF49317D).copy(alpha = .18f),
+                    Color(0xFF251E52).copy(alpha = .08f),
+                    Color.Transparent
+                )
+            )
+        )
+
+        val lowerWave = Path().apply {
+            moveTo(0f, size.height * .88f)
+            cubicTo(
+                size.width * .18f, size.height * .83f,
+                size.width * .35f, size.height * .94f,
+                size.width * .52f, size.height * .89f
+            )
+            cubicTo(
+                size.width * .72f, size.height * .84f,
+                size.width * .84f, size.height * .91f,
+                size.width, size.height * .86f
+            )
+            lineTo(size.width, size.height)
+            lineTo(0f, size.height)
+            close()
+        }
+        drawPath(
+            lowerWave,
+            Brush.verticalGradient(
+                listOf(Color(0xFF34205E).copy(alpha = .46f), Color(0xFF111832))
+            )
+        )
+
+        val bottomWave = Path().apply {
+            moveTo(0f, size.height * .95f)
+            cubicTo(
+                size.width * .16f, size.height * .91f,
+                size.width * .33f, size.height * .99f,
+                size.width * .51f, size.height * .95f
+            )
+            cubicTo(
+                size.width * .72f, size.height * .90f,
+                size.width * .86f, size.height * .98f,
+                size.width, size.height * .94f
+            )
+            lineTo(size.width, size.height)
+            lineTo(0f, size.height)
+            close()
+        }
+        drawPath(bottomWave, Color(0xFF14162F).copy(alpha = .9f))
     }
 }
 
@@ -211,29 +340,32 @@ private fun NowPlayingTopBar(
     animationMillis: Int,
     onCollapse: () -> Unit
 ) {
-    val label = stringResource(R.string.now_playing_collapse)
-    Row(
-        Modifier.fillMaxWidth().height(if (isCar) 72.dp else 56.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        NowPlayingCircleButton(
+    Box(Modifier.fillMaxWidth().height(if (isCar) 68.dp else 58.dp)) {
+        NowPlayingIconButton(
             icon = R.drawable.ic_ui_chevron_down,
-            description = label,
+            description = stringResource(R.string.now_playing_collapse),
             isCar = isCar,
             tag = "now_playing_collapse",
             animationMillis = animationMillis,
-            onClick = onCollapse
+            onClick = onCollapse,
+            modifier = Modifier.align(Alignment.CenterStart)
         )
-        Text(
-            stringResource(R.string.now_playing_page_label),
-            modifier = Modifier.weight(1f),
-            color = TuneColors.Muted,
-            fontSize = if (isCar) 16.sp else 14.sp,
-            fontWeight = FontWeight.Medium,
-            textAlign = TextAlign.Center,
-            style = TuneTextStyle
-        )
-        Spacer(Modifier.width(if (isCar) TuneSizes.TouchCar else TuneSizes.Touch))
+        Row(
+            Modifier.align(Alignment.Center).testTag("now_playing_brand"),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(if (isCar) 12.dp else 9.dp)
+        ) {
+            BrandLogo(Modifier.size(if (isCar) 38.dp else 28.dp))
+            Text(
+                stringResource(R.string.brand_full),
+                color = TuneColors.Text,
+                fontSize = if (isCar) 19.sp else 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = TuneTextStyle
+            )
+        }
     }
 }
 
@@ -241,73 +373,81 @@ private fun NowPlayingTopBar(
 private fun PhoneNowPlayingContent(
     state: PlayerUiState,
     station: Station,
-    countryName: String?,
-    randomRangeName: String?,
     connected: Boolean,
     buffering: Boolean,
     animationMillis: Int,
     canNext: Boolean,
     canPrevious: Boolean,
     shuffle: Boolean,
+    sleepTimer: SleepTimerState,
     onToggle: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
     onToggleShuffle: () -> Unit,
-    onVolume: () -> Unit,
+    onSleepTimer: () -> Unit,
     onCollapse: () -> Unit
 ) {
-    Column(
-        Modifier.fillMaxSize().focusGroup(),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        BoxWithConstraints(
-            Modifier.fillMaxWidth().weight(1f),
-            contentAlignment = Alignment.Center
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val compact = maxHeight < 560.dp
+        Column(
+            Modifier.fillMaxSize().focusGroup(),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            val artworkSize = minOf(maxWidth * .82f, maxHeight).coerceAtLeast(1.dp)
-            NowPlayingArtworkGesture(
+            BoxWithConstraints(
+                Modifier.fillMaxWidth().weight(1f),
+                contentAlignment = Alignment.Center
+            ) {
+                val artworkSize = minOf(
+                    maxWidth * if (compact) .64f else .72f,
+                    maxHeight * .94f,
+                    if (compact) 230.dp else 304.dp
+                ).coerceAtLeast(1.dp)
+                NowPlayingArtworkGesture(
+                    station = station,
+                    canNext = canNext,
+                    canPrevious = canPrevious,
+                    animationMillis = animationMillis,
+                    modifier = Modifier.size(artworkSize),
+                    onNext = onNext,
+                    onPrevious = onPrevious,
+                    onCollapse = onCollapse
+                )
+            }
+            Spacer(Modifier.height(if (compact) 6.dp else 14.dp))
+            StationTitle(
                 station = station,
+                isCar = false,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(if (compact) 8.dp else 18.dp))
+            TransportControls(
+                state = state,
+                connected = connected,
+                buffering = buffering,
+                animationMillis = animationMillis,
+                isCar = false,
                 canNext = canNext,
                 canPrevious = canPrevious,
-                animationMillis = animationMillis,
-                modifier = Modifier.size(minOf(artworkSize, 320.dp)),
+                onToggle = onToggle,
                 onNext = onNext,
                 onPrevious = onPrevious,
-                onCollapse = onCollapse
+                modifier = Modifier.fillMaxWidth()
             )
+            NowPlayingNotice(state, modifier = Modifier.padding(top = 6.dp))
+            Spacer(Modifier.height(if (compact) 8.dp else 18.dp))
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                NowPlayingTools(
+                    isCar = false,
+                    shuffle = shuffle,
+                    sleepTimer = sleepTimer,
+                    animationMillis = animationMillis,
+                    onToggleShuffle = onToggleShuffle,
+                    onSleepTimer = onSleepTimer,
+                    modifier = Modifier.widthIn(max = 540.dp).fillMaxWidth()
+                )
+            }
+            Spacer(Modifier.height(8.dp))
         }
-        Spacer(Modifier.height(12.dp))
-        StationHeading(
-            station = station,
-            countryName = countryName,
-            playing = state.phase == PlaybackPhase.PLAYING,
-            isCar = false,
-            centered = true
-        )
-        Spacer(Modifier.height(12.dp))
-        PlaybackControls(
-            state = state,
-            connected = connected,
-            buffering = buffering,
-            animationMillis = animationMillis,
-            isCar = false,
-            canNext = canNext,
-            canPrevious = canPrevious,
-            onToggle = onToggle,
-            onNext = onNext,
-            onPrevious = onPrevious
-        )
-        NowPlayingNotice(state, modifier = Modifier.heightIn(min = 28.dp))
-        Spacer(Modifier.height(6.dp))
-        NowPlayingTools(
-            isCar = false,
-            shuffle = shuffle,
-            rangeName = randomRangeName,
-            animationMillis = animationMillis,
-            onToggleShuffle = onToggleShuffle,
-            onVolume = onVolume,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
     }
 }
 
@@ -318,81 +458,97 @@ private fun WideNowPlayingContent(
     maxHeight: Dp,
     state: PlayerUiState,
     station: Station,
-    countryName: String?,
-    randomRangeName: String?,
     connected: Boolean,
     buffering: Boolean,
     animationMillis: Int,
     canNext: Boolean,
     canPrevious: Boolean,
     shuffle: Boolean,
+    sleepTimer: SleepTimerState,
     onToggle: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
     onToggleShuffle: () -> Unit,
-    onVolume: () -> Unit,
+    onSleepTimer: () -> Unit,
     onCollapse: () -> Unit
 ) {
-    val artworkSize = minOf(
-        maxHeight - if (isCar) 128.dp else 104.dp,
-        maxWidth * if (isCar) .34f else .4f,
-        if (isCar) 420.dp else 340.dp
-    ).coerceAtLeast(170.dp)
-    Row(
-        Modifier.fillMaxSize().focusGroup(),
-        horizontalArrangement = Arrangement.spacedBy(if (isCar) 48.dp else 32.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(Modifier.weight(1.12f).fillMaxHeight(), contentAlignment = Alignment.Center) {
-            NowPlayingArtworkGesture(
-                station = station,
-                canNext = canNext,
-                canPrevious = canPrevious,
-                animationMillis = animationMillis,
-                modifier = Modifier.size(artworkSize),
-                onNext = onNext,
-                onPrevious = onPrevious,
-                onCollapse = onCollapse
-            )
-        }
-        Column(
-            Modifier.weight(.88f).widthIn(max = if (isCar) 560.dp else 430.dp)
-                .fillMaxHeight(),
-            verticalArrangement = Arrangement.Center
+    Box(Modifier.fillMaxSize()) {
+        val artworkSize = minOf(
+            maxWidth * if (isCar) .36f else .34f,
+            maxHeight * .68f,
+            if (isCar) 420.dp else 330.dp
+        ).coerceAtLeast(150.dp)
+        Row(
+            Modifier.fillMaxSize().focusGroup(),
+            horizontalArrangement = Arrangement.spacedBy(if (isCar) 44.dp else 28.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            StationHeading(
-                station = station,
-                countryName = countryName,
-                playing = state.phase == PlaybackPhase.PLAYING,
-                isCar = isCar,
-                centered = false
-            )
-            Spacer(Modifier.height(if (isCar) 24.dp else 18.dp))
-            PlaybackControls(
-                state = state,
-                connected = connected,
-                buffering = buffering,
-                animationMillis = animationMillis,
-                isCar = isCar,
-                canNext = canNext,
-                canPrevious = canPrevious,
-                onToggle = onToggle,
-                onNext = onNext,
-                onPrevious = onPrevious
-            )
-            NowPlayingNotice(state, modifier = Modifier.heightIn(min = 30.dp))
-            Spacer(Modifier.height(if (isCar) 18.dp else 10.dp))
-            NowPlayingTools(
-                isCar = isCar,
-                shuffle = shuffle,
-                rangeName = randomRangeName,
-                animationMillis = animationMillis,
-                onToggleShuffle = onToggleShuffle,
-                onVolume = onVolume,
-                modifier = Modifier.fillMaxWidth()
-            )
+            Box(Modifier.weight(1.04f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                NowPlayingArtworkGesture(
+                    station = station,
+                    canNext = canNext,
+                    canPrevious = canPrevious,
+                    animationMillis = animationMillis,
+                    modifier = Modifier.size(artworkSize),
+                    onNext = onNext,
+                    onPrevious = onPrevious,
+                    onCollapse = onCollapse
+                )
+            }
+            Column(
+                Modifier.weight(.96f).fillMaxHeight().widthIn(max = if (isCar) 560.dp else 430.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Spacer(Modifier.weight(1f))
+                StationTitle(
+                    station = station,
+                    isCar = isCar,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(if (isCar) 22.dp else 14.dp))
+                TransportControls(
+                    state = state,
+                    connected = connected,
+                    buffering = buffering,
+                    animationMillis = animationMillis,
+                    isCar = isCar,
+                    canNext = canNext,
+                    canPrevious = canPrevious,
+                    onToggle = onToggle,
+                    onNext = onNext,
+                    onPrevious = onPrevious,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                NowPlayingNotice(state, modifier = Modifier.padding(top = 5.dp))
+                Spacer(Modifier.weight(1f))
+                NowPlayingTools(
+                    isCar = isCar,
+                    shuffle = shuffle,
+                    sleepTimer = sleepTimer,
+                    animationMillis = animationMillis,
+                    onToggleShuffle = onToggleShuffle,
+                    onSleepTimer = onSleepTimer,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(10.dp))
+            }
         }
     }
+}
+
+@Composable
+private fun StationTitle(station: Station, isCar: Boolean, modifier: Modifier) {
+    Text(
+        station.name.ifBlank { stringResource(R.string.station_unnamed) },
+        modifier = modifier,
+        color = TuneColors.Text,
+        fontSize = if (isCar) 34.sp else 28.sp,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        textAlign = TextAlign.Center,
+        style = TuneTextStyle
+    )
 }
 
 @Composable
@@ -424,7 +580,7 @@ private fun NowPlayingArtworkGesture(
         modifier
             .graphicsLayer {
                 translationX = offset.value
-                alpha = 1f - (abs(offset.value) / (size.width.coerceAtLeast(1f))) * .28f
+                alpha = 1f - (abs(offset.value) / size.width.coerceAtLeast(1f)) * .28f
             }
             .testTag("now_playing_artwork")
             .semantics { contentDescription = description }
@@ -454,7 +610,12 @@ private fun NowPlayingArtworkGesture(
                             val available = if (amount.x < 0f) currentCanNext else currentCanPrevious
                             val delta = if (available) amount.x else amount.x * .28f
                             scope.launch {
-                                offset.snapTo((offset.value + delta).coerceIn(-size.width * .32f, size.width * .32f))
+                                offset.snapTo(
+                                    (offset.value + delta).coerceIn(
+                                        -size.width * .32f,
+                                        size.width * .32f
+                                    )
+                                )
                             }
                         }
                     },
@@ -472,7 +633,7 @@ private fun NowPlayingArtworkGesture(
                             if (animationMillis > 0) {
                                 offset.animateTo(
                                     0f,
-                                    animationSpec = spring(
+                                    spring(
                                         dampingRatio = .9f,
                                         stiffness = Spring.StiffnessMedium,
                                         visibilityThreshold = .01f
@@ -485,8 +646,11 @@ private fun NowPlayingArtworkGesture(
                     },
                     onDragCancel = {
                         scope.launch {
-                            if (animationMillis > 0) offset.animateTo(0f, tween(160))
-                            else offset.snapTo(0f)
+                            if (animationMillis > 0) {
+                                offset.animateTo(0f, tween(160))
+                            } else {
+                                offset.snapTo(0f)
+                            }
                         }
                     }
                 )
@@ -510,18 +674,18 @@ private fun StationArtwork(station: Station, modifier: Modifier) {
         modifier.clip(shape)
             .background(
                 Brush.linearGradient(
-                    listOf(TuneColors.Raised, TuneColors.Surface)
+                    listOf(Color(0xFF262448), Color(0xFF161D38))
                 )
             )
-            .border(1.dp, TuneColors.BorderSoft, shape),
+            .border(1.dp, TuneColors.Primary.copy(alpha = .18f), shape),
         contentAlignment = Alignment.Center
     ) {
         val url = station.iconUrl
         if (url.isNullOrBlank()) {
             TuneIcon(
                 R.drawable.ic_radio,
-                Modifier.fillMaxSize(.44f),
-                TuneColors.Primary.copy(alpha = .82f)
+                Modifier.fillMaxSize(.42f),
+                TuneColors.Primary.copy(alpha = .86f)
             )
         } else {
             val fallback = painterResource(R.drawable.ic_radio)
@@ -538,55 +702,7 @@ private fun StationArtwork(station: Station, modifier: Modifier) {
 }
 
 @Composable
-private fun StationHeading(
-    station: Station,
-    countryName: String?,
-    playing: Boolean,
-    isCar: Boolean,
-    centered: Boolean
-) {
-    val alignment = if (centered) Alignment.CenterHorizontally else Alignment.Start
-    Column(
-        Modifier.fillMaxWidth(),
-        horizontalAlignment = alignment
-    ) {
-        Text(
-            station.name.ifBlank { stringResource(R.string.station_unnamed) },
-            color = TuneColors.Text,
-            fontSize = if (isCar) 31.sp else 24.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = if (centered) TextAlign.Center else TextAlign.Start,
-            style = TuneTextStyle
-        )
-        if (!countryName.isNullOrBlank()) {
-            Spacer(Modifier.height(5.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (playing) {
-                    PlayingWaveBars(
-                        Modifier.size(width = 17.dp, height = 11.dp),
-                        TuneColors.Primary.copy(alpha = .78f)
-                    )
-                }
-                Text(
-                    countryName,
-                    color = TuneColors.Muted,
-                    fontSize = if (isCar) 16.sp else 14.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = TuneTextStyle
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun PlaybackControls(
+private fun TransportControls(
     state: PlayerUiState,
     connected: Boolean,
     buffering: Boolean,
@@ -596,61 +712,51 @@ private fun PlaybackControls(
     canPrevious: Boolean,
     onToggle: () -> Unit,
     onNext: () -> Unit,
-    onPrevious: () -> Unit
+    onPrevious: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val failed = state.error != null
-    val playing = state.phase == PlaybackPhase.PLAYING
-    val enabled = connected && !buffering
-    val previousLabel = stringResource(R.string.player_previous)
-    val nextLabel = stringResource(R.string.player_next)
-    val actionLabel = when {
-        buffering -> stringResource(R.string.playback_buffering)
-        failed -> stringResource(R.string.directory_retry)
-        playing -> stringResource(R.string.action_pause)
-        else -> stringResource(R.string.action_play)
-    }
-    Row(
-        Modifier.fillMaxWidth().focusGroup(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
-    ) {
-        NowPlayingCircleButton(
-            icon = R.drawable.ic_ui_previous,
-            description = previousLabel,
-            isCar = isCar,
-            tag = "now_playing_previous",
-            enabled = canPrevious,
-            animationMillis = animationMillis,
-            onClick = onPrevious
-        )
-        Spacer(Modifier.width(if (isCar) 42.dp else 30.dp))
-        PrimaryPlaybackButton(
-            state = state,
-            enabled = enabled,
-            isCar = isCar,
-            label = actionLabel,
-            animationMillis = animationMillis,
-            onClick = onToggle
-        )
-        Spacer(Modifier.width(if (isCar) 42.dp else 30.dp))
-        NowPlayingCircleButton(
-            icon = R.drawable.ic_ui_next,
-            description = nextLabel,
-            isCar = isCar,
-            tag = "now_playing_next",
-            enabled = canNext,
-            animationMillis = animationMillis,
-            onClick = onNext
-        )
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Row(
+            Modifier.widthIn(max = if (isCar) 430.dp else 350.dp).fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            NowPlayingIconButton(
+                icon = R.drawable.ic_ui_previous,
+                description = stringResource(R.string.player_previous),
+                isCar = isCar,
+                tag = "now_playing_previous",
+                enabled = canPrevious,
+                animationMillis = animationMillis,
+                onClick = onPrevious
+            )
+            WaveformPlaybackControl(
+                state = state,
+                enabled = connected && !buffering,
+                buffering = buffering,
+                isCar = isCar,
+                animationMillis = animationMillis,
+                onClick = onToggle
+            )
+            NowPlayingIconButton(
+                icon = R.drawable.ic_ui_next,
+                description = stringResource(R.string.player_next),
+                isCar = isCar,
+                tag = "now_playing_next",
+                enabled = canNext,
+                animationMillis = animationMillis,
+                onClick = onNext
+            )
+        }
     }
 }
 
 @Composable
-private fun PrimaryPlaybackButton(
+private fun WaveformPlaybackControl(
     state: PlayerUiState,
     enabled: Boolean,
+    buffering: Boolean,
     isCar: Boolean,
-    label: String,
     animationMillis: Int,
     onClick: () -> Unit
 ) {
@@ -658,31 +764,38 @@ private fun PrimaryPlaybackButton(
     val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (pressed) .94f else 1f,
+        targetValue = if (pressed) .96f else 1f,
         animationSpec = tween(if (animationMillis > 0) 100 else 0),
-        label = "now_playing_press_scale"
+        label = "now_playing_wave_press"
     )
-    val size = if (isCar) 88.dp else 76.dp
-    val buffering = state.phase == PlaybackPhase.RESOLVING ||
-        state.phase == PlaybackPhase.RETRYING || state.phase == PlaybackPhase.BUFFERING
-    val failed = state.error != null && !buffering
     val playing = state.phase == PlaybackPhase.PLAYING
+    val failed = state.error != null && !buffering
+    val label = when {
+        buffering -> stringResource(R.string.playback_buffering)
+        failed -> stringResource(R.string.directory_retry)
+        playing -> stringResource(R.string.now_playing_pause_accessibility)
+        else -> stringResource(R.string.now_playing_resume_accessibility)
+    }
+    val shape = RoundedCornerShape(24.dp)
     val background by animateColorAsState(
-        targetValue = if (enabled) TuneColors.Accent.copy(alpha = .9f) else TuneColors.Raised,
-        animationSpec = tween(animationMillis),
-        label = "now_playing_primary_background"
+        targetValue = if (pressed) TuneColors.Primary.copy(alpha = .09f) else Color.Transparent,
+        animationSpec = tween(if (animationMillis > 0) 100 else 0),
+        label = "now_playing_wave_background"
     )
     Box(
-        Modifier.size(size)
+        Modifier.size(
+            width = if (isCar) 142.dp else 112.dp,
+            height = if (isCar) 82.dp else 68.dp
+        )
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
             }
-            .clip(CircleShape)
+            .clip(shape)
             .background(background)
             .then(
-                if (focused) Modifier.border(2.dp, TuneColors.Text, CircleShape)
-                else Modifier.border(1.dp, TuneColors.Primary.copy(alpha = .32f), CircleShape)
+                if (focused) Modifier.border(2.dp, TuneColors.Primary, shape)
+                else Modifier
             )
             .clickable(
                 enabled = enabled,
@@ -701,77 +814,147 @@ private fun PrimaryPlaybackButton(
             },
         contentAlignment = Alignment.Center
     ) {
+        val visual = when {
+            buffering -> WaveVisual.Loading
+            failed -> WaveVisual.Error
+            playing -> WaveVisual.Playing
+            else -> WaveVisual.Paused
+        }
         Crossfade(
-            targetState = when {
-                buffering -> PrimaryVisual.Loading
-                failed -> PrimaryVisual.Retry
-                playing -> PrimaryVisual.Pause
-                else -> PrimaryVisual.Play
-            },
-            animationSpec = tween(animationMillis),
-            label = "now_playing_primary_visual"
-        ) { visual ->
-            when (visual) {
-                PrimaryVisual.Loading -> CircularProgressIndicator(
-                    Modifier.size(if (isCar) 34.dp else 30.dp),
-                    color = TuneColors.Text,
+            targetState = visual,
+            animationSpec = tween(if (animationMillis > 0) 160 else 0),
+            label = "now_playing_wave_state"
+        ) { current ->
+            when (current) {
+                WaveVisual.Playing -> PlayingWaveform(
+                    animating = true,
+                    showPlayIcon = false,
+                    modifier = Modifier.fillMaxSize(.78f)
+                )
+                WaveVisual.Paused -> PlayingWaveform(
+                    animating = false,
+                    showPlayIcon = true,
+                    modifier = Modifier.fillMaxSize(.78f)
+                )
+                WaveVisual.Loading -> CircularProgressIndicator(
+                    Modifier.size(if (isCar) 32.dp else 27.dp),
+                    color = TuneColors.PrimaryLight,
                     strokeWidth = 2.dp,
-                    trackColor = TuneColors.Text.copy(alpha = .2f)
+                    trackColor = TuneColors.Primary.copy(alpha = .16f)
                 )
-                PrimaryVisual.Retry -> TuneIcon(
+                WaveVisual.Error -> TuneIcon(
                     R.drawable.ic_refresh,
-                    Modifier.size(if (isCar) 32.dp else 28.dp),
-                    TuneColors.Text
-                )
-                PrimaryVisual.Pause -> TuneIcon(
-                    R.drawable.ic_pause,
-                    Modifier.size(if (isCar) 36.dp else 32.dp),
-                    TuneColors.Text
-                )
-                PrimaryVisual.Play -> TuneIcon(
-                    R.drawable.ic_radio_play,
-                    Modifier.size(if (isCar) 36.dp else 32.dp),
-                    TuneColors.Text
+                    Modifier.size(if (isCar) 32.dp else 27.dp),
+                    TuneColors.Error
                 )
             }
         }
     }
 }
 
-private enum class PrimaryVisual { Play, Pause, Loading, Retry }
+private enum class WaveVisual { Playing, Paused, Loading, Error }
 
 @Composable
-private fun NowPlayingCircleButton(
+private fun PlayingWaveform(
+    animating: Boolean,
+    showPlayIcon: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val motionEnabled = rememberMotionEnabled()
+    val phase: Float = if (animating && motionEnabled) {
+        val transition = rememberInfiniteTransition(label = "now_playing_wave")
+        val value by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = (PI * 2).toFloat(),
+            animationSpec = infiniteRepeatable(
+                animation = tween(1_700, easing = LinearEasing)
+            ),
+            label = "now_playing_wave_phase"
+        )
+        value
+    } else {
+        0f
+    }
+    val staticLevels = remember { listOf(.36f, .62f, .84f, 1f, .74f, .5f, .3f) }
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val count = staticLevels.size
+            val gap = size.width / (count * 2f + 1f)
+            val barWidth = gap.coerceAtMost(size.width * .055f)
+            staticLevels.forEachIndexed { index, baseLevel ->
+                val level = if (animating && motionEnabled) {
+                    (.34f + .66f * (.5f + .5f * sin(phase + index * .83f))).coerceIn(.22f, 1f)
+                } else {
+                    baseLevel
+                }
+                val height = size.height * level
+                val left = gap + index * (gap + barWidth) + (gap - barWidth) / 2f
+                drawRoundRect(
+                    brush = Brush.verticalGradient(
+                        listOf(
+                            TuneColors.PrimaryLight.copy(alpha = if (animating) .94f else .45f),
+                            TuneColors.Primary.copy(alpha = if (animating) .72f else .3f)
+                        ),
+                        startY = (size.height - height) / 2f,
+                        endY = (size.height + height) / 2f
+                    ),
+                    topLeft = Offset(left, (size.height - height) / 2f),
+                    size = Size(barWidth, height),
+                    cornerRadius = CornerRadius(barWidth / 2f)
+                )
+            }
+        }
+        if (showPlayIcon) {
+            Box(
+                Modifier.size(if (showPlayIcon) 26.dp else 0.dp)
+                    .background(TuneColors.Background.copy(alpha = .82f), RoundedCornerShape(9.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                TuneIcon(
+                    R.drawable.ic_radio_play,
+                    Modifier.size(18.dp),
+                    TuneColors.PrimaryLight
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NowPlayingIconButton(
     icon: Int,
     description: String,
     isCar: Boolean,
     tag: String,
-    enabled: Boolean = true,
     animationMillis: Int,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
     val tint by animateColorAsState(
-        targetValue = if (enabled) TuneColors.Text else TuneColors.Muted.copy(alpha = .4f),
+        targetValue = if (enabled) TuneColors.Text else TuneColors.Muted.copy(alpha = .36f),
         animationSpec = tween(animationMillis),
-        label = "now_playing_control_tint"
+        label = "now_playing_icon_tint"
     )
     val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (pressed) .93f else 1f,
+        targetValue = if (pressed) .92f else 1f,
         animationSpec = tween(if (animationMillis > 0) 100 else 0),
-        label = "now_playing_control_scale"
+        label = "now_playing_icon_scale"
     )
+    val touch = if (isCar) 64.dp else TuneSizes.Touch
+    val shape = RoundedCornerShape(20.dp)
     Box(
-        Modifier.size(if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
+        modifier.size(touch)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
             }
-            .clip(CircleShape)
+            .clip(shape)
             .then(
-                if (focused) Modifier.border(2.dp, TuneColors.Primary, CircleShape)
+                if (focused) Modifier.border(2.dp, TuneColors.Primary, shape)
                 else Modifier
             )
             .clickable(
@@ -791,7 +974,11 @@ private fun NowPlayingCircleButton(
             },
         contentAlignment = Alignment.Center
     ) {
-        TuneIcon(icon, Modifier.size(if (isCar) 28.dp else 24.dp), tint)
+        TuneIcon(
+            icon,
+            Modifier.size(if (isCar) 34.dp else 28.dp),
+            tint
+        )
     }
 }
 
@@ -799,25 +986,23 @@ private fun NowPlayingCircleButton(
 private fun NowPlayingNotice(state: PlayerUiState, modifier: Modifier = Modifier) {
     val buffering = state.phase == PlaybackPhase.RESOLVING ||
         state.phase == PlaybackPhase.RETRYING || state.phase == PlaybackPhase.BUFFERING
-    val failed = state.error != null
     val text = when {
-        failed -> playbackErrorText(state.error, state.statusCode)
+        state.error != null -> playbackErrorText(state.error, state.statusCode)
             ?: stringResource(R.string.playback_unavailable)
         buffering -> stringResource(R.string.playback_connecting_source)
         else -> null
     }
-    Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        if (text != null) {
-            Text(
-                text,
-                color = if (failed) TuneColors.Error else TuneColors.Muted,
-                fontSize = 13.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-                style = TuneTextStyle
-            )
-        }
+    if (text != null) {
+        Text(
+            text,
+            modifier.fillMaxWidth(),
+            color = if (state.error != null) TuneColors.Error else TuneColors.Muted,
+            fontSize = 13.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            style = TuneTextStyle
+        )
     }
 }
 
@@ -825,76 +1010,84 @@ private fun NowPlayingNotice(state: PlayerUiState, modifier: Modifier = Modifier
 private fun NowPlayingTools(
     isCar: Boolean,
     shuffle: Boolean,
-    rangeName: String?,
+    sleepTimer: SleepTimerState,
     animationMillis: Int,
     onToggleShuffle: () -> Unit,
-    onVolume: () -> Unit,
+    onSleepTimer: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val modeLabel = when {
-        !shuffle -> stringResource(R.string.player_order_sequential)
-        rangeName != null -> stringResource(R.string.now_playing_shuffle_region, rangeName)
-        else -> stringResource(R.string.now_playing_shuffle_global)
-    }
-    val modeDescription = stringResource(R.string.now_playing_shuffle_description, modeLabel)
-    val volumeLabel = stringResource(R.string.now_playing_volume)
+    val shape = RoundedCornerShape(if (isCar) 34.dp else 28.dp)
+    val capsuleColor by animateColorAsState(
+        targetValue = TuneColors.Surface.copy(alpha = .76f),
+        animationSpec = tween(animationMillis),
+        label = "now_playing_toolbar"
+    )
+    val randomLabel = stringResource(R.string.player_order_shuffle)
+    val sleepLabel = stringResource(R.string.now_playing_sleep_timer)
+    val remaining = if (sleepTimer.isActive) {
+        sleepRemainingLabel(sleepTimer.remainingMillis)
+    } else null
+    val sleepDescription = remaining?.let {
+        stringResource(R.string.now_playing_sleep_accessibility_active, it)
+    } ?: stringResource(R.string.now_playing_sleep_accessibility)
     Row(
-        modifier.focusGroup(),
-        horizontalArrangement = Arrangement.spacedBy(if (isCar) 16.dp else 8.dp)
+        modifier.height(if (isCar) 78.dp else 74.dp)
+            .clip(shape)
+            .background(capsuleColor)
+            .border(1.dp, TuneColors.Primary.copy(alpha = .2f), shape)
+            .focusGroup()
+            .testTag("now_playing_tools"),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        NowPlayingToolChip(
-            icon = R.drawable.ic_order_shuffle,
-            label = modeLabel,
-            description = modeDescription,
-            selected = shuffle,
-            isCar = isCar,
+        ToolbarAction(
             tag = "now_playing_shuffle",
-            animationMillis = animationMillis,
-            onClick = onToggleShuffle,
-            modifier = Modifier.weight(1.35f)
-        )
-        NowPlayingToolChip(
-            icon = R.drawable.ic_volume,
-            label = volumeLabel,
-            description = volumeLabel,
-            selected = false,
+            icon = R.drawable.ic_order_shuffle,
+            label = randomLabel,
+            detail = null,
+            selected = shuffle,
+            description = randomLabel,
             isCar = isCar,
-            tag = "now_playing_volume",
-            animationMillis = animationMillis,
-            onClick = onVolume,
-            modifier = Modifier.weight(.82f)
+            modifier = Modifier.weight(1f),
+            onClick = onToggleShuffle
+        )
+        Box(
+            Modifier.width(1.dp).height(if (isCar) 42.dp else 36.dp)
+                .background(TuneColors.Muted.copy(alpha = .28f))
+        )
+        ToolbarAction(
+            tag = "now_playing_sleep",
+            icon = R.drawable.ic_sleep,
+            label = sleepLabel,
+            detail = remaining,
+            selected = sleepTimer.isActive,
+            description = sleepDescription,
+            isCar = isCar,
+            modifier = Modifier.weight(1f),
+            onClick = onSleepTimer
         )
     }
 }
 
 @Composable
-private fun NowPlayingToolChip(
+private fun ToolbarAction(
+    tag: String,
     icon: Int,
     label: String,
-    description: String,
+    detail: String?,
     selected: Boolean,
+    description: String,
     isCar: Boolean,
-    tag: String,
-    animationMillis: Int,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier,
+    onClick: () -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
-    val background by animateColorAsState(
-        targetValue = if (selected) TuneColors.Segment else TuneColors.Raised.copy(alpha = .72f),
-        animationSpec = tween(animationMillis),
-        label = "now_playing_tool_background"
-    )
+    val shape = RoundedCornerShape(24.dp)
     Row(
-        modifier.height(if (isCar) 56.dp else 48.dp)
-            .clip(TuneShapes.Control)
-            .background(background)
+        modifier.fillMaxHeight()
+            .clip(shape)
             .then(
-                if (selected || focused) Modifier.border(
-                    if (focused) 2.dp else 1.dp,
-                    if (focused) TuneColors.Text else TuneColors.Primary.copy(alpha = .52f),
-                    TuneShapes.Control
-                ) else Modifier
+                if (focused) Modifier.border(2.dp, TuneColors.Primary, shape)
+                else Modifier
             )
             .clickable(role = Role.Button, onClick = onClick)
             .onFocusChanged { focused = it.isFocused }
@@ -905,24 +1098,251 @@ private fun NowPlayingToolChip(
                 this.selected = selected
                 this.focused = focused
             }
-            .padding(horizontal = if (isCar) 14.dp else 10.dp),
+            .padding(horizontal = if (isCar) 18.dp else 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(if (isCar) 9.dp else 6.dp)
+        horizontalArrangement = Arrangement.Center
     ) {
         TuneIcon(
             icon,
-            Modifier.size(if (isCar) TuneSizes.IconMd else TuneSizes.IconSm),
-            if (selected) TuneColors.Primary else TuneColors.Muted
+            Modifier.size(if (isCar) 25.dp else 23.dp),
+            if (selected) TuneColors.PrimaryLight else TuneColors.Muted
         )
+        Spacer(Modifier.width(if (isCar) 10.dp else 8.dp))
+        Column(
+            horizontalAlignment = Alignment.Start,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                label,
+                color = if (selected) TuneColors.Text else TuneColors.Muted,
+                fontSize = if (isCar) 16.sp else 14.sp,
+                fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = TuneTextStyle
+            )
+            if (detail != null) {
+                Text(
+                    detail,
+                    color = TuneColors.PrimaryLight.copy(alpha = .78f),
+                    fontSize = if (isCar) 13.sp else 12.sp,
+                    maxLines = 1,
+                    style = TuneTextStyle
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun sleepRemainingLabel(remainingMillis: Long): String {
+    val minutes = sleepTimerRemainingMinutes(remainingMillis)
+    val hours = minutes / 60
+    val rest = minutes % 60
+    return when {
+        hours == 0 -> stringResource(R.string.sleep_timer_remaining_minutes, minutes)
+        rest == 0 -> stringResource(R.string.sleep_timer_remaining_hours, hours)
+        else -> stringResource(R.string.sleep_timer_remaining_hours_minutes, hours, rest)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SleepTimerPanel(
+    isCar: Boolean,
+    timer: SleepTimerState,
+    onDismiss: () -> Unit,
+    onPreset: (Int) -> Unit,
+    onCustom: () -> Unit,
+    onCancelTimer: () -> Unit
+) {
+    val remaining = if (timer.isActive) sleepRemainingLabel(timer.remainingMillis) else null
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = TuneColors.Surface,
+        contentColor = TuneColors.Text,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = TuneColors.Border) }
+    ) {
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Column(
+                Modifier.widthIn(max = 560.dp).fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 8.dp)
+                    .testTag("sleep_timer_panel")
+            ) {
+                Text(
+                    stringResource(R.string.now_playing_sleep_timer),
+                    color = TuneColors.Text,
+                    fontSize = if (isCar) 23.sp else 21.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.semantics { heading() },
+                    style = TuneTextStyle
+                )
+                if (remaining != null) {
+                    Spacer(Modifier.height(5.dp))
+                    Text(
+                        stringResource(R.string.sleep_timer_remaining_prefix, remaining),
+                        color = TuneColors.PrimaryLight,
+                        fontSize = 14.sp,
+                        style = TuneTextStyle
+                    )
+                }
+                Spacer(Modifier.height(18.dp))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(15, 30, 45, 60).forEach { minutes ->
+                        SleepTimerPreset(
+                            minutes = minutes,
+                            modifier = Modifier.weight(1f),
+                            onClick = { onPreset(minutes) }
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                SleepTimerMenuRow(
+                    label = stringResource(R.string.sleep_timer_custom),
+                    tag = "sleep_timer_custom",
+                    onClick = onCustom
+                )
+                if (timer.isActive) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        color = TuneColors.Divider
+                    )
+                    SleepTimerMenuRow(
+                        label = stringResource(R.string.sleep_timer_cancel),
+                        tag = "sleep_timer_cancel",
+                        destructive = true,
+                        onClick = onCancelTimer
+                    )
+                }
+                Spacer(Modifier.height(18.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun SleepTimerPreset(
+    minutes: Int,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val shape = RoundedCornerShape(18.dp)
+    Box(
+        modifier.heightIn(min = 50.dp)
+            .clip(shape)
+            .background(TuneColors.Raised)
+            .border(1.dp, TuneColors.BorderSoft, shape)
+            .clickable(role = Role.Button, onClick = onClick)
+            .testTag("sleep_timer_$minutes")
+            .semantics {
+                role = Role.Button
+                contentDescription = "$minutes 分钟"
+            },
+        contentAlignment = Alignment.Center
+    ) {
         Text(
-            label,
-            color = if (selected) TuneColors.Text else TuneColors.Muted,
-            fontSize = if (isCar) 14.sp else 12.sp,
-            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+            stringResource(R.string.sleep_timer_minutes, minutes),
+            color = TuneColors.Text,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
             style = TuneTextStyle
         )
     }
 }
 
+@Composable
+private fun SleepTimerMenuRow(
+    label: String,
+    tag: String,
+    destructive: Boolean = false,
+    onClick: () -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 52.dp)
+            .clip(TuneShapes.Control)
+            .clickable(role = Role.Button, onClick = onClick)
+            .testTag(tag)
+            .semantics { contentDescription = label }
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            label,
+            color = if (destructive) TuneColors.Error else TuneColors.Text,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Medium,
+            style = TuneTextStyle
+        )
+    }
+}
+
+@Composable
+private fun CustomSleepTimerDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (Int) -> Unit
+) {
+    var value by rememberSaveable { mutableStateOf("") }
+    val minutes = value.toIntOrNull()
+    val valid = minutes != null && minutes in 1..480
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.sleep_timer_custom_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    stringResource(R.string.sleep_timer_custom_body),
+                    color = TuneColors.Muted,
+                    fontSize = 14.sp,
+                    style = TuneTextStyle
+                )
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = { input ->
+                        value = input.filter(Char::isDigit).take(3)
+                    },
+                    label = { Text(stringResource(R.string.sleep_timer_minutes_label)) },
+                    singleLine = true,
+                    isError = value.isNotBlank() && !valid,
+                    supportingText = {
+                        Text(
+                            stringResource(
+                                if (value.isNotBlank() && !valid) {
+                                    R.string.sleep_timer_custom_invalid
+                                } else {
+                                    R.string.sleep_timer_custom_range
+                                }
+                            )
+                        )
+                    },
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Done
+                    ),
+                    modifier = Modifier.fillMaxWidth().testTag("sleep_timer_custom_input")
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = valid,
+                onClick = { onConfirm(requireNotNull(minutes)) },
+                modifier = Modifier.testTag("sleep_timer_custom_confirm")
+            ) {
+                Text(stringResource(R.string.sleep_timer_start))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        },
+        containerColor = TuneColors.Surface,
+        textContentColor = TuneColors.Text,
+        titleContentColor = TuneColors.Text
+    )
+}

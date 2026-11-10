@@ -37,16 +37,15 @@ import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.RadioDisplayMode
 import com.meowv.tune.domain.RadioUiState
-import com.meowv.tune.domain.ScopeMode
 import com.meowv.tune.domain.Station
 import com.meowv.tune.domain.TuneError
 import com.meowv.tune.domain.TuneSettings
 import com.meowv.tune.radio.CountryOptions
+import com.meowv.tune.playback.SleepTimerState
 import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.update.LocalVersion
 import com.meowv.tune.update.UpdateUiState
 import com.meowv.tune.update.install.InstallState
-import java.util.Locale
 import kotlinx.coroutines.flow.StateFlow
 
 @Composable
@@ -56,6 +55,7 @@ fun TuneApp(
     radio: StateFlow<RadioUiState>,
     playback: StateFlow<PlayerUiState>,
     playbackConnected: StateFlow<Boolean>,
+    sleepTimer: StateFlow<SleepTimerState>,
     snackbar: SnackbarHostState,
     directoryRefreshing: Boolean,
     localVersion: LocalVersion,
@@ -67,6 +67,7 @@ fun TuneApp(
     onCancelDownload: () -> Unit,
     onInstallUpdate: () -> Unit,
     onPlayback: (PlayerCommand) -> Unit,
+    onSetSleepTimer: (Int?) -> Unit,
     onSelectTarget: (Station) -> Unit,
     onDisplayModeChange: (RadioDisplayMode) -> Unit,
     countries: CountryOptions,
@@ -82,6 +83,7 @@ fun TuneApp(
     val connected by playbackConnected.collectAsStateWithLifecycle()
     val playbackState by playback.collectAsStateWithLifecycle()
     val radioState by radio.collectAsStateWithLifecycle()
+    val sleepTimerState by sleepTimer.collectAsStateWithLifecycle()
     var page by rememberSaveable { mutableStateOf(TunePage.Radio) }
     var showScopePicker by rememberSaveable { mutableStateOf(false) }
     var showUpdate by rememberSaveable { mutableStateOf(false) }
@@ -149,11 +151,6 @@ fun TuneApp(
     }
     BackHandler(enabled = nowPlayingOpen && !showUpdate && !showScopePicker) {
         nowPlayingOpen = false
-    }
-    val randomRangeName = when (settings.scope.mode) {
-        ScopeMode.COUNTRY -> settings.scope.countryCode?.displayName(Locale.getDefault())
-        ScopeMode.GLOBAL -> null
-        ScopeMode.AUTO -> radioState.resolvedCountryCode?.displayName(Locale.getDefault())
     }
     val motionEnabled = rememberMotionEnabled()
     val fullscreenAnimMillis = if (motionEnabled) 280 else 0
@@ -234,9 +231,8 @@ fun TuneApp(
                         connected = connected,
                         state = playbackState,
                         station = overlayStation,
-                        countryName = overlayStation.countryCode?.displayName(Locale.getDefault()),
-                        randomRangeName = randomRangeName,
                         shuffle = shuffle,
+                        sleepTimer = sleepTimerState,
                         onCollapse = { nowPlayingOpen = false },
                         onToggle = toggle,
                         onNext = next,
@@ -252,6 +248,7 @@ fun TuneApp(
                                 )
                             }
                         },
+                        onSetSleepTimer = onSetSleepTimer,
                         modifier = Modifier.fillMaxSize().testTag("now_playing_screen")
                     )
                 }

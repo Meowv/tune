@@ -145,6 +145,7 @@ class MainActivity : ComponentActivity() {
                     radio = radioModel.radioState,
                     playback = tuneApp.playerController.state,
                     playbackConnected = tuneApp.playerController.connected,
+                    sleepTimer = tuneApp.sleepTimer.state,
                     snackbar = snackbar,
                     directoryRefreshing = refresh == DirectoryRefresh.Running,
                     localVersion = local,
@@ -156,6 +157,13 @@ class MainActivity : ComponentActivity() {
                     onCancelDownload = updateModel::cancelDownload,
                     onInstallUpdate = updateModel::installApk,
                     onPlayback = ::dispatchPlayback,
+                    onSetSleepTimer = { minutes ->
+                        if (minutes == null) {
+                            tuneApp.sleepTimer.cancel()
+                        } else {
+                            runCatching { tuneApp.sleepTimer.start(minutes) }
+                        }
+                    },
                     onSelectTarget = radioModel::selectTarget,
                     onDisplayModeChange = { mode ->
                         settingsModel.update { it.copy(displayMode = mode) }
