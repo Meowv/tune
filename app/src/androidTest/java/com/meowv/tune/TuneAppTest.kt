@@ -188,28 +188,32 @@ class TuneAppTest {
             app.playerController.state.value.station?.uuid == UUID(0, 1) &&
                 app.playerController.state.value.phase == PlaybackPhase.PLAYING
         }
+        compose.onNodeWithTag("player_order")
+            .assertContentDescriptionEquals("随机播放")
+            .performClick()
+        compose.waitUntil(3000) { order() == PlaybackOrder.SEQUENTIAL }
         compose.onNodeWithTag("player_info").performClick()
         compose.waitUntil(5000) {
             compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithTag("now_playing_shuffle")
             .assertContentDescriptionEquals("随机播放")
-            .assertIsSelected()
+            .assertIsNotSelected()
             .performClick()
-        compose.waitUntil(3000) { order() == PlaybackOrder.SEQUENTIAL }
+        compose.waitUntil(3000) { order() == PlaybackOrder.SHUFFLE }
         compose.onNodeWithTag("now_playing_shuffle")
             .assertContentDescriptionEquals("随机播放")
-            .assertIsNotSelected()
+            .assertIsSelected()
 
         compose.activityRule.scenario.recreate()
         compose.waitUntil(5000) { app.playerController.connected.value }
-        compose.waitUntil(5000) { order() == PlaybackOrder.SEQUENTIAL }
+        compose.waitUntil(5000) { order() == PlaybackOrder.SHUFFLE }
         compose.waitUntil(5000) {
             compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithTag("now_playing_shuffle")
             .assertContentDescriptionEquals("随机播放")
-            .assertIsNotSelected()
+            .assertIsSelected()
         runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
     }
 

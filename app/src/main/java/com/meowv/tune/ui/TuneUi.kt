@@ -205,6 +205,19 @@ fun TuneApp(
                         state = playbackState,
                         station = visibleStation,
                         connected = connected,
+                        shuffle = shuffle,
+                        onToggleOrder = {
+                            onSettingsChange { current ->
+                                current.copy(
+                                    playbackOrder =
+                                        if (current.playbackOrder == PlaybackOrder.SHUFFLE) {
+                                            PlaybackOrder.SEQUENTIAL
+                                        } else {
+                                            PlaybackOrder.SHUFFLE
+                                        }
+                                )
+                            }
+                        },
                         onOpen = { nowPlayingOpen = true },
                         onToggle = toggle,
                         onNext = next,

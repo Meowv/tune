@@ -176,7 +176,7 @@ private fun MiniPlayerAction(
 
 /**
  * 播放器主操作按钮：48dp 热区（车机 56dp），不铺底色。
- * 播放/暂停使用明确图标；缓冲是品牌紫加载环，失败转错误色重试键，未选台为灰色。
+ * 播放中用轻量波形表达出声状态；缓冲是品牌紫加载环，失败转错误色重试键，未选台为灰色。
  */
 @Composable
 private fun PlayerActionButton(
@@ -204,9 +204,7 @@ private fun PlayerActionButton(
                     trackColor = tint.copy(alpha = .22f),
                     strokeCap = StrokeCap.Round
                 )
-                PlayerButtonVisual.Playing -> TuneIcon(
-                    R.drawable.ic_pause, Modifier.size(glyph), tint
-                )
+                PlayerButtonVisual.Playing -> PlayingWaveBars(Modifier.size(glyph), tint)
                 PlayerButtonVisual.Retry -> TuneIcon(
                     R.drawable.ic_refresh, Modifier.size(glyph), tint
                 )
@@ -428,8 +426,8 @@ private fun NavigationItem(
 }
 
 /**
- * 全局播放器：只保留台标、台名与一个播放/暂停按钮。
- * 信息区上滑展开，横滑换台，按钮独立响应，避免误触。
+ * 全局播放器保留台标、台名、播放顺序与播放状态按钮。
+ * 信息区上滑展开，横滑换台，控制按钮独立响应，避免误触。
  */
 @Composable
 internal fun MeowvMiniPlayer(
@@ -437,6 +435,8 @@ internal fun MeowvMiniPlayer(
     state: PlayerUiState,
     station: Station?,
     connected: Boolean,
+    shuffle: Boolean,
+    onToggleOrder: () -> Unit,
     onOpen: () -> Unit,
     onToggle: () -> Unit,
     onNext: () -> Unit,
@@ -477,6 +477,9 @@ internal fun MeowvMiniPlayer(
     val nextLabel = stringResource(R.string.player_next)
     val previousLabel = stringResource(R.string.player_previous)
     val openLabel = stringResource(R.string.now_playing_open)
+    val orderLabel = stringResource(
+        if (shuffle) R.string.player_order_shuffle else R.string.player_order_sequential
+    )
     val dragOffset = remember { Animatable(0f) }
     val dragScope = rememberCoroutineScope()
     val velocity = remember { VelocityTracker() }
@@ -492,9 +495,9 @@ internal fun MeowvMiniPlayer(
             Modifier.fillMaxWidth()
                 .padding(
                     start = if (isCar) 0.dp else 12.dp, end = if (isCar) 0.dp else 12.dp,
-                    top = if (isCar) 0.dp else 6.dp, bottom = if (isCar) 0.dp else 6.dp
+                    top = if (isCar) 0.dp else 8.dp, bottom = if (isCar) 0.dp else 8.dp
                 )
-                .height(if (isCar) 80.dp else 64.dp)
+                .height(if (isCar) 80.dp else 68.dp)
                 // 裁到播放器轮廓：横滑时台标和台名可以滑出边缘，但不会画到播放器外面。
                 .clip(if (isCar) RoundedCornerShape(0.dp) else TuneShapes.Player)
                 .background(
@@ -604,6 +607,19 @@ internal fun MeowvMiniPlayer(
                         modifier = Modifier.weight(1f)
                     )
                 }
+            }
+            MiniPlayerAction(
+                "player_order",
+                orderLabel,
+                enabled = true,
+                isCar = isCar,
+                onClick = onToggleOrder
+            ) {
+                TuneIcon(
+                    if (shuffle) R.drawable.ic_order_shuffle else R.drawable.ic_order_sequential,
+                    Modifier.size(if (isCar) TuneSizes.IconLg else TuneSizes.IconMd),
+                    TuneColors.Primary
+                )
             }
             PlayerActionButton(visual, buttonLabel, canToggle, isCar, onToggle)
         }
