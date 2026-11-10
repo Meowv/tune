@@ -21,6 +21,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
@@ -98,10 +99,7 @@ internal fun BrandLogo(modifier: Modifier = Modifier) {
  */
 @Composable
 internal fun PlayingWaveBars(modifier: Modifier = Modifier, color: Color = TuneColors.Primary) {
-    val context = LocalContext.current
-    val motionEnabled = remember {
-        Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f
-    }
+    val motionEnabled = rememberMotionEnabled()
     val fractions: List<androidx.compose.runtime.State<Float>> = if (motionEnabled) {
         val transition = rememberInfiniteTransition(label = "playing_wave")
         List(WAVE_BAR_COUNT) { index ->
@@ -130,6 +128,18 @@ internal fun PlayingWaveBars(modifier: Modifier = Modifier, color: Color = TuneC
                 cornerRadius = CornerRadius(barWidth / 2f)
             )
         }
+    }
+}
+
+@Composable
+internal fun rememberMotionEnabled(): Boolean {
+    val context = LocalContext.current
+    return remember(context) {
+        Settings.Global.getFloat(
+            context.contentResolver,
+            Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f
+        ) > 0f
     }
 }
 
@@ -166,8 +176,7 @@ private fun MiniPlayerAction(
 
 /**
  * 播放器主操作按钮：48dp 热区（车机 56dp），不铺底色。
- * 与顺序/随机键、列表行保持同一套无底色图标语言；状态靠图形与颜色区分：
- * 播放/播放中为品牌紫，缓冲是品牌紫加载环，失败转错误色重试键，未选台为灰色。
+ * 播放/暂停使用明确图标；缓冲是品牌紫加载环，失败转错误色重试键，未选台为灰色。
  */
 @Composable
 private fun PlayerActionButton(
@@ -195,8 +204,9 @@ private fun PlayerActionButton(
                     trackColor = tint.copy(alpha = .22f),
                     strokeCap = StrokeCap.Round
                 )
-                // 播放中用波形表示「正在出声」，与列表行同一套状态语言。
-                PlayerButtonVisual.Playing -> PlayingWaveBars(Modifier.size(glyph), tint)
+                PlayerButtonVisual.Playing -> TuneIcon(
+                    R.drawable.ic_pause, Modifier.size(glyph), tint
+                )
                 PlayerButtonVisual.Retry -> TuneIcon(
                     R.drawable.ic_refresh, Modifier.size(glyph), tint
                 )
@@ -419,7 +429,7 @@ private fun NavigationItem(
 
 /**
  * 全局播放器：只保留台标、台名与一个播放/暂停按钮。
- * 信息区横滑切台，按钮独立响应，避免误触。
+ * 信息区上滑展开，横滑换台，按钮独立响应，避免误触。
  */
 @Composable
 internal fun MeowvMiniPlayer(
@@ -427,8 +437,7 @@ internal fun MeowvMiniPlayer(
     state: PlayerUiState,
     station: Station?,
     connected: Boolean,
-    shuffle: Boolean,
-    onToggleOrder: () -> Unit,
+    onOpen: () -> Unit,
     onToggle: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit
@@ -437,13 +446,15 @@ internal fun MeowvMiniPlayer(
     val buffering = phase == PlaybackPhase.RESOLVING ||
         phase == PlaybackPhase.RETRYING || phase == PlaybackPhase.BUFFERING
     val playing = phase == PlaybackPhase.PLAYING
-    val failed = phase == PlaybackPhase.ERROR
+    val failed = state.error != null && !buffering
     val canToggle = connected && station != null && !buffering
     val currentNext by rememberUpdatedState(onNext)
     val currentPrevious by rememberUpdatedState(onPrevious)
+    val currentOpen by rememberUpdatedState(onOpen)
     // 可切台能力由播放队列按当前顺序给出（随机模式下有当前台即可返回）。
     val currentCanNext by rememberUpdatedState(state.canNext)
     val currentCanPrevious by rememberUpdatedState(state.canPrevious)
+    val motionEnabled = rememberMotionEnabled()
     val name = station?.name?.ifBlank { stringResource(R.string.station_unnamed) }
         ?: stringResource(R.string.player_unselected)
     val pauseLabel = stringResource(R.string.action_pause)
@@ -465,9 +476,15 @@ internal fun MeowvMiniPlayer(
     }
     val nextLabel = stringResource(R.string.player_next)
     val previousLabel = stringResource(R.string.player_previous)
-    val orderLabel = stringResource(
-        if (shuffle) R.string.player_order_shuffle else R.string.player_order_sequential
-    )
+    val openLabel = stringResource(R.string.now_playing_open)
+    val dragOffset = remember { Animatable(0f) }
+    val dragScope = rememberCoroutineScope()
+    val velocity = remember { VelocityTracker() }
+    val density = LocalDensity.current
+    val dragLimit = with(density) { 120.dp.toPx() }
+    val commitPx = with(density) { 56.dp.toPx() }
+    val flingPx = with(density) { 420.dp.toPx() }
+    val openPx = with(density) { 44.dp.toPx() }
 
     Column(Modifier.fillMaxWidth().background(if (isCar) TuneColors.Player else TuneColors.Background)) {
         if (isCar) HorizontalDivider(color = TuneColors.Divider, thickness = .5.dp)
@@ -475,9 +492,9 @@ internal fun MeowvMiniPlayer(
             Modifier.fillMaxWidth()
                 .padding(
                     start = if (isCar) 0.dp else 12.dp, end = if (isCar) 0.dp else 12.dp,
-                    top = if (isCar) 0.dp else 8.dp, bottom = if (isCar) 0.dp else 8.dp
+                    top = if (isCar) 0.dp else 6.dp, bottom = if (isCar) 0.dp else 6.dp
                 )
-                .height(if (isCar) 80.dp else 68.dp)
+                .height(if (isCar) 80.dp else 64.dp)
                 // 裁到播放器轮廓：横滑时台标和台名可以滑出边缘，但不会画到播放器外面。
                 .clip(if (isCar) RoundedCornerShape(0.dp) else TuneShapes.Player)
                 .background(
@@ -489,34 +506,44 @@ internal fun MeowvMiniPlayer(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // 台标 + 台名整体横滑换台。手势挂在静止的外层，位移只写 layer，既不触发重组，
-            // 也不会让节点跟着手指移动而把拖动增量抵消掉。
-            val dragOffset = remember { Animatable(0f) }
-            val dragScope = rememberCoroutineScope()
-            val velocity = remember { VelocityTracker() }
-            val density = LocalDensity.current
-            val dragLimit = with(density) { 120.dp.toPx() }
-            val commitPx = with(density) { 56.dp.toPx() }
-            val flingPx = with(density) { 420.dp.toPx() }
-            // 没有当前台时也算「可切」：滑一下直接从列表头/尾起播。
-            val canSwipeNext = currentCanNext || station == null
-            val canSwipePrevious = currentCanPrevious || station == null
+            // 手势先锁方向：横滑换台，上滑展开；点击仍交给独立的可点击节点。
+            val canSwipeNext = currentCanNext && !buffering && connected
+            val canSwipePrevious = currentCanPrevious && !buffering && connected
             Box(
                 Modifier.weight(1f).fillMaxHeight()
                     .testTag("player_info")
+                    .clickable(role = Role.Button, onClick = currentOpen)
                     .pointerInput(station?.uuid) {
-                        detectHorizontalDragGestures(
-                            onDragStart = { velocity.resetTracking() },
-                            onHorizontalDrag = { change, amount ->
+                        var totalX = 0f
+                        var totalY = 0f
+                        var horizontal = false
+                        var vertical = false
+                        detectDragGestures(
+                            onDragStart = {
+                                totalX = 0f
+                                totalY = 0f
+                                horizontal = false
+                                vertical = false
+                                velocity.resetTracking()
+                            },
+                            onDrag = { change, amount ->
                                 change.consume()
+                                totalX += amount.x
+                                totalY += amount.y
                                 velocity.addPosition(change.uptimeMillis, change.position)
-                                // 该方向没有下一台时给强阻尼，拉起来像橡皮筋，而不是撞到硬墙。
-                                val available = if (amount < 0) canSwipeNext else canSwipePrevious
-                                val delta = if (available) amount else amount * .3f
-                                dragScope.launch {
-                                    dragOffset.snapTo(
-                                        (dragOffset.value + delta).coerceIn(-dragLimit, dragLimit)
-                                    )
+                                if (!horizontal && !vertical && (abs(totalX) > 3f || abs(totalY) > 3f)) {
+                                    horizontal = abs(totalX) >= abs(totalY)
+                                    vertical = !horizontal
+                                }
+                                if (horizontal) {
+                                    // 该方向没有下一台时给强阻尼，拉起来像橡皮筋，而不是撞到硬墙。
+                                    val available = if (amount.x < 0) canSwipeNext else canSwipePrevious
+                                    val delta = if (available) amount.x else amount.x * .3f
+                                    dragScope.launch {
+                                        dragOffset.snapTo(
+                                            (dragOffset.value + delta).coerceIn(-dragLimit, dragLimit)
+                                        )
+                                    }
                                 }
                             },
                             onDragEnd = {
@@ -524,16 +551,30 @@ internal fun MeowvMiniPlayer(
                                 val flung = velocity.calculateVelocity().x
                                 val settled = dragOffset.value
                                 when {
-                                    (settled < -commitPx || flung < -flingPx) && canSwipeNext -> currentNext()
-                                    (settled > commitPx || flung > flingPx) && canSwipePrevious -> currentPrevious()
+                                    vertical && totalY <= -openPx -> currentOpen()
+                                    horizontal &&
+                                        (settled < -commitPx || flung < -flingPx) &&
+                                        canSwipeNext -> currentNext()
+                                    horizontal &&
+                                        (settled > commitPx || flung > flingPx) &&
+                                        canSwipePrevious -> currentPrevious()
                                 }
-                                dragScope.launch { dragOffset.animateTo(0f, SwipeSpring) }
+                                dragScope.launch {
+                                    if (motionEnabled) dragOffset.animateTo(0f, SwipeSpring)
+                                    else dragOffset.snapTo(0f)
+                                }
                             },
-                            onDragCancel = { dragScope.launch { dragOffset.animateTo(0f, SwipeSpring) } }
+                            onDragCancel = {
+                                dragScope.launch {
+                                    if (motionEnabled) dragOffset.animateTo(0f, SwipeSpring)
+                                    else dragOffset.snapTo(0f)
+                                }
+                            }
                         )
                     }
                     .semantics {
-                        // 无障碍动作与横滑同源：没有当前台时也能「下一个」起播。
+                        contentDescription = openLabel
+                        // 无障碍动作与横滑同源，均复用范围队列的真实切台能力。
                         customActions = listOf(
                             CustomAccessibilityAction(nextLabel) {
                                 if (canSwipeNext) { onNext(); true } else false
@@ -563,14 +604,6 @@ internal fun MeowvMiniPlayer(
                         modifier = Modifier.weight(1f)
                     )
                 }
-            }
-            // 顺序/随机是模式开关：两种模式都按「选中」呈现，模式由图标本身区分，不做灰化。
-            MiniPlayerAction("player_order", orderLabel, enabled = true, isCar = isCar, onClick = onToggleOrder) {
-                TuneIcon(
-                    if (shuffle) R.drawable.ic_order_shuffle else R.drawable.ic_order_sequential,
-                    Modifier.size(if (isCar) TuneSizes.IconLg else TuneSizes.IconMd),
-                    TuneColors.Primary
-                )
             }
             PlayerActionButton(visual, buttonLabel, canToggle, isCar, onToggle)
         }

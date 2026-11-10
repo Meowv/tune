@@ -52,6 +52,9 @@ class TuneAppTest {
         awaitCompose()
         app.mockNetwork.value = NetworkState(NetworkType.WIFI, metered = false)
         runBlocking {
+            runCatching {
+                app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop)
+            }
             // 相邻台站断言依赖顺序模式；随机默认值由专门用例覆盖。
             app.userSettings.update {
                 TuneSettings(scope = RadioScope(ScopeMode.GLOBAL), playbackOrder = PlaybackOrder.SEQUENTIAL)
@@ -147,27 +150,63 @@ class TuneAppTest {
     }
 
     @Test
+    fun nowPlayingShowsNetworkErrorAndRetryState() {
+        playFirstStation()
+        compose.onNodeWithTag("player_info").performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        app.mockNetwork.value = NetworkState(NetworkType.OFFLINE, metered = false)
+        compose.waitUntil(5000) {
+            app.playerController.state.value.phase == PlaybackPhase.PAUSED &&
+                app.playerController.state.value.error == com.meowv.tune.domain.TuneError.NETWORK_OFFLINE
+        }
+        compose.onNode(
+            hasText("网络不可用") and hasAnyAncestor(hasTestTag("now_playing_screen"))
+        ).assertIsDisplayed()
+        compose.onNodeWithTag("now_playing_play").assertContentDescriptionEquals("重试")
+
+        app.mockNetwork.value = NetworkState(NetworkType.WIFI, metered = false)
+        compose.waitUntil(3000) {
+            app.playerController.state.value.error == null
+        }
+        compose.onNodeWithTag("now_playing_play").assertContentDescriptionEquals("播放")
+        runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
+    }
+
+    @Test
     fun orderDefaultsToShuffleAndTogglePersists() {
         compose.waitUntil(5000) { app.playerController.connected.value }
         runBlocking { app.userSettings.update { TuneSettings(scope = RadioScope(ScopeMode.GLOBAL)) } }
         compose.waitUntil(3000) { order() == PlaybackOrder.SHUFFLE }
-        compose.waitUntil(3000) {
-            compose.onAllNodesWithContentDescription("随机播放").fetchSemanticsNodes().isNotEmpty()
+        val first = "station_${UUID(0, 1)}"
+        compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(first))
+        compose.onNodeWithTag(first).performClick()
+        compose.waitUntil(8000) {
+            app.playerController.state.value.station?.uuid == UUID(0, 1) &&
+                app.playerController.state.value.phase == PlaybackPhase.PLAYING
         }
-        compose.onNodeWithTag("player_order").assertContentDescriptionEquals("随机播放").performClick()
+        compose.onNodeWithTag("player_info").performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("now_playing_shuffle")
+            .assertContentDescriptionEquals("播放顺序：不限区域随机")
+            .performClick()
         compose.waitUntil(3000) { order() == PlaybackOrder.SEQUENTIAL }
-        compose.waitUntil(3000) {
-            compose.onAllNodesWithContentDescription("顺序播放").fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithTag("player_order").assertContentDescriptionEquals("顺序播放")
+        compose.onNodeWithTag("now_playing_shuffle")
+            .assertContentDescriptionEquals("播放顺序：顺序播放")
 
         compose.activityRule.scenario.recreate()
         compose.waitUntil(5000) { app.playerController.connected.value }
         compose.waitUntil(5000) { order() == PlaybackOrder.SEQUENTIAL }
         compose.waitUntil(5000) {
-            compose.onAllNodesWithContentDescription("顺序播放").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithTag("player_order").assertContentDescriptionEquals("顺序播放")
+        compose.onNodeWithTag("now_playing_shuffle")
+            .assertContentDescriptionEquals("播放顺序：顺序播放")
+        runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
     }
 
     @Test
@@ -249,8 +288,7 @@ class TuneAppTest {
         selectPage("nav_settings")
         compose.onNodeWithTag("page_settings").assertIsDisplayed()
         compose.onNodeWithText("自动播放").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithTag("global_player").assertIsDisplayed()
-        compose.onNodeWithTag("player_pause").assertIsNotEnabled()
+        compose.onNodeWithTag("global_player").assertDoesNotExist()
         assertFalse(app.radioQueue.canPrevious.value)
         selectPage("nav_radio")
         compose.onNodeWithTag("page_radio").assertIsDisplayed()
@@ -300,7 +338,7 @@ class TuneAppTest {
         selectPage("nav_radio")
         awaitScope(label)
         compose.onNodeWithTag("scope_selector").assertContentDescriptionEquals(label)
-        compose.onNodeWithTag("global_player").assertIsDisplayed()
+        compose.onNodeWithTag("global_player").assertDoesNotExist()
     }
 
     @Test
@@ -324,11 +362,12 @@ class TuneAppTest {
 
     @Test
     fun fixedControlsHaveEnoughSpaceAndClearSemantics() {
-        val player = compose.onNodeWithTag("global_player").getUnclippedBoundsInRoot()
         val list = compose.onNodeWithTag("station_list").getUnclippedBoundsInRoot()
-        assertTrue("List must end before the fixed player", list.bottom <= player.top)
+        val navigation = compose.onNodeWithTag("bottom_navigation").getUnclippedBoundsInRoot()
+        assertTrue("List must end before navigation", list.bottom <= navigation.top)
+        compose.onNodeWithTag("global_player").assertDoesNotExist()
         val minimum = if (compose.onAllNodesWithTag("shell_car").fetchSemanticsNodes().isNotEmpty()) 56.dp else 48.dp
-        listOf("nav_radio", "nav_music", "nav_settings", "player_order", "player_pause", "player_info").forEach { tag ->
+        listOf("nav_radio", "nav_music", "nav_settings").forEach { tag ->
             val bounds = compose.onNodeWithTag(tag).getUnclippedBoundsInRoot()
             assertTrue("$tag width", bounds.right - bounds.left + .5.dp >= minimum)
             assertTrue("$tag height", bounds.bottom - bounds.top + .5.dp >= minimum)
@@ -533,6 +572,81 @@ class TuneAppTest {
         assertEquals(UUID(0, 1), app.playerController.state.value.station?.uuid)
         assertEquals(queries, app.queries.get())
         runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
+    }
+
+    @Test
+    fun miniPlayerOpensFullscreenAndBackKeepsPlayback() {
+        playFirstStation()
+        val resolutions = app.resolveCalls[UUID(0, 1)]?.get() ?: 0
+
+        compose.onNodeWithTag("player_info").performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("global_player").assertDoesNotExist()
+        compose.onNode(
+            hasText("Test station 1") and hasAnyAncestor(hasTestTag("now_playing_screen"))
+        ).assertIsDisplayed()
+
+        compose.activityRule.scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isEmpty() &&
+                compose.onAllNodesWithTag("global_player").fetchSemanticsNodes().isNotEmpty()
+        }
+        assertEquals(UUID(0, 1), app.playerController.state.value.station?.uuid)
+        assertEquals(PlaybackPhase.PLAYING, app.playerController.state.value.phase)
+        assertEquals(resolutions, app.resolveCalls[UUID(0, 1)]?.get() ?: 0)
+        runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
+    }
+
+    @Test
+    fun swipeUpAndArtworkGesturesUseTheSharedQueue() {
+        playFirstStation()
+        compose.onNodeWithTag("player_info").performTouchInput { swipeUp() }
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        compose.onNodeWithTag("now_playing_artwork").performTouchInput { swipeLeft() }
+        compose.waitUntil(8000) {
+            app.playerController.state.value.station?.uuid == UUID(0, 2) &&
+                app.playerController.state.value.phase == PlaybackPhase.PLAYING
+        }
+        compose.onNodeWithTag("now_playing_artwork").performTouchInput { swipeRight() }
+        compose.waitUntil(8000) {
+            app.playerController.state.value.station?.uuid == UUID(0, 1) &&
+                app.playerController.state.value.phase == PlaybackPhase.PLAYING
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("now_playing_next").assertIsEnabled().performClick()
+        compose.waitUntil(8000) {
+            val current = app.playerController.state.value
+            current.station?.uuid != null && current.station?.uuid != UUID(0, 1) &&
+                current.phase == PlaybackPhase.PLAYING
+        }
+        compose.onNodeWithTag("now_playing_previous").performClick()
+        compose.waitUntil(8000) {
+            app.playerController.state.value.station?.uuid == UUID(0, 1)
+        }
+        compose.onNodeWithTag("now_playing_artwork").performTouchInput { swipeDown() }
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isEmpty() &&
+                compose.onAllNodesWithTag("global_player").fetchSemanticsNodes().isNotEmpty()
+        }
+        assertEquals(UUID(0, 1), app.playerController.state.value.station?.uuid)
+        assertEquals(PlaybackPhase.PLAYING, app.playerController.state.value.phase)
+        runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
+    }
+
+    private fun playFirstStation() {
+        compose.waitUntil(5000) { app.playerController.connected.value }
+        val first = "station_${UUID(0, 1)}"
+        compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(first))
+        compose.onNodeWithTag(first).performClick()
+        compose.waitUntil(8000) {
+            app.playerController.state.value.station?.uuid == UUID(0, 1) &&
+                app.playerController.state.value.phase == PlaybackPhase.PLAYING
+        }
     }
 
     private fun radioState() = ViewModelProvider(compose.activity)[RadioViewModel::class].radioState.value

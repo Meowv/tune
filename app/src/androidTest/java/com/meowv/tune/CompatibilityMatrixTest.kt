@@ -41,19 +41,25 @@ class CompatibilityMatrixTest {
         )
 
         compose.onNodeWithTag("brand_header").assertIsDisplayed()
-        compose.onNodeWithTag("global_player").assertIsDisplayed()
         compose.onNodeWithTag("nav_radio").assertIsDisplayed()
+        assertTrue(
+            "尚未选择音频时不应显示迷你播放器",
+            compose.onAllNodesWithTag("global_player").fetchSemanticsNodes().isEmpty()
+        )
 
+        val navigationTag = if (
+            compose.onAllNodesWithTag("shell_car").fetchSemanticsNodes().isNotEmpty()
+        ) "side_navigation" else "bottom_navigation"
         val brand = compose.onNodeWithTag("brand_header").getUnclippedBoundsInRoot()
-        val player = compose.onNodeWithTag("global_player").getUnclippedBoundsInRoot()
-        assertTrue("品牌栏不应压到播放器", brand.bottom <= player.top)
+        val navigation = compose.onNodeWithTag(navigationTag).getUnclippedBoundsInRoot()
+        assertTrue("品牌栏不应压到导航", brand.bottom <= navigation.top)
 
         // 列表可用：滚到第 4 项且条目可点击。
         compose.onNodeWithTag("station_list").performScrollToIndex(3)
         compose.onNodeWithTag("station_list").assertIsDisplayed()
 
         // 主要播放控件热区不小于 44dp。
-        listOf("player_pause", "nav_radio", "nav_music", "nav_settings").forEach { tag ->
+        listOf("nav_radio", "nav_music", "nav_settings").forEach { tag ->
             val bounds = compose.onNodeWithTag(tag).getUnclippedBoundsInRoot()
             val width = (bounds.right - bounds.left).value
             val height = (bounds.bottom - bounds.top).value

@@ -18,4 +18,12 @@ class WindowLayoutTest {
             assertEquals("$width x $height", expected, isCarWindow(width, height))
         }
     }
+
+    @Test
+    fun nowPlayingUsesTheSameWindowBasedWideLayoutDecision() {
+        assertEquals(false, isNowPlayingWide(432f, 936f))
+        assertEquals(false, isNowPlayingWide(840f, 1200f))
+        assertEquals(true, isNowPlayingWide(1280f, 720f))
+        assertEquals(true, isNowPlayingWide(600f, 360f))
+    }
 }

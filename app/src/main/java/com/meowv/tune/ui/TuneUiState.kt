@@ -10,3 +10,6 @@ enum class TunePage(@StringRes val label: Int) {
 internal fun isCarWindow(widthDp: Float, heightDp: Float): Boolean =
     widthDp >= 600 && heightDp >= 360 &&
         (widthDp >= 840 && widthDp > heightDp || widthDp / heightDp >= 1.35f)
+
+internal fun isNowPlayingWide(widthDp: Float, heightDp: Float): Boolean =
+    isCarWindow(widthDp, heightDp)

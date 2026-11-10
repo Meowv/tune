@@ -136,6 +136,15 @@
   <string name="playback_offline">网络不可用</string>
   <string name="playback_focus_lost">音频焦点已丢失</string>
   <string name="playback_disconnected">播放设备已断开</string>
+  <string name="playback_connecting_source">正在连接音源…</string>
+  <string name="now_playing_page_label">电台</string>
+  <string name="now_playing_open">打开全屏播放页</string>
+  <string name="now_playing_collapse">收起播放页</string>
+  <string name="now_playing_artwork">电台台标：%1$s</string>
+  <string name="now_playing_shuffle_region">随机 · %1$s</string>
+  <string name="now_playing_shuffle_global">不限区域随机</string>
+  <string name="now_playing_shuffle_description">播放顺序：%1$s</string>
+  <string name="now_playing_volume">系统音量</string>
   <string name="notification_channel_playback">电台播放</string>
   <string name="notification_permission_denied">通知权限未开启，通知栏与锁屏控制不可用</string>
   <!-- 覆盖 Media3 默认英文控件描述，通知、锁屏与车机媒体面板统一使用本应用文案。 -->

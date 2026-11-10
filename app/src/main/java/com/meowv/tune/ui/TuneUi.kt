@@ -1,5 +1,13 @@
 package com.meowv.tune.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
@@ -18,6 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.hideFromAccessibility
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.meowv.tune.R
@@ -27,6 +37,7 @@ import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.RadioDisplayMode
 import com.meowv.tune.domain.RadioUiState
+import com.meowv.tune.domain.ScopeMode
 import com.meowv.tune.domain.Station
 import com.meowv.tune.domain.TuneError
 import com.meowv.tune.domain.TuneSettings
@@ -35,6 +46,7 @@ import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.update.LocalVersion
 import com.meowv.tune.update.UpdateUiState
 import com.meowv.tune.update.install.InstallState
+import java.util.Locale
 import kotlinx.coroutines.flow.StateFlow
 
 @Composable
@@ -73,6 +85,7 @@ fun TuneApp(
     var page by rememberSaveable { mutableStateOf(TunePage.Radio) }
     var showScopePicker by rememberSaveable { mutableStateOf(false) }
     var showUpdate by rememberSaveable { mutableStateOf(false) }
+    var nowPlayingOpen by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(showScopePicker) { if (showScopePicker) onLoadCountries(false) }
     // 进入版本页时检查一次；重复进入由 ViewModel 的进行中判断挡住，不会叠加请求。
     LaunchedEffect(showUpdate) { if (showUpdate) onCheckUpdate() }
@@ -92,8 +105,10 @@ fun TuneApp(
         }
     }
     val errorText = playbackErrorText(playbackState.error, playbackState.statusCode)
-    LaunchedEffect(playbackState.error) {
-        if (errorText != null) snackbar.showSnackbar(errorText, duration = SnackbarDuration.Short)
+    LaunchedEffect(playbackState.error, nowPlayingOpen) {
+        if (!nowPlayingOpen && errorText != null) {
+            snackbar.showSnackbar(errorText, duration = SnackbarDuration.Short)
+        }
     }
 
     val selectedId = radioState.selectedStationUuid ?: playbackState.station?.uuid
@@ -102,36 +117,9 @@ fun TuneApp(
     val paused = playbackState.phase == PlaybackPhase.PAUSED
     val idle = playbackState.phase == PlaybackPhase.IDLE
     val shuffle = settings.playbackOrder == PlaybackOrder.SHUFFLE
-    val adjacent: (Int) -> Station? = { offset ->
-        val list = radioState.stations
-        val current = target
-        if (current == null) {
-            // 还没有当前台时，第一下滑动直接从列表头/尾起播，而不是毫无反应。
-            if (offset > 0) list.firstOrNull() else list.lastOrNull()
-        } else {
-            val index = list.indexOfFirst { it.uuid == current.uuid }
-            if (index < 0) null else list.getOrNull(index + offset)
-        }
-    }
-    // 播放中的切台统一交给播放队列按当前顺序处理，底栏与系统媒体键走同一条路径；
-    // 暂停/空闲时换台即起播：滑动或媒体键换到的台，用户意图就是「听这个」。
-    val randomTarget: () -> Station? = {
-        radioState.stations.filter { it.uuid != target?.uuid }.randomOrNull()
-    }
-    val playTarget: (Station?) -> Unit = { station ->
-        station?.let {
-            onSelectTarget(it)
-            onPlayback(PlayerCommand.Play(it))
-        }
-    }
-    val next: () -> Unit = {
-        if (!paused && !idle) onPlayback(PlayerCommand.Next)
-        else playTarget(if (shuffle) randomTarget() else adjacent(1))
-    }
-    val previous: () -> Unit = {
-        if (!paused && !idle) onPlayback(PlayerCommand.Previous)
-        else playTarget(if (shuffle) randomTarget() else adjacent(-1))
-    }
+    // Mini Player、全屏页、通知和媒体键都交给播放队列，暂停时换台也会继续起播。
+    val next: () -> Unit = { onPlayback(PlayerCommand.Next) }
+    val previous: () -> Unit = { onPlayback(PlayerCommand.Previous) }
     val toggle: () -> Unit = {
         val station = target
         when {
@@ -144,6 +132,31 @@ fun TuneApp(
             else -> onPlayback(PlayerCommand.TogglePause)
         }
     }
+    val visibleStation = playbackState.station
+    val fullscreenTransition = remember { MutableTransitionState(false) }
+    LaunchedEffect(nowPlayingOpen, visibleStation?.uuid) {
+        fullscreenTransition.targetState = nowPlayingOpen && visibleStation != null
+    }
+    LaunchedEffect(visibleStation?.uuid) {
+        if (visibleStation == null) nowPlayingOpen = false
+    }
+    val fullscreenOccupied = nowPlayingOpen ||
+        !fullscreenTransition.isIdle || fullscreenTransition.currentState
+    val showMiniPlayer = visibleStation != null && !fullscreenOccupied
+    var lastVisibleStation by remember { mutableStateOf(visibleStation) }
+    LaunchedEffect(visibleStation) {
+        if (visibleStation != null) lastVisibleStation = visibleStation
+    }
+    BackHandler(enabled = nowPlayingOpen && !showUpdate && !showScopePicker) {
+        nowPlayingOpen = false
+    }
+    val randomRangeName = when (settings.scope.mode) {
+        ScopeMode.COUNTRY -> settings.scope.countryCode?.displayName(Locale.getDefault())
+        ScopeMode.GLOBAL -> null
+        ScopeMode.AUTO -> radioState.resolvedCountryCode?.displayName(Locale.getDefault())
+    }
+    val motionEnabled = rememberMotionEnabled()
+    val fullscreenAnimMillis = if (motionEnabled) 280 else 0
 
     Surface(color = TuneColors.Background) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -156,6 +169,11 @@ fun TuneApp(
                     .windowInsetsPadding(if (isCar) WindowInsets.displayCutout else WindowInsets.safeDrawing)
                     .onGloballyPositioned { onFirstLayout() }
                     .testTag(if (isCar) "shell_car" else "shell_phone")
+                    .then(
+                        if (fullscreenOccupied) {
+                            Modifier.semantics { hideFromAccessibility() }
+                        } else Modifier
+                    )
             ) {
                 MeowvTopBar(isCar)
                 if (storageError) {
@@ -184,28 +202,59 @@ fun TuneApp(
                         onClearDirectoryCache, { showUpdate = true }, { showScopePicker = true }
                     )
                 }
-                MeowvMiniPlayer(
-                    isCar = isCar,
-                    state = playbackState,
-                    station = target,
-                    connected = connected,
-                    shuffle = shuffle,
-                    onToggleOrder = {
-                        onSettingsChange { current ->
-                            current.copy(
-                                playbackOrder = if (current.playbackOrder == PlaybackOrder.SHUFFLE) {
-                                    PlaybackOrder.SEQUENTIAL
-                                } else {
-                                    PlaybackOrder.SHUFFLE
-                                }
-                            )
-                        }
-                    },
-                    onToggle = toggle,
-                    onNext = next,
-                    onPrevious = previous
-                )
+                if (showMiniPlayer) {
+                    MeowvMiniPlayer(
+                        isCar = isCar,
+                        state = playbackState,
+                        station = visibleStation,
+                        connected = connected,
+                        onOpen = { nowPlayingOpen = true },
+                        onToggle = toggle,
+                        onNext = next,
+                        onPrevious = previous
+                    )
+                }
                 if (!isCar) MeowvNavigationBar(page) { page = it }
+            }
+            AnimatedVisibility(
+                visibleState = fullscreenTransition,
+                enter = slideInVertically(
+                    initialOffsetY = { it },
+                    animationSpec = tween(fullscreenAnimMillis)
+                ) + fadeIn(tween(fullscreenAnimMillis)),
+                exit = slideOutVertically(
+                    targetOffsetY = { it },
+                    animationSpec = tween(fullscreenAnimMillis)
+                ) + fadeOut(tween(fullscreenAnimMillis))
+            ) {
+                val overlayStation = visibleStation ?: lastVisibleStation
+                if (overlayStation != null) {
+                    NowPlayingScreen(
+                        isCar = isCar,
+                        connected = connected,
+                        state = playbackState,
+                        station = overlayStation,
+                        countryName = overlayStation.countryCode?.displayName(Locale.getDefault()),
+                        randomRangeName = randomRangeName,
+                        shuffle = shuffle,
+                        onCollapse = { nowPlayingOpen = false },
+                        onToggle = toggle,
+                        onNext = next,
+                        onPrevious = previous,
+                        onToggleShuffle = {
+                            onSettingsChange { current ->
+                                current.copy(
+                                    playbackOrder = if (current.playbackOrder == PlaybackOrder.SHUFFLE) {
+                                        PlaybackOrder.SEQUENTIAL
+                                    } else {
+                                        PlaybackOrder.SHUFFLE
+                                    }
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize().testTag("now_playing_screen")
+                    )
+                }
             }
             // 版本页覆盖整个外壳（含播放器与导航），保持主菜单仍是三个。
             if (showUpdate) {
@@ -232,7 +281,14 @@ fun TuneApp(
                 // 让出系统栏高度后再按播放器/导航栏厚度上移，避免提示压在播放器上。
                 Modifier.align(Alignment.BottomCenter)
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
-                    .padding(bottom = if (isCar) 96.dp else 152.dp)
+                    .padding(
+                        bottom = when {
+                            nowPlayingOpen -> 24.dp
+                            showMiniPlayer -> if (isCar) 96.dp else 152.dp
+                            isCar -> 16.dp
+                            else -> 88.dp
+                        }
+                    )
             )
             if (showScopePicker) {
                 ScopePicker(
@@ -262,7 +318,7 @@ private fun updateSubtitle(state: UpdateUiState, versionName: String): String {
 }
 
 @Composable
-private fun playbackErrorText(error: TuneError?, statusCode: Int?): String? = when (error) {
+internal fun playbackErrorText(error: TuneError?, statusCode: Int?): String? = when (error) {
     null -> null
     TuneError.NETWORK_OFFLINE -> stringResource(R.string.playback_offline)
     TuneError.AUDIO_FOCUS_LOST -> stringResource(R.string.playback_focus_lost)
