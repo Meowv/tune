@@ -18,7 +18,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
-internal class RadioMediaConnection(context: Context) : PlayerController {
+internal class RadioMediaConnection(
+    context: Context,
+    private val createController: (Context, SessionToken, MediaController.Listener) -> ListenableFuture<MediaController> =
+        { app, token, listener -> MediaController.Builder(app, token).setListener(listener).buildAsync() }
+) : PlayerController {
     private val app = context.applicationContext
     private val token = SessionToken(app, ComponentName(app, RadioPlaybackService::class.java))
     private var leases = 0
@@ -55,13 +59,13 @@ internal class RadioMediaConnection(context: Context) : PlayerController {
     }
 
     private fun connect() {
-        val future = MediaController.Builder(app, token).setListener(object : MediaController.Listener {
+        val future = createController(app, token, object : MediaController.Listener {
             override fun onDisconnected(controller: MediaController) {
                 if (this@RadioMediaConnection.controller !== controller) return
                 release()
                 scheduleReconnect()
             }
-        }).buildAsync()
+        })
         pending = future
         future.addListener({
             if (pending === future) {

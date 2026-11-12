@@ -56,6 +56,11 @@ class UpdateViewModelTest {
             assertEquals(1, downloads.enqueued)
             assertEquals(0, downloads.queries)
             assertEquals(InstallState.Cancelled, model.installState.value)
+            model.download()
+            yield()
+            assertEquals(2, downloads.enqueued)
+            assertEquals(1, downloads.queries)
+            assertTrue(model.installState.value is InstallState.Downloading)
         }
     }
 
@@ -64,6 +69,33 @@ class UpdateViewModelTest {
         withModel(downloads, FakeStore(read = { record }), ApkVerification { _, _ -> throw IOException() }) { model, _ ->
             assertEquals(InstallState.Failed(InstallFailure.STORAGE),
                 withTimeout(2000) { model.installState.first { it is InstallState.Failed } })
+        }
+    }
+
+    @Test fun storageClearFailureIsReportedWithoutEscaping() = runBlocking {
+        withModel(FakeDownloads(DownloadStatus.FAILED),
+            FakeStore(read = { record }, clearAction = { throw IOException() })) { model, _ ->
+            assertEquals(InstallState.Failed(InstallFailure.STORAGE),
+                withTimeout(2000) { model.installState.first { it is InstallState.Failed } })
+        }
+    }
+
+    @Test fun returningToForegroundDoesNotStartDuplicateVerification() = runBlocking {
+        var verifications = 0
+        val started = CompletableDeferred<Unit>()
+        withModel(FakeDownloads(DownloadStatus.SUCCESSFUL), FakeStore(read = { record }),
+            ApkVerification { _, _ ->
+                verifications++
+                started.complete(Unit)
+                awaitCancellation()
+            }) { model, _ ->
+            withTimeout(2000) { started.await() }
+            model.onResume()
+            yield()
+            assertEquals(1, verifications)
+            model.cancelDownload()
+            yield()
+            assertEquals(InstallState.Cancelled, model.installState.value)
         }
     }
 

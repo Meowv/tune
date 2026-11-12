@@ -67,14 +67,17 @@ internal class RadioPlayback(
     private var playbackScope: ResolvedRadioScope? = null
     private var committed = false
     private var recovering = false
-    private var resumeAfterFocusGain = false
+    private val interruptions = PlaybackInterruptionState()
     private var sameRetries = 0
     private var alternateCount = 0
     private var generation = 0L
     private var state = PlayerUiState()
-    private var lastProgressPosition = -1L
-    private var lastProgressAt = 0L
-    private var stallJob: Job? = null
+    private val stallMonitor = PlaybackStallMonitor(
+        scope = scope,
+        nowMillis = android.os.SystemClock::elapsedRealtime,
+        progress = { PlaybackProgress(player.currentPosition, player.playbackState == Player.STATE_BUFFERING, player.playWhenReady) },
+        onStalled = { scheduleRecovery(TuneFailure(TuneError.TIMEOUT)) }
+    )
 
     init {
         player.addListener(this)
@@ -111,7 +114,10 @@ internal class RadioPlayback(
     override val canPrevious: Boolean get() = queue.canPrevious.value
     override val canNext: Boolean get() = queue.canNext.value
 
-    override fun onSessionPlay() = submit { resume() }
+    override fun onSessionPlay() {
+        // 重复的系统播放命令不能取消正在执行的解析或重试。
+        if (state.phase !in PendingPhases) submit { resume() }
+    }
 
     override fun onSessionPause() = submit { pause() }
 
@@ -123,15 +129,11 @@ internal class RadioPlayback(
 
     fun cancelPending() {
         supersedeRequest()
-        resumeAfterFocusGain = false
+        interruptions.reset()
         recovering = false
         resetRetryBudget()
         if (state.phase == PlaybackPhase.RESOLVING || state.phase == PlaybackPhase.RETRYING) {
-            update(state.copy(
-                phase = if (player.isPlaying) PlaybackPhase.PLAYING else PlaybackPhase.PAUSED,
-                error = null,
-                statusCode = null
-            ))
+            pausePlayback(PauseReason.USER, cancelPending = false)
         }
     }
 
@@ -165,7 +167,7 @@ internal class RadioPlayback(
         playbackScope = null
         committed = false
         recovering = false
-        resumeAfterFocusGain = false
+        interruptions.reset()
         resetRetryBudget()
         update(PlayerUiState())
         syncStallWatch()
@@ -175,6 +177,7 @@ internal class RadioPlayback(
         supersedeRequest()
         audioFocus.abandon()
         routeMonitor.close()
+        stallMonitor.reset()
         scope.cancel()
         player.removeListener(this)
     }
@@ -302,7 +305,7 @@ internal class RadioPlayback(
                     fail(TuneError.AUDIO_FOCUS_LOST)
                     return
                 }
-                resumeAfterFocusGain = false
+                interruptions.reset()
                 update(state.copy(error = null, statusCode = null))
                 player.play()
             }
@@ -328,11 +331,7 @@ internal class RadioPlayback(
             if (isNetworkError(state.error)) update(state.copy(error = null, statusCode = null))
             return
         }
-        supersedeRequest()
-        audioFocus.abandon()
-        resumeAfterFocusGain = false
-        player.pause()
-        update(state.copy(phase = PlaybackPhase.PAUSED, error = TuneError.NETWORK_OFFLINE, statusCode = null))
+        pausePlayback(PauseReason.NETWORK)
     }
 
     private fun submit(block: suspend () -> Unit) {
@@ -359,6 +358,8 @@ internal class RadioPlayback(
         existingIntent: PlaybackIntent? = null
     ) {
         val id = generation
+        interruptions.reset()
+        stallMonitor.reset()
         audioFocus.abandon()
         player.stop()
         player.clearMediaItems()
@@ -420,11 +421,7 @@ internal class RadioPlayback(
         currentCoroutineContext().ensureActive()
         val decision = NetworkPolicy.evaluate(network.value)
         if (decision != NetworkDecision.ALLOWED) {
-            request?.cancel()
-            resumeAfterFocusGain = false
-            audioFocus.abandon()
-            player.pause()
-            update(state.copy(phase = PlaybackPhase.PAUSED, error = TuneError.NETWORK_OFFLINE, statusCode = null))
+            pausePlayback(PauseReason.NETWORK, cancelPending = false)
             return
         }
         val canRetrySame = retryPolicy.isRetryable(failure) && retryPolicy.canRetrySame(++sameRetries)
@@ -483,53 +480,8 @@ internal class RadioPlayback(
         ?.takeIf { it.startsWith("https://", ignoreCase = true) }
         ?.let { runCatching { Uri.parse(it) }.getOrNull() }
 
-    // 卡死检测只在「已选台且 playWhenReady」时运行；暂停/空闲时不再每 5s 唤醒一次。
     private fun syncStallWatch() {
-        val needed = selection != null && player.playWhenReady && state.phase != PlaybackPhase.ERROR
-        if (needed) {
-            if (stallJob?.isActive == true) return
-            stallJob = scope.launch {
-                while (true) {
-                    delay(PlaybackStallDetector.CHECK_INTERVAL_MS)
-                    watchStall()
-                }
-            }
-        } else {
-            stallJob?.cancel()
-            stallJob = null
-            lastProgressAt = 0L
-        }
-    }
-
-    // 直播源静默卡死时按超时进入既有恢复预算，避免界面长期停在缓冲中。
-    private fun watchStall() {
-        if (selection == null) {
-            lastProgressAt = 0L
-            return
-        }
-        val now = android.os.SystemClock.elapsedRealtime()
-        val position = player.currentPosition
-        val buffering = player.playbackState == Player.STATE_BUFFERING
-        if (position != lastProgressPosition) {
-            lastProgressPosition = position
-            lastProgressAt = now
-            return
-        }
-        if (lastProgressAt == 0L) {
-            lastProgressAt = now
-            return
-        }
-        val stalled = PlaybackStallDetector.isStalled(
-            buffering = buffering,
-            playWhenReady = player.playWhenReady,
-            position = position,
-            lastPosition = lastProgressPosition,
-            sinceProgressMs = now - lastProgressAt
-        )
-        if (stalled) {
-            lastProgressAt = now
-            scheduleRecovery(TuneFailure(TuneError.TIMEOUT))
-        }
+        stallMonitor.sync(selection != null && player.playWhenReady && state.phase != PlaybackPhase.ERROR)
     }
 
     private fun classify(error: PlaybackException): TuneFailure {
@@ -548,11 +500,17 @@ internal class RadioPlayback(
         }
     }
 
-    private fun userPause() {
-        resumeAfterFocusGain = false
-        audioFocus.abandon()
+    private fun userPause() = pausePlayback(PauseReason.USER, cancelPending = false)
+
+    private fun pausePlayback(reason: PauseReason, cancelPending: Boolean = true) {
+        if (selection == null) return
+        val paused = interruptions.pause(state, reason, player.playWhenReady)
+        if (cancelPending) supersedeRequest()
+        if (reason != PauseReason.TRANSIENT_FOCUS) audioFocus.abandon()
+        stallMonitor.reset()
+        player.volume = 1f
         player.pause()
-        if (selection != null) update(state.copy(phase = PlaybackPhase.PAUSED))
+        update(paused)
     }
 
     internal fun onAudioFocusEvent(event: AudioFocusEvent) {
@@ -560,46 +518,25 @@ internal class RadioPlayback(
             when (event) {
                 AudioFocusEvent.GAIN -> {
                     player.volume = 1f
-                    if (resumeAfterFocusGain && selection != null) {
-                        resumeAfterFocusGain = false
-                        update(state.copy(error = null, statusCode = null))
+                    if (interruptions.consumeFocusResume() && selection != null) {
                         submit { resume() }
                     } else if (state.error == TuneError.AUDIO_FOCUS_LOST) {
                         update(state.copy(error = null, statusCode = null))
                     }
                 }
                 AudioFocusEvent.DUCK -> player.volume = .2f
-                AudioFocusEvent.TRANSIENT_LOSS -> {
-                    resumeAfterFocusGain = player.isPlaying || player.playWhenReady || state.phase in PendingPhases
-                    supersedeRequest()
-                    player.volume = 1f
-                    player.pause()
-                    update(state.copy(phase = PlaybackPhase.PAUSED, error = TuneError.AUDIO_FOCUS_LOST))
-                }
-                AudioFocusEvent.PERMANENT_LOSS -> {
-                    supersedeRequest()
-                    resumeAfterFocusGain = false
-                    player.volume = 1f
-                    player.pause()
-                    audioFocus.abandon()
-                    update(state.copy(phase = PlaybackPhase.PAUSED, error = TuneError.AUDIO_FOCUS_LOST))
-                }
+                AudioFocusEvent.TRANSIENT_LOSS -> pausePlayback(PauseReason.TRANSIENT_FOCUS)
+                AudioFocusEvent.PERMANENT_LOSS -> pausePlayback(PauseReason.PERMANENT_FOCUS)
                 AudioFocusEvent.DENIED -> fail(TuneError.AUDIO_FOCUS_LOST)
             }
         }
     }
 
-    // 外接输出断开默认暂停，避免声音突然从扬声器外放。
     internal fun onExternalOutputRemoved() {
         scope.launch {
-            if (selection == null) return@launch
-            if (!player.isPlaying && !player.playWhenReady && state.phase !in PendingPhases) return@launch
-            supersedeRequest()
-            resumeAfterFocusGain = false
-            audioFocus.abandon()
-            player.volume = 1f
-            player.pause()
-            update(state.copy(phase = PlaybackPhase.PAUSED, error = TuneError.AUDIO_DISCONNECTED))
+            if (player.isPlaying || player.playWhenReady || state.phase in PendingPhases) {
+                pausePlayback(PauseReason.OUTPUT)
+            }
         }
     }
 
@@ -623,9 +560,7 @@ internal class RadioPlayback(
     }
 
     private fun fail(kind: TuneError, status: Int? = null, station: Station? = state.station) {
-        stallJob?.cancel()
-        stallJob = null
-        lastProgressAt = 0L
+        stallMonitor.reset()
         audioFocus.abandon()
         update(state.copy(phase = PlaybackPhase.ERROR, station = station, error = kind, statusCode = status))
     }

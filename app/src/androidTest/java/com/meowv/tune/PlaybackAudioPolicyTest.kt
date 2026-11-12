@@ -99,6 +99,34 @@ class PlaybackAudioPolicyTest {
         }
     }
 
+    @Test fun repeatedSystemPlayDoesNotCancelResolution() = runBlocking {
+        launchReady {
+            val target = station(1)
+            app.playbackDelays[target.uuid] = 800
+            try {
+                connection.dispatch(PlayerCommand.Play(target))
+                withTimeout(2000) { connection.state.first { it.phase == PlaybackPhase.RESOLVING } }
+                onMain { requireNotNull(connection.engine).onSessionPlay() }
+                withTimeout(5000) { connection.state.first { it.phase == PlaybackPhase.PLAYING } }
+            } finally {
+                app.playbackDelays.clear()
+            }
+        }
+    }
+
+    @Test fun manualPauseDuringFocusLossPreventsAutomaticResume() = runBlocking {
+        launchReady {
+            playAndWait(station(1))
+            val engine = requireNotNull(connection.engine)
+            onMain { engine.onAudioFocusEvent(AudioFocusEvent.TRANSIENT_LOSS) }
+            withTimeout(2000) { connection.state.first { it.phase == PlaybackPhase.PAUSED } }
+            onMain { engine.onSessionPause() }
+            onMain { engine.onAudioFocusEvent(AudioFocusEvent.GAIN) }
+            delay(500)
+            assertEquals(PlaybackPhase.PAUSED, connection.state.value.phase)
+        }
+    }
+
     @Test fun systemPauseDuringResolutionCanResume() = runBlocking {
         launchReady {
             val target = station(1)

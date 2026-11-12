@@ -140,19 +140,21 @@ class TuneTestApplication : TuneApplication() {
         override suspend fun fetch(): UpdateInfo = testManifest
     }
 
-    val testManifest = UpdateInfo(
-        packageName = "com.meowv.tune",
-        channel = "stable",
-        versionName = "1.1.0",
-        versionCode = 101,
-        minSdkVersion = 28,
-        releaseDate = "2026-11-15",
-        title = "MeowvTune 1.1.0",
-        releaseNotes = listOf("优化电台播放体验", "修复部分问题"),
-        apkUrl = "https://studio.meowv.com/data/meowvtune/MeowvTune-1.1.0.apk",
-        apkSizeBytes = 25_600_000,
-        apkSha256 = "a".repeat(64)
-    )
+    val testManifest by lazy {
+        UpdateInfo(
+            packageName = "com.meowv.tune",
+            channel = "stable",
+            versionName = "1.1.0",
+            versionCode = packageManager.getPackageInfo(packageName, 0).longVersionCode + 1,
+            minSdkVersion = 28,
+            releaseDate = "2026-11-15",
+            title = "MeowvTune 1.1.0",
+            releaseNotes = listOf("优化电台播放体验", "修复部分问题"),
+            apkUrl = "https://studio.meowv.com/data/meowvtune/MeowvTune-1.1.0.apk",
+            apkSizeBytes = 25_600_000,
+            apkSha256 = "a".repeat(64)
+        )
+    }
 
     private val fakeRepository: RadioRepository = object : RadioRepository {
         override suspend fun countries() = directory

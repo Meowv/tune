@@ -21,6 +21,50 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class RadioMediaConnectionTest {
+    @Test fun initialConnectionFailureRetriesAndConnects() = runBlocking {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val app = instrumentation.targetContext.applicationContext as TuneApplication
+        val attempts = java.util.concurrent.atomic.AtomicInteger()
+        lateinit var connection: com.meowv.tune.playback.RadioMediaConnection
+        lateinit var lease: AutoCloseable
+        ActivityScenario.launch(MainActivity::class.java).use {
+            instrumentation.runOnMainSync {
+                connection = com.meowv.tune.playback.RadioMediaConnection(app) { context, token, listener ->
+                    if (attempts.incrementAndGet() == 1) {
+                        com.google.common.util.concurrent.SettableFuture.create<androidx.media3.session.MediaController>().apply {
+                            setException(java.io.IOException("Injected connection failure"))
+                        }
+                    } else {
+                        androidx.media3.session.MediaController.Builder(context, token).setListener(listener).buildAsync()
+                    }
+                }
+                lease = connection.acquire()
+            }
+            try {
+                withTimeout(5000) { connection.connected.first { it } }
+                assertEquals(2, attempts.get())
+            } finally {
+                instrumentation.runOnMainSync { lease.close() }
+            }
+        }
+    }
+
+    @Test fun releasingLastLeaseCancelsConnectionRetry() = runBlocking {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val attempts = java.util.concurrent.atomic.AtomicInteger()
+        instrumentation.runOnMainSync {
+            val connection = com.meowv.tune.playback.RadioMediaConnection(instrumentation.targetContext) { _, _, _ ->
+                attempts.incrementAndGet()
+                com.google.common.util.concurrent.SettableFuture.create<androidx.media3.session.MediaController>().apply {
+                    setException(java.io.IOException("Injected connection failure"))
+                }
+            }
+            connection.acquire().close()
+        }
+        delay(1000)
+        assertEquals(1, attempts.get())
+    }
+
     @Test fun playsMp3AacAndHlsAndCanPauseResumeAndStop() = runBlocking {
         val app = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as TuneApplication
         val connection = app.playerController

@@ -151,13 +151,13 @@ class UpdateViewModel internal constructor(
             install.value = InstallState.InstallPermissionRequired
             return
         }
-        val file = downloader.fileFor(record.fileName)
-        if (!file.isFile) {
-            install.value = InstallState.Failed(InstallFailure.FILE_MISSING)
-            return
-        }
         install.value = InstallState.Installing
         installJob = launchInstall {
+            val file = downloader.fileFor(record.fileName)
+            if (!file.isFile) {
+                install.value = InstallState.Failed(InstallFailure.FILE_MISSING)
+                return@launchInstall
+            }
             installer.install(file) { outcome ->
                 launchInstall outcome@{
                     if (pending !== record) return@outcome
