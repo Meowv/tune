@@ -1,6 +1,7 @@
 package com.meowv.tune.ui
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -1215,7 +1216,6 @@ private fun NowPlayingTools(
             description = randomLabel,
             isCar = isCar,
             animationMillis = animationMillis,
-            reserveDetail = false,
             modifier = Modifier.weight(1f),
             onClick = onToggleShuffle
         )
@@ -1232,7 +1232,6 @@ private fun NowPlayingTools(
             description = sleepDescription,
             isCar = isCar,
             animationMillis = animationMillis,
-            reserveDetail = true,
             modifier = Modifier.weight(1f),
             onClick = onSleepTimer
         )
@@ -1249,7 +1248,6 @@ private fun ToolbarAction(
     description: String,
     isCar: Boolean,
     animationMillis: Int,
-    reserveDetail: Boolean,
     modifier: Modifier,
     onClick: () -> Unit
 ) {
@@ -1287,11 +1285,15 @@ private fun ToolbarAction(
         )
         Spacer(Modifier.width(if (isCar) 10.dp else 8.dp))
         Column(
+            Modifier.animateContentSize(
+                animationSpec = tween(if (animationMillis > 0) 160 else 0)
+            ),
             horizontalAlignment = Alignment.Start,
             verticalArrangement = Arrangement.Center
         ) {
             Text(
                 label,
+                modifier = Modifier.testTag("${tag}_label"),
                 color = if (selected) TuneColors.Text else contentColor,
                 fontSize = if (isCar) 16.sp else 15.sp,
                 fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
@@ -1299,7 +1301,7 @@ private fun ToolbarAction(
                 overflow = TextOverflow.Ellipsis,
                 style = TuneTextStyle
             )
-            if (reserveDetail) {
+            if (detail != null) {
                 Box(
                     Modifier.height(16.dp),
                     contentAlignment = Alignment.CenterStart
@@ -1309,15 +1311,13 @@ private fun ToolbarAction(
                         animationSpec = tween(if (animationMillis > 0) 160 else 0),
                         label = "now_playing_tool_detail"
                     ) { current ->
-                        if (current != null) {
-                            Text(
-                                current,
-                                color = TuneColors.PrimaryLight.copy(alpha = .78f),
-                                fontSize = if (isCar) 13.sp else 12.sp,
-                                maxLines = 1,
-                                style = TuneTextStyle
-                            )
-                        }
+                        Text(
+                            current,
+                            color = TuneColors.PrimaryLight.copy(alpha = .78f),
+                            fontSize = if (isCar) 13.sp else 12.sp,
+                            maxLines = 1,
+                            style = TuneTextStyle
+                        )
                     }
                 }
             }

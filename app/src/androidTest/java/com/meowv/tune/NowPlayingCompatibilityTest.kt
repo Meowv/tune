@@ -116,6 +116,26 @@ class NowPlayingCompatibilityTest {
             .assertContentDescriptionEquals("电台台标：Test station 1")
         compose.onNodeWithTag("now_playing_brand").assertIsDisplayed()
         compose.onNodeWithTag("now_playing_volume").assertDoesNotExist()
+        val shuffleLabel = compose.onNodeWithTag(
+            "now_playing_shuffle_label",
+            useUnmergedTree = true
+        )
+            .assertIsDisplayed()
+            .getUnclippedBoundsInRoot()
+        val sleepLabel = compose.onNodeWithTag(
+            "now_playing_sleep_label",
+            useUnmergedTree = true
+        )
+            .assertIsDisplayed()
+            .getUnclippedBoundsInRoot()
+        assertTrue(
+            "未启用定时时，睡眠定时应与随机播放同高同基线：$shuffleLabel / $sleepLabel",
+            kotlin.math.abs((shuffleLabel.top - sleepLabel.top).value) <= 1f &&
+                kotlin.math.abs(
+                    (shuffleLabel.bottom - shuffleLabel.top).value -
+                        (sleepLabel.bottom - sleepLabel.top).value
+                ) <= 1f
+        )
         assertTrue(
             "Now Playing 不应展示地区副标题",
             compose.onAllNodes(
