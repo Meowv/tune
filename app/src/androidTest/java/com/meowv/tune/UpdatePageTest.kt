@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.meowv.tune.domain.RadioScope
@@ -34,9 +35,10 @@ class UpdatePageTest {
     fun settingsEntryShowsUpdateStatusAndOpensPage() {
         openSettings()
         scrollTo("版本与更新")
-        // 入口副标题由固定清单推导：本地 1.0.0 / 远程 1.1.0。
+        val localVersion = compose.activity.packageManager
+            .getPackageInfo(compose.activity.packageName, 0).versionName
         compose.waitUntil(8000) {
-            compose.onAllNodesWithText("v1.0.0 · 发现新版本 v1.1.0").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithText("v$localVersion · 发现新版本 v1.1.0").fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithText("版本与更新").performClick()
 
@@ -47,10 +49,10 @@ class UpdatePageTest {
         compose.waitForIdle()
         compose.onNodeWithTag("update_status_title").assertIsDisplayed()
         compose.onNodeWithText("发现新版本 1.1.0").assertIsDisplayed()
-        compose.onNodeWithText("MeowvTune 1.1.0").assertIsDisplayed()
-        compose.onNodeWithText("优化电台播放体验").assertIsDisplayed()
-        compose.onNodeWithText("2026-11-15").assertIsDisplayed()
-        compose.onNodeWithText("stable").assertIsDisplayed()
+        compose.onNodeWithText("MeowvTune 1.1.0").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("优化电台播放体验").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("2026-11-15").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("stable").performScrollTo().assertIsDisplayed()
 
         compose.onNodeWithTag("update_back").performClick()
         compose.waitUntil(4000) {

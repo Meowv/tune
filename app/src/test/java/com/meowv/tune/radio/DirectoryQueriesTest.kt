@@ -32,6 +32,38 @@ internal val idlePlayer = object : PlayerController {
 }
 
 class DirectoryQueriesTest {
+    @Test fun manualRefreshFollowsReplacementLoadToCompletion() = runBlocking {
+        withTimeout(5000) {
+            val firstStarted = CompletableDeferred<Unit>()
+            val replacementStarted = CompletableDeferred<Unit>()
+            val releaseReplacement = CompletableDeferred<Unit>()
+            val lifetime = CoroutineScope(coroutineContext + SupervisorJob())
+            val repository = StubRadioRepository(
+                random = { firstStarted.complete(Unit); awaitCancellation() },
+                countryPage = { _, _, _ ->
+                    replacementStarted.complete(Unit)
+                    releaseReplacement.await()
+                    StationPage(listOf(testStation(1)))
+                }
+            )
+            try {
+                val model = RadioViewModel(repository, idlePlayer, CountryResolver({ null }, { null }), lifetime)
+                model.refreshManually(RadioScope(ScopeMode.GLOBAL))
+                firstStarted.await()
+                model.refresh(RadioScope(ScopeMode.COUNTRY, JP))
+                replacementStarted.await()
+                delay(50)
+                releaseReplacement.complete(Unit)
+                assertEquals(DirectoryRefresh.Success,
+                    model.refreshState.first { it != DirectoryRefresh.Running })
+                model.acknowledgeRefresh()
+                assertEquals(DirectoryRefresh.Idle, model.refreshState.value)
+            } finally {
+                lifetime.cancel()
+            }
+        }
+    }
+
     @Test fun stationByUuidUsesSingleStationEndpoint() = runBlocking {
         val station = testStation(7)
         val repository = RadioBrowserRepository({ emptyList() }) { endpoint, query ->

@@ -11,19 +11,19 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
  * DownloadManager 封装：只负责入队、查询、取消与目标文件定位。
  * 下载本身由系统服务完成，进程被杀也会继续。
  */
-internal class ApkDownloader(private val context: Context) {
+internal class ApkDownloader(private val context: Context) : ApkDownloads {
 
     private val manager: DownloadManager
         get() = context.getSystemService(DownloadManager::class.java)
 
-    fun fileFor(fileName: String): File {
+    override fun fileFor(fileName: String): File {
         // 外置存储不可用时退回内部目录，避免拼出相对路径。
         val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
         return File(dir, fileName)
     }
 
     /** 入队前先清掉同名旧文件，避免残留包被当成新下载结果。 */
-    fun enqueue(url: String, fileName: String, title: String): Long {
+    override fun enqueue(url: String, fileName: String, title: String): Long {
         val parsed = url.toHttpUrlOrNull()
         require(parsed != null && parsed.isHttps) { "APK 地址必须是 HTTPS" }
         fileFor(fileName).delete()
@@ -37,7 +37,7 @@ internal class ApkDownloader(private val context: Context) {
         return manager.enqueue(request)
     }
 
-    fun query(id: Long): DownloadSnapshot {
+    override fun query(id: Long): DownloadSnapshot {
         val cursor = manager.query(DownloadManager.Query().setFilterById(id)) ?: return unknown()
         cursor.use {
             if (!it.moveToFirst()) return unknown()
@@ -65,7 +65,7 @@ internal class ApkDownloader(private val context: Context) {
     }
 
     /** 移除任务并删除已下载文件；下载中的任务由系统一并清理。 */
-    fun cancel(id: Long) {
+    override fun cancel(id: Long) {
         runCatching { manager.remove(id) }
     }
 

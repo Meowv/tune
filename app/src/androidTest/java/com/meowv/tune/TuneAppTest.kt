@@ -556,6 +556,23 @@ class TuneAppTest {
     }
 
     @Test
+    fun miniPlayerSwipeWorksAfterResolutionFinishes() {
+        val first = UUID(0, 1)
+        app.playbackDelays[first] = 1000
+        try {
+            playFirstStation()
+            compose.onNodeWithTag("player_info").performTouchInput { swipeLeft() }
+            compose.waitUntil(8000) {
+                app.playerController.state.value.station?.uuid != first &&
+                    app.playerController.state.value.phase == PlaybackPhase.PLAYING
+            }
+        } finally {
+            app.playbackDelays.clear()
+            runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
+        }
+    }
+
+    @Test
     fun pausedSwipeStartsPlaybackOnTheNextStation() {
         compose.waitUntil(5000) { app.playerController.connected.value }
         val first = "station_${UUID(0, 1)}"

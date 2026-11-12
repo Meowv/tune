@@ -9,12 +9,16 @@ import android.os.Build
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import java.io.File
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 
 /**
  * 系统安装器封装：优先走 PackageInstaller.Session，失败时退回 ACTION_VIEW 交给系统安装界面。
  * 安装动作始终由系统完成，应用只负责写入已校验的 APK 并接收结果。
  */
-internal class ApkInstaller(private val context: Context) {
+internal class ApkInstaller(private val context: Context) : ApkInstallation {
 
     internal sealed interface Outcome {
         data object UserActionRequired : Outcome
@@ -25,11 +29,11 @@ internal class ApkInstaller(private val context: Context) {
 
     private var receiver: BroadcastReceiver? = null
 
-    fun canRequestInstall(): Boolean = runCatching {
+    override fun canRequestInstall(): Boolean = runCatching {
         context.packageManager.canRequestPackageInstalls()
     }.getOrDefault(false)
 
-    fun install(apk: File, onOutcome: (Outcome) -> Unit) {
+    override suspend fun install(apk: File, onOutcome: (Outcome) -> Unit) {
         val packageInstaller = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
             setAppPackageName(context.packageName)
@@ -41,15 +45,31 @@ internal class ApkInstaller(private val context: Context) {
             launchSystemInstaller(apk, onOutcome)
             return
         }
-        registerResultReceiver(onOutcome)
         try {
-            packageInstaller.openSession(sessionId).use { session ->
-                session.openWrite("base.apk", 0, apk.length()).use { output ->
-                    apk.inputStream().use { input -> input.copyTo(output) }
-                    session.fsync(output)
+            registerResultReceiver(onOutcome)
+            withContext(Dispatchers.IO) {
+                packageInstaller.openSession(sessionId).use { session ->
+                    session.openWrite("base.apk", 0, apk.length()).use { output ->
+                        apk.inputStream().use { input ->
+                            val buffer = ByteArray(64 * 1024)
+                            while (true) {
+                                coroutineContext.ensureActive()
+                                val count = input.read(buffer)
+                                if (count < 0) break
+                                output.write(buffer, 0, count)
+                            }
+                        }
+                        session.fsync(output)
+                    }
                 }
+            }
+            packageInstaller.openSession(sessionId).use { session ->
                 session.commit(resultIntent(sessionId).intentSender)
             }
+        } catch (cancelled: CancellationException) {
+            runCatching { packageInstaller.abandonSession(sessionId) }
+            unregister()
+            throw cancelled
         } catch (_: Exception) {
             runCatching { packageInstaller.abandonSession(sessionId) }
             unregister()
@@ -57,7 +77,7 @@ internal class ApkInstaller(private val context: Context) {
         }
     }
 
-    fun close() = unregister()
+    override fun close() = unregister()
 
     private fun resultIntent(sessionId: Int): android.app.PendingIntent {
         val intent = Intent(ACTION_INSTALL_RESULT).setPackage(context.packageName)

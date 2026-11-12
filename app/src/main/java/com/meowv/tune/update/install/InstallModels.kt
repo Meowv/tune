@@ -22,6 +22,7 @@ sealed interface InstallState {
 enum class InstallFailure {
     DOWNLOAD_FAILED,
     FILE_MISSING,
+    STORAGE,
     SIZE_MISMATCH,
     CHECKSUM_MISMATCH,
     PACKAGE_MISMATCH,

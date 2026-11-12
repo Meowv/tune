@@ -123,6 +123,7 @@ internal class RadioPlayback(
 
     fun cancelPending() {
         supersedeRequest()
+        resumeAfterFocusGain = false
         recovering = false
         resetRetryBudget()
         if (state.phase == PlaybackPhase.RESOLVING || state.phase == PlaybackPhase.RETRYING) {
@@ -275,7 +276,7 @@ internal class RadioPlayback(
     }
 
     private suspend fun pause() {
-        if (player.playWhenReady) userPause()
+        if (selection != null) userPause()
     }
 
     private suspend fun resume() {
@@ -291,6 +292,12 @@ internal class RadioPlayback(
             }
             else -> {
                 if (!networkAllows()) return
+                if (player.mediaItemCount == 0) {
+                    val currentSelection = selection ?: return
+                    resetRetryBudget()
+                    resolveAndPlay(currentSelection, PlaybackPhase.RETRYING, intent)
+                    return
+                }
                 if (!audioFocus.acquire()) {
                     fail(TuneError.AUDIO_FOCUS_LOST)
                     return
@@ -321,7 +328,7 @@ internal class RadioPlayback(
             if (isNetworkError(state.error)) update(state.copy(error = null, statusCode = null))
             return
         }
-        request?.cancel()
+        supersedeRequest()
         audioFocus.abandon()
         resumeAfterFocusGain = false
         player.pause()
@@ -545,6 +552,7 @@ internal class RadioPlayback(
         resumeAfterFocusGain = false
         audioFocus.abandon()
         player.pause()
+        if (selection != null) update(state.copy(phase = PlaybackPhase.PAUSED))
     }
 
     internal fun onAudioFocusEvent(event: AudioFocusEvent) {
@@ -555,19 +563,21 @@ internal class RadioPlayback(
                     if (resumeAfterFocusGain && selection != null) {
                         resumeAfterFocusGain = false
                         update(state.copy(error = null, statusCode = null))
-                        player.play()
+                        submit { resume() }
                     } else if (state.error == TuneError.AUDIO_FOCUS_LOST) {
                         update(state.copy(error = null, statusCode = null))
                     }
                 }
                 AudioFocusEvent.DUCK -> player.volume = .2f
                 AudioFocusEvent.TRANSIENT_LOSS -> {
-                    resumeAfterFocusGain = player.isPlaying || player.playWhenReady
+                    resumeAfterFocusGain = player.isPlaying || player.playWhenReady || state.phase in PendingPhases
+                    supersedeRequest()
                     player.volume = 1f
                     player.pause()
                     update(state.copy(phase = PlaybackPhase.PAUSED, error = TuneError.AUDIO_FOCUS_LOST))
                 }
                 AudioFocusEvent.PERMANENT_LOSS -> {
+                    supersedeRequest()
                     resumeAfterFocusGain = false
                     player.volume = 1f
                     player.pause()
@@ -583,7 +593,8 @@ internal class RadioPlayback(
     internal fun onExternalOutputRemoved() {
         scope.launch {
             if (selection == null) return@launch
-            if (!player.isPlaying && !player.playWhenReady) return@launch
+            if (!player.isPlaying && !player.playWhenReady && state.phase !in PendingPhases) return@launch
+            supersedeRequest()
             resumeAfterFocusGain = false
             audioFocus.abandon()
             player.volume = 1f
@@ -633,7 +644,8 @@ internal class RadioPlayback(
 
     private fun isNetworkError(error: TuneError?) = error == TuneError.NETWORK_OFFLINE
 
-    private sealed interface Command {        data class Play(val station: Station) : Command
+    private sealed interface Command {
+        data class Play(val station: Station) : Command
         data object Next : Command
         data object Previous : Command
         data object Toggle : Command
@@ -650,3 +662,4 @@ internal class RadioPlayback(
 
 // onEvents 高频回调，相位集合提为常量避免每次构造。
 private val SettlingPhases = setOf(PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING, PlaybackPhase.ERROR)
+private val PendingPhases = setOf(PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING)

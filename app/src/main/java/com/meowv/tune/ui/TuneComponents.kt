@@ -510,8 +510,8 @@ internal fun MeowvMiniPlayer(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // 手势先锁方向：横滑换台，上滑展开；点击仍交给独立的可点击节点。
-            val canSwipeNext = currentCanNext && !buffering && connected
-            val canSwipePrevious = currentCanPrevious && !buffering && connected
+            val canSwipeNext by rememberUpdatedState(currentCanNext && !buffering && connected)
+            val canSwipePrevious by rememberUpdatedState(currentCanPrevious && !buffering && connected)
             Box(
                 Modifier.weight(1f).fillMaxHeight()
                     .testTag("player_info")

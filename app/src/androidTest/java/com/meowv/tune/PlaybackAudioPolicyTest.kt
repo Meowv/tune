@@ -99,7 +99,85 @@ class PlaybackAudioPolicyTest {
         }
     }
 
-    private suspend fun launchReady(block: suspend () -> Unit) {
+    @Test fun systemPauseDuringResolutionCanResume() = runBlocking {
+        launchReady {
+            val target = station(1)
+            app.playbackDelays[target.uuid] = 800
+            try {
+                connection.dispatch(PlayerCommand.Play(target))
+                withTimeout(2000) { connection.state.first { it.phase == PlaybackPhase.RESOLVING } }
+                onMain { requireNotNull(connection.engine).onSessionPause() }
+                withTimeout(2000) { connection.state.first { it.phase == PlaybackPhase.PAUSED } }
+                delay(900)
+                assertEquals(PlaybackPhase.PAUSED, connection.state.value.phase)
+                onMain { requireNotNull(connection.engine).onSessionPlay() }
+                withTimeout(5000) { connection.state.first { it.phase == PlaybackPhase.PLAYING } }
+            } finally {
+                app.playbackDelays.clear()
+            }
+        }
+    }
+
+    @Test fun disconnectDuringResolutionCancelsPlaybackUntilUserResumes() = runBlocking {
+        launchReady {
+            val target = station(1)
+            app.playbackDelays[target.uuid] = 800
+            try {
+                connection.dispatch(PlayerCommand.Play(target))
+                withTimeout(2000) { connection.state.first { it.phase == PlaybackPhase.RESOLVING } }
+                onMain { requireNotNull(connection.engine).onExternalOutputRemoved() }
+                withTimeout(2000) { connection.state.first { it.error == TuneError.AUDIO_DISCONNECTED } }
+                delay(900)
+                assertEquals(PlaybackPhase.PAUSED, connection.state.value.phase)
+                connection.dispatch(PlayerCommand.TogglePause)
+                withTimeout(5000) { connection.state.first { it.phase == PlaybackPhase.PLAYING } }
+            } finally {
+                app.playbackDelays.clear()
+            }
+        }
+    }
+
+    @Test fun networkLossDuringResolutionCanResume() = runBlocking {
+        launchReady {
+            val target = station(1)
+            app.playbackDelays[target.uuid] = 800
+            try {
+                connection.dispatch(PlayerCommand.Play(target))
+                withTimeout(2000) { connection.state.first { it.phase == PlaybackPhase.RESOLVING } }
+                app.mockNetwork.value = com.meowv.tune.domain.NetworkState()
+                withTimeout(2000) { connection.state.first { it.error == TuneError.NETWORK_OFFLINE } }
+                app.mockNetwork.value = com.meowv.tune.domain.NetworkState(com.meowv.tune.domain.NetworkType.WIFI)
+                withTimeout(2000) { connection.state.first { it.error == null } }
+                connection.dispatch(PlayerCommand.TogglePause)
+                withTimeout(5000) { connection.state.first { it.phase == PlaybackPhase.PLAYING } }
+            } finally {
+                app.playbackDelays.clear()
+                app.mockNetwork.value = com.meowv.tune.domain.NetworkState(com.meowv.tune.domain.NetworkType.WIFI)
+            }
+        }
+    }
+
+    @Test fun sleepTimerStopsPlaybackWithNoActivityController() = runBlocking {
+        launchReady { scenario ->
+            playAndWait(station(1))
+            onMain { app.sleepTimer.start(1) }
+            try {
+                scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
+                withTimeout(3000) { connection.connected.first { !it } }
+                withTimeout(65_000) { connection.state.first { it.phase == PlaybackPhase.IDLE } }
+                assertEquals(false, app.sleepTimer.state.value.isActive)
+            } finally {
+                scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
+                withTimeout(5000) { connection.connected.first { it } }
+                onMain { app.sleepTimer.cancel() }
+            }
+        }
+    }
+
+    private fun onMain(block: () -> Unit) =
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(block)
+
+    private suspend fun launchReady(block: suspend (ActivityScenario<MainActivity>) -> Unit) {
         app.userSettings.update {
             it.copy(scope = RadioScope(ScopeMode.COUNTRY, app.country))
         }
@@ -113,7 +191,7 @@ class PlaybackAudioPolicyTest {
             queue.updateDirectory(scope, StationPage((1L..3L).map(::station)))
             connection.dispatch(PlayerCommand.Stop)
             try {
-                block()
+                block(scenario)
             } finally {
                 connection.dispatch(PlayerCommand.Stop)
             }

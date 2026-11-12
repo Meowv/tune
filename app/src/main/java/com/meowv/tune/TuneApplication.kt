@@ -17,7 +17,6 @@ import com.meowv.tune.radio.RadioQueueManager
 import com.meowv.tune.domain.RadioQueue
 import com.meowv.tune.domain.RadioRepository
 import com.meowv.tune.domain.SettingsRepository
-import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.playback.MediaProbe
 import com.meowv.tune.playback.PlaybackIntent
 import com.meowv.tune.playback.PlaybackRetryPolicy
@@ -99,7 +98,7 @@ open class TuneApplication : Application(), SingletonImageLoader.Factory {
     internal val playerController by lazy { RadioMediaConnection(this) }
     internal val sleepTimer by lazy {
         SleepTimerController(onExpired = {
-            runCatching { playerController.dispatch(PlayerCommand.Stop) }
+            playerController.engine?.stop()
         })
     }
 

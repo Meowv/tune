@@ -14,9 +14,9 @@ import kotlin.coroutines.coroutineContext
  * 安装包校验：存在性 → 大小 → SHA-256 → 包名 → versionCode → minSdk → 签名。
  * 任意一步失败都抛 [InstallException]，调用方负责删文件和提示，禁止继续安装。
  */
-internal class ApkVerifier(private val context: Context) {
+internal class ApkVerifier(private val context: Context) : ApkVerification {
 
-    suspend fun verify(file: File, expected: ExpectedApk) {
+    override suspend fun verify(file: File, expected: ExpectedApk) {
         withContext(Dispatchers.IO) {
             if (!file.isFile || file.length() <= 0L) throw InstallException(InstallFailure.FILE_MISSING)
             if (file.length() != expected.sizeBytes) throw InstallException(InstallFailure.SIZE_MISMATCH)
@@ -56,11 +56,12 @@ internal class ApkVerifier(private val context: Context) {
             .signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray()
     }.getOrNull()
 
-    private fun sha256(file: File): String {
+    private suspend fun sha256(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { input ->
             val buffer = ByteArray(64 * 1024)
             while (true) {
+                coroutineContext.ensureActive()
                 val read = input.read(buffer)
                 if (read <= 0) break
                 digest.update(buffer, 0, read)

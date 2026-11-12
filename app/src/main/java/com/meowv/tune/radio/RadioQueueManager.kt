@@ -144,6 +144,7 @@ class RadioQueueManager(private val repository: RadioRepository) : RadioQueue {
         val station = selection.station
         if (pending.fromHistory) active.history.removeLast()
         else active.current?.takeIf { it.uuid != station.uuid }?.let(active.history::addLast)
+        if (active.history.size > HISTORY_LIMIT) active.history.removeFirst()
         active.current = station
         // 随机模式用最近记录避开刚播过的台，顺序模式不读它。
         active.recent.remove(station.uuid)
@@ -207,6 +208,7 @@ class RadioQueueManager(private val repository: RadioRepository) : RadioQueue {
     )
 
     private companion object {
+        const val HISTORY_LIMIT = 100
         const val RECENT_LIMIT = 10
     }
 }

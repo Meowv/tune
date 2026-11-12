@@ -12,9 +12,9 @@ import kotlinx.coroutines.flow.first
  * 把 downloadId 与目标版本（含校验期望值）落到 DataStore：
  * 页面重进、进程被杀后都还能接着查任务状态并按原清单校验。
  */
-internal class InstallStore(private val dataStore: DataStore<Preferences>) {
+internal class InstallStore(private val dataStore: DataStore<Preferences>) : InstallPersistence {
 
-    suspend fun pending(): PendingInstall? {
+    override suspend fun pending(): PendingInstall? {
         val prefs = dataStore.data.first()
         val id = prefs[DownloadId] ?: return null
         val code = prefs[TargetVersionCode] ?: return null
@@ -33,7 +33,7 @@ internal class InstallStore(private val dataStore: DataStore<Preferences>) {
         )
     }
 
-    suspend fun save(pending: PendingInstall) {
+    override suspend fun save(pending: PendingInstall) {
         dataStore.edit {
             it[DownloadId] = pending.downloadId
             it[TargetVersionCode] = pending.versionCode
@@ -46,7 +46,7 @@ internal class InstallStore(private val dataStore: DataStore<Preferences>) {
         }
     }
 
-    suspend fun clear() {
+    override suspend fun clear() {
         dataStore.edit {
             it.remove(DownloadId)
             it.remove(TargetVersionCode)

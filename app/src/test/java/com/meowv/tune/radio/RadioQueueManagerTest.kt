@@ -141,6 +141,20 @@ class RadioQueueManagerTest {
         assertEquals(only, requireNotNull(queue.previous(japan)).station)
     }
 
+    @Test fun successfulPlaybackHistoryIsBounded() {
+        val stations = (1L..150L).map { testStation(it) }
+        val queue = RadioQueueManager(StubRadioRepository())
+        queue.updateDirectory(japan, StationPage(stations))
+        stations.forEach { queue.recordSuccessfulPlayback(requireNotNull(queue.select(japan, it.uuid))) }
+        var previousCount = 0
+        while (true) {
+            val previous = queue.previous(japan) ?: break
+            assertTrue(queue.recordSuccessfulPlayback(previous))
+            previousCount++
+        }
+        assertEquals(100, previousCount)
+    }
+
     @Test fun scopeChangeClearsHistoryAndIgnoresLatePageEvenAfterReturningToSameScope() = runBlocking {
         withTimeout(5000) {
             val first = testStation(1)

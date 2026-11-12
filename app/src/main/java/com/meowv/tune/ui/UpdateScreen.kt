@@ -626,6 +626,7 @@ private fun updateFailureText(failure: UpdateFailure): String = stringResource(
 private fun installFailureText(failure: InstallFailure): String = stringResource(
     when (failure) {
         InstallFailure.DOWNLOAD_FAILED -> R.string.update_fail_download
+        InstallFailure.STORAGE -> R.string.update_fail_storage
         InstallFailure.FILE_MISSING -> R.string.update_fail_file_missing
         InstallFailure.SIZE_MISMATCH -> R.string.update_fail_size
         InstallFailure.CHECKSUM_MISMATCH -> R.string.update_fail_checksum

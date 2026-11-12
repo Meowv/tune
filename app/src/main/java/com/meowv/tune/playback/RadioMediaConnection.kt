@@ -2,6 +2,8 @@ package com.meowv.tune.playback
 
 import android.content.ComponentName
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import androidx.annotation.MainThread
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -22,6 +24,9 @@ internal class RadioMediaConnection(context: Context) : PlayerController {
     private var leases = 0
     private var pending: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
+    private val handler = Handler(Looper.getMainLooper())
+    private var retries = 0
+    private val reconnect = Runnable { if (leases > 0 && pending == null) connect() }
     private val connectedState = MutableStateFlow(false)
     val connected = connectedState.asStateFlow()
     private val playback = MutableStateFlow(PlayerUiState())
@@ -38,6 +43,7 @@ internal class RadioMediaConnection(context: Context) : PlayerController {
     @MainThread
     fun acquire(): AutoCloseable {
         leases++
+        if (leases == 1) retries = 0
         if (pending == null) connect()
         var closed = false
         return AutoCloseable {
@@ -53,7 +59,7 @@ internal class RadioMediaConnection(context: Context) : PlayerController {
             override fun onDisconnected(controller: MediaController) {
                 if (this@RadioMediaConnection.controller !== controller) return
                 release()
-                if (leases > 0) connect()
+                scheduleReconnect()
             }
         }).buildAsync()
         pending = future
@@ -62,18 +68,29 @@ internal class RadioMediaConnection(context: Context) : PlayerController {
                 val media = runCatching { future.get() }.getOrNull()
                 if (media?.isConnected == true) {
                     controller = media
+                    retries = 0
                     connectedState.value = true
-                } else release()
+                } else {
+                    release()
+                    scheduleReconnect()
+                }
             }
         }, app.mainExecutor)
     }
 
     private fun release() {
+        handler.removeCallbacks(reconnect)
         controller = null
         val future = pending
         pending = null
         connectedState.value = false
         future?.let(MediaController::releaseFuture)
+    }
+
+    private fun scheduleReconnect() {
+        if (leases > 0 && retries < 3) {
+            handler.postDelayed(reconnect, 500L * ++retries)
+        }
     }
 
     override suspend fun dispatch(command: PlayerCommand) = withContext(Dispatchers.Main.immediate) {

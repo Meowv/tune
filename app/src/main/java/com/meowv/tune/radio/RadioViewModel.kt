@@ -148,11 +148,12 @@ class RadioViewModel(
         if (refresh.value == DirectoryRefresh.Running) return
         refresh.value = DirectoryRefresh.Running
         refresh(scope, force = true)
-        val job = load
         viewModelScope.launch {
-            job?.join()
-            // 期间又被新的加载取代时，结果由那一次负责，这里不覆盖。
-            if (directory.value.isLoading) return@launch
+            // 范围切换会替换加载任务，持续跟踪到最新任务结束。
+            do {
+                val job = load
+                job?.join()
+            } while (load !== job)
             val error = directory.value.error
             refresh.value = if (error == null) DirectoryRefresh.Success else DirectoryRefresh.Failed(error)
         }

@@ -2,35 +2,42 @@ package com.meowv.tune.update
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.meowv.tune.update.install.ApkDownloader
+import com.meowv.tune.update.install.ApkDownloads
+import com.meowv.tune.update.install.ApkInstallation
 import com.meowv.tune.update.install.ApkInstaller
-import com.meowv.tune.update.install.ApkVerifier
+import com.meowv.tune.update.install.ApkVerification
 import com.meowv.tune.update.install.DownloadStatus
 import com.meowv.tune.update.install.ExpectedApk
 import com.meowv.tune.update.install.InstallException
 import com.meowv.tune.update.install.InstallFailure
+import com.meowv.tune.update.install.InstallPersistence
 import com.meowv.tune.update.install.InstallState
-import com.meowv.tune.update.install.InstallStore
 import com.meowv.tune.update.install.PendingInstall
+import java.io.IOException
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class UpdateViewModel internal constructor(
     private val repository: UpdateRepository,
     private val checker: UpdateChecker,
     private val localVersion: () -> LocalVersion,
-    private val downloader: ApkDownloader,
-    private val verifier: ApkVerifier,
-    private val installer: ApkInstaller,
-    private val store: InstallStore,
-    private val installedVersionCode: () -> Long
-) : ViewModel() {
+    private val downloader: ApkDownloads,
+    private val verifier: ApkVerification,
+    private val installer: ApkInstallation,
+    private val store: InstallPersistence,
+    private val installedVersionCode: () -> Long,
+    scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+) : ViewModel(scope) {
 
     private val current = MutableStateFlow<UpdateUiState>(UpdateUiState.Idle)
     val state: StateFlow<UpdateUiState> = current.asStateFlow()
@@ -47,11 +54,11 @@ class UpdateViewModel internal constructor(
     val upgradedTo: StateFlow<String?> = upgraded.asStateFlow()
 
     private var inFlight: Job? = null
-    private var pollJob: Job? = null
+    private var installJob: Job? = null
     private var pending: PendingInstall? = null
 
     init {
-        viewModelScope.launch { restore() }
+        installJob = launchInstall { restore() }
     }
 
     // ---- 版本检查 ----
@@ -81,21 +88,22 @@ class UpdateViewModel internal constructor(
 
     fun download() {
         val info = (current.value as? UpdateUiState.UpdateAvailable)?.info ?: return
-        if (install.value is InstallState.Downloading ||
+        if (installJob?.isActive == true || install.value is InstallState.Downloading ||
             install.value is InstallState.Verifying ||
             install.value is InstallState.Installing
         ) {
             return
         }
         upgraded.value = null
-        viewModelScope.launch {
-            install.value = InstallState.Downloading(0L, info.apkSizeBytes)
+        install.value = InstallState.Downloading(0L, info.apkSizeBytes)
+        installJob = launchInstall {
+            pending?.let { downloader.cancel(it.downloadId) }
             val fileName = "MeowvTune-${info.versionName}.apk"
             val downloadId = try {
                 downloader.enqueue(info.apkUrl, fileName, "MeowvTune ${info.versionName}")
             } catch (_: Exception) {
                 install.value = InstallState.Failed(InstallFailure.DOWNLOAD_FAILED)
-                return@launch
+                return@launchInstall
             }
             val record = PendingInstall(
                 downloadId = downloadId,
@@ -112,26 +120,33 @@ class UpdateViewModel internal constructor(
             )
             pending = record
             store.save(record)
+            coroutineContext.ensureActive()
             poll(record)
         }
     }
 
     fun cancelDownload() {
         val record = pending ?: return
-        pollJob?.cancel()
-        pollJob = null
-        downloader.cancel(record.downloadId)
-        downloader.fileFor(record.fileName).delete()
+        val previous = installJob
+        previous?.cancel()
         pending = null
-        viewModelScope.launch { store.clear() }
+        downloader.cancel(record.downloadId)
         install.value = InstallState.Cancelled
+        // 等保存/校验完全退出，再清理记录；新下载会等待这一步结束。
+        installJob = launchInstall {
+            previous?.join()
+            downloader.fileFor(record.fileName).delete()
+            store.clear()
+        }
     }
 
     // ---- 安装 ----
 
     fun installApk() {
         val record = pending ?: return
-        if (install.value is InstallState.Installing) return
+        if (installJob?.isActive == true ||
+            install.value !in setOf(InstallState.Downloaded, InstallState.InstallPermissionRequired)
+        ) return
         if (!installer.canRequestInstall()) {
             install.value = InstallState.InstallPermissionRequired
             return
@@ -142,15 +157,18 @@ class UpdateViewModel internal constructor(
             return
         }
         install.value = InstallState.Installing
-        installer.install(file) { outcome ->
-            viewModelScope.launch {
-                when (outcome) {
-                    ApkInstaller.Outcome.UserActionRequired -> Unit
-                    ApkInstaller.Outcome.Success -> finishInstalled(record)
-                    ApkInstaller.Outcome.Cancelled ->
-                        install.value = InstallState.Failed(InstallFailure.INSTALL_CANCELLED)
-                    is ApkInstaller.Outcome.Failed ->
-                        install.value = InstallState.Failed(InstallFailure.INSTALL_FAILED)
+        installJob = launchInstall {
+            installer.install(file) { outcome ->
+                launchInstall outcome@{
+                    if (pending !== record) return@outcome
+                    when (outcome) {
+                        ApkInstaller.Outcome.UserActionRequired -> Unit
+                        ApkInstaller.Outcome.Success -> finishInstalled(record)
+                        ApkInstaller.Outcome.Cancelled ->
+                            install.value = InstallState.Failed(InstallFailure.INSTALL_CANCELLED)
+                        is ApkInstaller.Outcome.Failed ->
+                            install.value = InstallState.Failed(InstallFailure.INSTALL_FAILED)
+                    }
                 }
             }
         }
@@ -159,7 +177,8 @@ class UpdateViewModel internal constructor(
     /** 回到前台时调用：确认安装结果、补查下载进度、复查安装权限。 */
     fun onResume() {
         refreshLocal()
-        viewModelScope.launch {
+        if (installJob?.isActive == true) return
+        launchInstall {
             val record = pending
             when {
                 install.value is InstallState.Installing && record != null ->
@@ -171,10 +190,6 @@ class UpdateViewModel internal constructor(
                     }
                 install.value is InstallState.InstallPermissionRequired ->
                     if (installer.canRequestInstall()) installApk()
-                install.value is InstallState.Downloading && record != null -> {
-                    val snapshot = downloader.query(record.downloadId)
-                    if (snapshot.status == DownloadStatus.SUCCESSFUL) verify(record)
-                }
             }
         }
     }
@@ -217,39 +232,37 @@ class UpdateViewModel internal constructor(
         }
     }
 
-    private fun poll(record: PendingInstall) {
-        pollJob?.cancel()
-        pollJob = viewModelScope.launch {
-            while (isActive) {
-                val snapshot = downloader.query(record.downloadId)
-                when (snapshot.status) {
-                    DownloadStatus.PENDING, DownloadStatus.RUNNING, DownloadStatus.PAUSED -> {
-                        val total = if (snapshot.totalBytes > 0) {
-                            snapshot.totalBytes
-                        } else {
-                            record.expected.sizeBytes
-                        }
-                        install.value = InstallState.Downloading(snapshot.downloadedBytes, total)
+    private suspend fun poll(record: PendingInstall) {
+        while (pending === record) {
+            coroutineContext.ensureActive()
+            val snapshot = downloader.query(record.downloadId)
+            when (snapshot.status) {
+                DownloadStatus.PENDING, DownloadStatus.RUNNING, DownloadStatus.PAUSED -> {
+                    val total = if (snapshot.totalBytes > 0) {
+                        snapshot.totalBytes
+                    } else {
+                        record.expected.sizeBytes
                     }
-                    DownloadStatus.SUCCESSFUL -> {
-                        verify(record)
-                        return@launch
-                    }
-                    DownloadStatus.FAILED -> {
-                        store.clear()
-                        pending = null
-                        install.value = InstallState.Failed(InstallFailure.DOWNLOAD_FAILED)
-                        return@launch
-                    }
-                    DownloadStatus.UNKNOWN -> {
-                        store.clear()
-                        pending = null
-                        install.value = InstallState.Idle
-                        return@launch
-                    }
+                    install.value = InstallState.Downloading(snapshot.downloadedBytes, total)
                 }
-                delay(POLL_INTERVAL_MS)
+                DownloadStatus.SUCCESSFUL -> {
+                    verify(record)
+                    return
+                }
+                DownloadStatus.FAILED -> {
+                    store.clear()
+                    pending = null
+                    install.value = InstallState.Failed(InstallFailure.DOWNLOAD_FAILED)
+                    return
+                }
+                DownloadStatus.UNKNOWN -> {
+                    store.clear()
+                    pending = null
+                    install.value = InstallState.Idle
+                    return
+                }
             }
+            delay(POLL_INTERVAL_MS)
         }
     }
 
@@ -269,7 +282,6 @@ class UpdateViewModel internal constructor(
     }
 
     private suspend fun finishInstalled(record: PendingInstall) {
-        pollJob?.cancel()
         store.clear()
         pending = null
         install.value = InstallState.Idle
@@ -277,6 +289,30 @@ class UpdateViewModel internal constructor(
         downloader.fileFor(record.fileName).delete()
         refreshLocal()
         check()
+    }
+
+    private fun launchInstall(block: suspend () -> Unit): Job = viewModelScope.launch {
+        guardInstall(block)
+    }
+
+    private suspend fun guardInstall(block: suspend () -> Unit) {
+        try {
+            block()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: IOException) {
+            coroutineContext.ensureActive()
+            pending?.let { downloader.cancel(it.downloadId) }
+            install.value = InstallState.Failed(InstallFailure.STORAGE)
+        } catch (_: SecurityException) {
+            coroutineContext.ensureActive()
+            install.value = InstallState.Failed(InstallFailure.INSTALL_FAILED)
+        }
+    }
+
+    override fun onCleared() {
+        installer.close()
+        super.onCleared()
     }
 
     private companion object {
