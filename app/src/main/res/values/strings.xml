@@ -55,7 +55,6 @@
   <string name="update_subtitle_latest">%1$s · 已是最新版本</string>
   <string name="update_subtitle_available">%1$s · 发现新版本 %2$s</string>
   <string name="update_subtitle_failed">%1$s · 检查更新失败</string>
-  <string name="update_subtitle_downgrade">%1$s · 服务器版本较旧</string>
   <string name="update_status_idle_title">尚未检查更新</string>
   <string name="update_status_idle_body">点击下方按钮获取最新版本信息。</string>
   <string name="update_status_checking_title">正在检查更新</string>
@@ -64,8 +63,6 @@
   <string name="update_status_latest_body">当前版本已是最新，稍后再来看看吧。</string>
   <string name="update_status_available_title">发现新版本 %1$s</string>
   <string name="update_status_available_body">新版本已经发布，可查看下方更新内容。</string>
-  <string name="update_status_downgrade_title">当前版本较新</string>
-  <string name="update_status_downgrade_body">服务器版本低于已安装版本，已保持现有版本。</string>
   <string name="update_status_error_title">检查更新失败</string>
   <string name="update_check">检查更新</string>
   <string name="update_checking">正在检查…</string>
@@ -115,7 +112,6 @@
   <string name="update_fail_checksum">SHA-256 校验不通过，已删除。</string>
   <string name="update_fail_package">安装包包名不匹配，已删除。</string>
   <string name="update_fail_version">安装包版本与清单不一致，已删除。</string>
-  <string name="update_fail_signature">安装包签名与当前应用不一致，已删除。</string>
   <string name="update_fail_incompatible">安装包与当前系统不兼容。</string>
   <string name="update_fail_install">系统安装失败，请重试。</string>
   <string name="update_fail_install_cancelled">已取消安装，安装包仍保留，可再次安装。</string>

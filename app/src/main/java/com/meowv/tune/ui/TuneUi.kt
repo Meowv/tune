@@ -322,7 +322,6 @@ private fun updateSubtitle(state: UpdateUiState, versionName: String): String {
         is UpdateUiState.UpdateAvailable ->
             stringResource(R.string.update_subtitle_available, current, "v${state.info.versionName}")
         is UpdateUiState.Error -> stringResource(R.string.update_subtitle_failed, current)
-        is UpdateUiState.Downgrade -> stringResource(R.string.update_subtitle_downgrade, current)
         UpdateUiState.Idle -> stringResource(R.string.update_subtitle_idle, current)
     }
 }

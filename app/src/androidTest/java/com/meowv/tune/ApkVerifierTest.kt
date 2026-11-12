@@ -27,7 +27,7 @@ class ApkVerifierTest {
     fun setUp() {
         file = File(context.cacheDir, "verify-test.apk")
         file.writeBytes(ByteArray(1024) { it.toByte() })
-        // 用真实安装包跑一遍完整链路：包名、versionCode、minSdk、签名都能对得上。
+        // 用当前已安装的 APK 校验完整性与元数据；签名兼容性由系统安装器负责。
         installedCopy = File(context.cacheDir, "installed.apk").apply {
             File(installedApkPath()).copyTo(this, overwrite = true)
         }

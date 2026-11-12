@@ -400,8 +400,6 @@ private fun StatusIcon(isCar: Boolean, state: UpdateUiState, install: InstallSta
                 state is UpdateUiState.UpToDate -> TuneIcon(R.drawable.ic_ui_check, Modifier.size(size), TuneColors.Primary)
                 state is UpdateUiState.UpdateAvailable ->
                     TuneIcon(R.drawable.ic_update, Modifier.size(size), TuneColors.Primary)
-                state is UpdateUiState.Downgrade ->
-                    TuneIcon(R.drawable.ic_ui_info, Modifier.size(size), TuneColors.Muted)
                 else -> TuneIcon(R.drawable.ic_update, Modifier.size(size), TuneColors.Muted)
             }
         }
@@ -486,11 +484,6 @@ private fun statusPresentation(
             stringResource(R.string.update_status_available_title, state.info.versionName),
             stringResource(R.string.update_status_available_body),
             TuneColors.Primary
-        )
-        is UpdateUiState.Downgrade -> StatusPresentation(
-            stringResource(R.string.update_status_downgrade_title),
-            stringResource(R.string.update_status_downgrade_body),
-            TuneColors.Text
         )
         is UpdateUiState.Error -> StatusPresentation(
             stringResource(R.string.update_status_error_title),
@@ -632,7 +625,6 @@ private fun installFailureText(failure: InstallFailure): String = stringResource
         InstallFailure.CHECKSUM_MISMATCH -> R.string.update_fail_checksum
         InstallFailure.PACKAGE_MISMATCH -> R.string.update_fail_package
         InstallFailure.VERSION_MISMATCH -> R.string.update_fail_version
-        InstallFailure.SIGNATURE_MISMATCH -> R.string.update_fail_signature
         InstallFailure.INCOMPATIBLE -> R.string.update_fail_incompatible
         InstallFailure.INSTALL_FAILED -> R.string.update_fail_install
         InstallFailure.INSTALL_CANCELLED -> R.string.update_fail_install_cancelled

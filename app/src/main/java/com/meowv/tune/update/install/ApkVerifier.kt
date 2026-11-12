@@ -1,7 +1,6 @@
 package com.meowv.tune.update.install
 
 import android.content.Context
-import android.content.pm.PackageManager
 import android.os.Build
 import java.io.File
 import java.security.MessageDigest
@@ -11,7 +10,8 @@ import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 
 /**
- * 安装包校验：存在性 → 大小 → SHA-256 → 包名 → versionCode → minSdk → 签名。
+ * 安装包校验：存在性 → 大小 → SHA-256 → 包名 → 清单版本一致性 → minSdk。
+ * 签名兼容性由系统安装器验证，客户端不做额外的签名相等限制。
  * 任意一步失败都抛 [InstallException]，调用方负责删文件和提示，禁止继续安装。
  */
 internal class ApkVerifier(private val context: Context) : ApkVerification {
@@ -28,7 +28,7 @@ internal class ApkVerifier(private val context: Context) : ApkVerification {
             }
 
             val archive = context.packageManager
-                .getPackageArchiveInfo(file.absolutePath, PackageManager.GET_SIGNING_CERTIFICATES)
+                .getPackageArchiveInfo(file.absolutePath, 0)
                 ?: throw InstallException(InstallFailure.INCOMPATIBLE)
             if (archive.packageName != expected.packageName) {
                 throw InstallException(InstallFailure.PACKAGE_MISMATCH)
@@ -39,22 +39,8 @@ internal class ApkVerifier(private val context: Context) : ApkVerification {
             val minSdk = archive.applicationInfo?.minSdkVersion ?: 0
             if (minSdk > Build.VERSION.SDK_INT) throw InstallException(InstallFailure.INCOMPATIBLE)
 
-            // 签名必须与已安装版本一致，否则系统会拒绝覆盖，提前拦下来给出明确原因。
-            val archiveSigner = archive.signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray()
-            val installedSigner = installedSigner()
-            if (archiveSigner == null || installedSigner == null ||
-                !MessageDigest.isEqual(archiveSigner, installedSigner)
-            ) {
-                throw InstallException(InstallFailure.SIGNATURE_MISMATCH)
-            }
         }
     }
-
-    private fun installedSigner(): ByteArray? = runCatching {
-        context.packageManager
-            .getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
-            .signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray()
-    }.getOrNull()
 
     private suspend fun sha256(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")

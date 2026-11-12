@@ -76,15 +76,11 @@ class MainActivity : ComponentActivity() {
                     downloader = tuneApp.apkDownloader,
                     verifier = tuneApp.apkVerifier,
                     installer = tuneApp.apkInstaller,
-                    store = tuneApp.installStore,
-                    installedVersionCode = ::currentVersionCode
+                    store = tuneApp.installStore
                 )
             }
         }
     }
-
-    private fun currentVersionCode(): Long =
-        packageManager.getPackageInfo(packageName, 0).longVersionCode
 
     private fun localVersion(): LocalVersion {
         val info = packageManager.getPackageInfo(packageName, 0)

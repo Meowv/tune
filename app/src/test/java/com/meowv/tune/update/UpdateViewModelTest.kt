@@ -99,22 +99,103 @@ class UpdateViewModelTest {
         }
     }
 
+    @Test fun changedNameWithSameCodeAndLowerCodeBothAllowDownload() = runBlocking {
+        val installed = local.copy(versionCode = 3)
+        for (target in listOf(remote.copy(versionCode = 3), remote.copy(versionCode = 2, versionName = installed.versionName))) {
+            val downloads = FakeDownloads()
+            withModel(downloads, currentVersion = { installed }, manifest = target) { model, _ ->
+                model.check()
+                withTimeout(2000) { model.state.first { it is UpdateUiState.UpdateAvailable } }
+                model.download()
+                yield()
+                assertEquals(1, downloads.enqueued)
+                assertTrue(model.installState.value is InstallState.Downloading)
+            }
+        }
+    }
+
+    @Test fun restoringLowerCodeDoesNotMistakePendingDownloadForInstalled() = runBlocking {
+        val downloads = FakeDownloads(DownloadStatus.SUCCESSFUL)
+        withModel(downloads, FakeStore(read = { record }), currentVersion = { local.copy(versionCode = 3) }) { model, _ ->
+            assertEquals(InstallState.Downloaded,
+                withTimeout(2000) { model.installState.first { it is InstallState.Downloaded } })
+            assertNull(model.upgradedTo.value)
+            assertEquals(1, downloads.queries)
+        }
+    }
+
+    @Test fun restoringSameCodeWithDifferentNameStillVerifiesDownload() = runBlocking {
+        val target = record.copy(versionCode = local.versionCode)
+        val downloads = FakeDownloads(DownloadStatus.SUCCESSFUL)
+        withModel(downloads, FakeStore(read = { target })) { model, _ ->
+            withTimeout(2000) { model.installState.first { it is InstallState.Downloaded } }
+            assertNull(model.upgradedTo.value)
+            assertEquals(1, downloads.queries)
+        }
+    }
+
+    @Test fun restoredInstallCompletesOnlyWhenBothVersionFieldsMatch() = runBlocking {
+        val downloads = FakeDownloads()
+        var cleared = false
+        withModel(downloads, FakeStore(read = { record }, clearAction = { cleared = true }),
+            currentVersion = { local.copy(versionCode = record.versionCode, versionName = record.versionName) }) { model, _ ->
+            assertEquals(record.versionName, withTimeout(2000) { model.upgradedTo.first { it != null } })
+            assertTrue(cleared)
+            assertEquals(0, downloads.queries)
+        }
+    }
+
+    @Test fun cancellingSameCodeOrLowerCodeInstallDoesNotReportSuccess() = runBlocking {
+        val installed = local.copy(versionCode = 3)
+        val apk = File.createTempFile("tune-policy-", ".apk")
+        val installer = object : ApkInstallation {
+            override fun canRequestInstall() = true
+            override suspend fun install(apk: File, onOutcome: (ApkInstaller.Outcome) -> Unit) {
+                onOutcome(ApkInstaller.Outcome.UserActionRequired)
+            }
+            override fun close() = Unit
+        }
+        try {
+            for (targetCode in listOf(2L, 3L)) {
+                val target = record.copy(versionCode = targetCode,
+                    expected = record.expected.copy(versionCode = targetCode))
+                withModel(FakeDownloads(DownloadStatus.SUCCESSFUL, apk), FakeStore(read = { target }),
+                    currentVersion = { installed }, installation = installer) { model, _ ->
+                    withTimeout(2000) { model.installState.first { it is InstallState.Downloaded } }
+                    yield()
+                    model.installApk()
+                    yield()
+                    assertEquals(InstallState.Installing, model.installState.value)
+                    model.onResume()
+                    yield()
+                    assertEquals(InstallState.Downloaded, model.installState.value)
+                    assertNull(model.upgradedTo.value)
+                }
+            }
+        } finally {
+            apk.delete()
+        }
+    }
+
     private suspend fun withModel(
         downloads: FakeDownloads = FakeDownloads(),
         store: InstallPersistence = FakeStore(),
         verifier: ApkVerification = ApkVerification { _, _ -> },
+        currentVersion: () -> LocalVersion = { local },
+        manifest: UpdateInfo = remote,
+        installation: ApkInstallation? = null,
         block: suspend (UpdateViewModel, CoroutineScope) -> Unit
     ) = coroutineScope {
         val lifetime = CoroutineScope(coroutineContext + SupervisorJob())
-        val installer = object : ApkInstallation {
+        val installer = installation ?: object : ApkInstallation {
             override fun canRequestInstall() = true
             override suspend fun install(apk: File, onOutcome: (ApkInstaller.Outcome) -> Unit) = Unit
             override fun close() = Unit
         }
         try {
             val model = UpdateViewModel(object : UpdateRepository {
-                override suspend fun fetch() = remote
-            }, UpdateChecker(), { local }, downloads, verifier, installer, store, { 1 }, lifetime)
+                override suspend fun fetch() = manifest
+            }, UpdateChecker(), currentVersion, downloads, verifier, installer, store, lifetime)
             yield()
             block(model, lifetime)
         } finally {
@@ -122,7 +203,10 @@ class UpdateViewModelTest {
         }
     }
 
-    private class FakeDownloads(private val status: DownloadStatus = DownloadStatus.RUNNING) : ApkDownloads {
+    private class FakeDownloads(
+        private val status: DownloadStatus = DownloadStatus.RUNNING,
+        private val apk: File? = null
+    ) : ApkDownloads {
         var enqueued = 0
         var queries = 0
         val cancelled = mutableListOf<Long>()
@@ -132,7 +216,7 @@ class UpdateViewModelTest {
             return DownloadSnapshot(status, 0, 10, null, 0)
         }
         override fun cancel(id: Long) { cancelled += id }
-        override fun fileFor(fileName: String) = File(System.getProperty("java.io.tmpdir"), "tune-fake-missing.apk")
+        override fun fileFor(fileName: String) = apk ?: File(System.getProperty("java.io.tmpdir"), "tune-fake-missing.apk")
     }
 
     private class FakeStore(

@@ -21,24 +21,31 @@ class UpdateCheckerTest {
     }
 
     @Test
-    fun equalVersionCodeIsUpToDate() {
-        val verdict = checker.evaluate(local, info(versionCode = 5))
+    fun equalVersionCodeAndNameIsUpToDate() {
+        val verdict = checker.evaluate(local, info(versionCode = 5, versionName = local.versionName))
         assertTrue(verdict is UpdateVerdict.UpToDate)
     }
 
     @Test
-    fun lowerVersionCodeIsDowngrade() {
+    fun lowerVersionCodeIsAvailable() {
         val verdict = checker.evaluate(local, info(versionCode = 4))
-        assertTrue(verdict is UpdateVerdict.Downgrade)
+        assertTrue(verdict is UpdateVerdict.Available)
     }
 
-    // versionName 只做展示，比较只看 versionCode。
     @Test
-    fun comparisonIgnoresVersionName() {
+    fun changingOnlyVersionNameIsAvailable() {
         val verdict = checker.evaluate(local, info(versionCode = 101, versionName = "0.9.0"))
         assertTrue(verdict is UpdateVerdict.Available)
         val sameCode = checker.evaluate(local, info(versionCode = 5, versionName = "9.9.9"))
-        assertTrue(sameCode is UpdateVerdict.UpToDate)
+        assertTrue(sameCode is UpdateVerdict.Available)
+    }
+
+    @Test
+    fun changingOnlyVersionCodeIsAvailableEvenWhenLower() {
+        for (code in listOf(4L, 6L)) {
+            assertTrue(checker.evaluate(local, info(versionCode = code, versionName = local.versionName))
+                is UpdateVerdict.Available)
+        }
     }
 
     @Test

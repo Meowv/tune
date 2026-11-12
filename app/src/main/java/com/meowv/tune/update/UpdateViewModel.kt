@@ -35,7 +35,6 @@ class UpdateViewModel internal constructor(
     private val verifier: ApkVerification,
     private val installer: ApkInstallation,
     private val store: InstallPersistence,
-    private val installedVersionCode: () -> Long,
     scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 ) : ViewModel(scope) {
 
@@ -72,7 +71,6 @@ class UpdateViewModel internal constructor(
                 when (val verdict = checker.evaluate(localState.value, info)) {
                     is UpdateVerdict.Available -> UpdateUiState.UpdateAvailable(verdict.info)
                     is UpdateVerdict.UpToDate -> UpdateUiState.UpToDate(verdict.info)
-                    is UpdateVerdict.Downgrade -> UpdateUiState.Downgrade(verdict.info)
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -182,7 +180,7 @@ class UpdateViewModel internal constructor(
             val record = pending
             when {
                 install.value is InstallState.Installing && record != null ->
-                    if (installedVersionCode() >= record.versionCode) {
+                    if (targetInstalled(record)) {
                         finishInstalled(record)
                     } else {
                         // 用户取消了系统确认框：保留已校验的包，允许再装一次。
@@ -201,9 +199,15 @@ class UpdateViewModel internal constructor(
         runCatching { localVersion() }.getOrNull()?.let { localState.value = it }
     }
 
+    // 同码换名称、低码版本都可能成为目标，不能用 >= 判断安装成功。
+    private fun targetInstalled(record: PendingInstall): Boolean {
+        val installed = localVersion()
+        return installed.versionCode == record.versionCode && installed.versionName == record.versionName
+    }
+
     private suspend fun restore() {
         val record = store.pending() ?: return
-        if (installedVersionCode() >= record.versionCode) {
+        if (targetInstalled(record)) {
             // 自更新会杀掉进程，下次启动靠这里把「刚装完」认回来。
             store.clear()
             upgraded.value = record.versionName

@@ -18,7 +18,7 @@ data class UpdateInfo(
     val apkSha256: String
 )
 
-/** 本地安装信息，全部取自 PackageManager / BuildConfig，不参与字符串比较。 */
+/** 本地安装信息，全部取自 PackageManager / BuildConfig。 */
 data class LocalVersion(
     val packageName: String,
     val versionName: String,
@@ -35,11 +35,10 @@ enum class UpdateFailure {
 
 class UpdateException(val failure: UpdateFailure) : Exception(failure.name)
 
-/** 版本比较结论；降级单独成态，避免被当成「有更新」或「已最新」。 */
+/** 只有两个版本字段都相同才视为已是当前版本，其余差异统一提供安装。 */
 sealed interface UpdateVerdict {
     data class Available(val info: UpdateInfo) : UpdateVerdict
     data class UpToDate(val info: UpdateInfo) : UpdateVerdict
-    data class Downgrade(val info: UpdateInfo) : UpdateVerdict
 }
 
 sealed interface UpdateUiState {
@@ -47,7 +46,6 @@ sealed interface UpdateUiState {
     data object Checking : UpdateUiState
     data class UpToDate(val info: UpdateInfo) : UpdateUiState
     data class UpdateAvailable(val info: UpdateInfo) : UpdateUiState
-    data class Downgrade(val info: UpdateInfo) : UpdateUiState
     data class Error(val failure: UpdateFailure) : UpdateUiState
 
     val isChecking: Boolean get() = this is Checking
@@ -57,7 +55,6 @@ sealed interface UpdateUiState {
         get() = when (this) {
             is UpToDate -> info
             is UpdateAvailable -> info
-            is Downgrade -> info
             else -> null
         }
 }
