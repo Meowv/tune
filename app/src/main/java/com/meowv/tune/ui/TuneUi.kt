@@ -187,7 +187,8 @@ fun TuneApp(
                             settings, radioState, playbackState, connected, directoryRefreshing,
                             updateSubtitle, onPlayback, onSelectTarget, onDisplayModeChange,
                             onSettingsChange, onRefreshRadio, onRefreshFromSettings, onLoadMore,
-                            onClearDirectoryCache, { showUpdate = true }, { showScopePicker = true }
+                            onClearDirectoryCache, { showUpdate = true }, { showScopePicker = true },
+                            radioAnimationsEnabled = !fullscreenOccupied && !showUpdate && !showScopePicker
                         )
                     }
                 } else {
@@ -196,7 +197,8 @@ fun TuneApp(
                         settings, radioState, playbackState, connected, directoryRefreshing,
                         updateSubtitle, onPlayback, onSelectTarget, onDisplayModeChange,
                         onSettingsChange, onRefreshRadio, onRefreshFromSettings, onLoadMore,
-                        onClearDirectoryCache, { showUpdate = true }, { showScopePicker = true }
+                        onClearDirectoryCache, { showUpdate = true }, { showScopePicker = true },
+                        radioAnimationsEnabled = !fullscreenOccupied && !showUpdate && !showScopePicker
                     )
                 }
                 if (showMiniPlayer) {
@@ -367,7 +369,8 @@ private fun TunePager(
     onLoadMore: () -> Unit,
     onClearDirectoryCache: () -> Unit,
     onOpenUpdate: () -> Unit,
-    onScopeClick: () -> Unit
+    onScopeClick: () -> Unit,
+    radioAnimationsEnabled: Boolean
 ) {
     HorizontalPager(state = state, modifier = modifier, key = { TunePage.entries[it].name }) { index ->
         val target = TunePage.entries[index]
@@ -377,7 +380,8 @@ private fun TunePager(
                 directoryRefreshing, updateSubtitle, onPlayback, onSelectTarget,
                 onDisplayModeChange, onSettingsChange, onRefreshRadio,
                 onRefreshFromSettings, onLoadMore, onClearDirectoryCache,
-                onOpenUpdate, onScopeClick
+                onOpenUpdate, onScopeClick,
+                radioAnimationsEnabled && index == state.settledPage && !state.isScrollInProgress
             )
         }
     }
@@ -403,7 +407,8 @@ private fun pageContent(
     onLoadMore: () -> Unit,
     onClearDirectoryCache: () -> Unit,
     onOpenUpdate: () -> Unit,
-    onScopeClick: () -> Unit
+    onScopeClick: () -> Unit,
+    radioAnimationsEnabled: Boolean
 ) {
     pageStates.SaveableStateProvider(page) {
         when (page) {
@@ -418,7 +423,8 @@ private fun pageContent(
                 onPlayback = onPlayback,
                 onSelectTarget = onSelectTarget,
                 onRefresh = onRefreshRadio,
-                onScopeClick = onScopeClick
+                onScopeClick = onScopeClick,
+                animationsEnabled = radioAnimationsEnabled
             )
             TunePage.Music -> MusicScreen(isCar)
             TunePage.Settings -> SettingsScreen(

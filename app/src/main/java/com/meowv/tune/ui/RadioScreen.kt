@@ -18,8 +18,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PageSize
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -73,12 +75,13 @@ internal fun RadioScreen(
     onPlayback: (PlayerCommand) -> Unit,
     onSelectTarget: (Station) -> Unit,
     onRefresh: () -> Unit,
-    onScopeClick: () -> Unit
+    onScopeClick: () -> Unit,
+    animationsEnabled: Boolean = true
 ) {
     key(state.scope, state.resolvedCountryCode) {
         RadioDirectory(
             isCar, state, playback, connected, displayMode, onDisplayModeChange,
-            onLoadMore, if (connected) onPlayback else null, onSelectTarget, onRefresh, onScopeClick
+            onLoadMore, if (connected) onPlayback else null, onSelectTarget, onRefresh, onScopeClick, animationsEnabled
         )
     }
 }
@@ -95,7 +98,8 @@ private fun RadioDirectory(
     onPlayback: ((PlayerCommand) -> Unit)?,
     onSelectTarget: (Station) -> Unit,
     onRefresh: () -> Unit,
-    onScopeClick: () -> Unit
+    onScopeClick: () -> Unit,
+    animationsEnabled: Boolean
 ) {
     val locale = CountryLocale
     val selectedId = state.selectedStationUuid ?: playback.station?.uuid
@@ -128,7 +132,8 @@ private fun RadioDirectory(
                         isCar, state, playback, selectedId, listState, onPlayback, onLoadMore, onSelectTarget, onRefresh
                     )
                     RadioDisplayMode.CARD -> CardMode(
-                        isCar, state, playback, selectedId, onPlayback, onLoadMore, onSelectTarget, onRefresh
+                        isCar, state, playback, selectedId, onPlayback, onLoadMore, onSelectTarget, onRefresh,
+                        connected, animationsEnabled && displayMode == RadioDisplayMode.CARD
                     )
                 }
             }
@@ -344,7 +349,9 @@ private fun CardMode(
     onPlayback: ((PlayerCommand) -> Unit)?,
     onLoadMore: () -> Unit,
     onSelectTarget: (Station) -> Unit,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    connected: Boolean,
+    animationsEnabled: Boolean
 ) {
     if (state.stations.isEmpty()) {
         when {
@@ -390,11 +397,12 @@ private fun CardMode(
         if (page >= queue.lastIndex - 2) onLoadMore()
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        // 卡片尺寸整体收敛约 6%，台标随卡片高度再缩 10% 左右，四周保留呼吸空间。
+        val statusGap = if (isCar) TuneSpacing.Large else TuneSpacing.Medium
+        val statusHeight = if (isCar) 28.dp else 22.dp
         val width = (if (isCar) 366.dp else 262.dp).coerceAtMost(maxWidth - 48.dp)
-        val height = (if (isCar) 366.dp else 308.dp).coerceAtMost(maxHeight - 24.dp)
-        // 高度吃紧时先缩台标，给两行名称和国家行留位置，避免文字被裁。
-        val artwork = (height - 48.dp - 112.dp).coerceIn(88.dp, if (isCar) 194.dp else 148.dp)
+        // 状态区先占位，所有页面保持同高；高度吃紧时由卡片内部缩小台标。
+        val height = (if (isCar) 366.dp else 308.dp)
+            .coerceAtMost((maxHeight - statusHeight - statusGap - 24.dp).coerceAtLeast(0.dp))
         val side = ((maxWidth - width) / 2).coerceAtLeast(16.dp)
         HorizontalPager(
             state = pagerState,
@@ -404,11 +412,14 @@ private fun CardMode(
             pageSpacing = 12.dp,
             key = { index -> queue[index].uuid.toString() }
         ) { page ->
-            // 卡片在可视区内垂直居中，避免旧版头重脚轻的大面积上下留白。
-            Box(Modifier.fillMaxHeight(), contentAlignment = Alignment.Center) {
+            Column(
+                Modifier.fillMaxHeight().width(width),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
                 val station = queue[page]
                 StationCard(
-                    station = station, isCar = isCar, artwork = artwork,
+                    station = station, isCar = isCar,
                     // 电台所属国家与当前选择区域一致时不重复展示国家文字。
                     showCountry = station.countryCode != null &&
                         station.countryCode != state.resolvedCountryCode,
@@ -416,7 +427,16 @@ private fun CardMode(
                         onSelectTarget(station)
                         onPlayback?.invoke(PlayerCommand.Play(station))
                     },
-                    modifier = Modifier.width(width).height(height)
+                    modifier = Modifier.fillMaxWidth().height(height).testTag("station_card_${station.uuid}")
+                )
+                Spacer(Modifier.height(statusGap))
+                StationPlaybackStatus(
+                    visual = stationPlaybackVisual(station.uuid, playback, connected),
+                    isCar = isCar,
+                    animationsEnabled = animationsEnabled && page == pagerState.settledPage &&
+                        !pagerState.isScrollInProgress,
+                    modifier = Modifier.fillMaxWidth().height(statusHeight)
+                        .testTag("station_status_${station.uuid}")
                 )
             }
         }
@@ -425,40 +445,55 @@ private fun CardMode(
 
 @Composable
 private fun StationCard(
-    station: Station, isCar: Boolean, artwork: Dp, showCountry: Boolean,
+    station: Station, isCar: Boolean, showCountry: Boolean,
     onClick: () -> Unit, modifier: Modifier
 ) {
-    Column(
+    BoxWithConstraints(
         modifier.background(TuneColors.Raised, TuneShapes.Card).clickable(onClick = onClick)
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
     ) {
-        StationBadge(station, artwork)
-        Spacer(Modifier.height(if (isCar) 20.dp else 16.dp))
-        // 名称固定占两行高度：短名居中不上下跳动，长名在第二行末尾省略。
+        val padding = if (maxHeight < 280.dp) TuneSpacing.Large else TuneSpacing.Section
         val nameLine = if (isCar) 32.sp else 27.sp
-        val nameBlock = with(LocalDensity.current) { (nameLine.value * fontScale).dp * 2 }
-        Box(Modifier.fillMaxWidth().heightIn(min = nameBlock), contentAlignment = Alignment.Center) {
-            Text(
-                station.name.ifBlank { stringResource(R.string.station_unnamed) },
-                modifier = Modifier.fillMaxWidth(),
-                color = TuneColors.Text,
-                fontSize = if (isCar) 26.sp else 22.sp,
-                lineHeight = nameLine,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-                style = TuneTextStyle
-            )
-        }
-        if (showCountry) station.countryCode?.let {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                it.displayName(CountryLocale),
-                color = TuneColors.Muted, fontSize = if (isCar) 14.sp else 12.sp, style = TuneTextStyle
-            )
+        val nameBlock = with(LocalDensity.current) { nameLine.toDp() * 2 }
+        val countryHeight = if (showCountry && station.countryCode != null) {
+            with(LocalDensity.current) { (if (isCar) 20.sp else 18.sp).toDp() } + TuneSpacing.Small
+        } else 0.dp
+        val artworkGap = if (isCar) TuneSpacing.Large else TuneSpacing.Medium
+        val artwork = (maxHeight - padding * 2 - nameBlock - countryHeight - artworkGap)
+            .coerceIn(0.dp, if (isCar) 194.dp else 148.dp)
+            .coerceAtMost((maxWidth - padding * 2).coerceAtLeast(0.dp))
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            if (artwork >= 32.dp) {
+                StationBadge(station, artwork)
+                Spacer(Modifier.height(artworkGap))
+            }
+            // 名称固定占两行高度，状态切换不改变卡片内容位置。
+            Box(Modifier.fillMaxWidth().heightIn(min = nameBlock), contentAlignment = Alignment.Center) {
+                Text(
+                    station.name.ifBlank { stringResource(R.string.station_unnamed) },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = TuneColors.Text,
+                    fontSize = if (isCar) 26.sp else 22.sp,
+                    lineHeight = nameLine,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    style = TuneTextStyle
+                )
+            }
+            if (showCountry) station.countryCode?.let {
+                Spacer(Modifier.height(TuneSpacing.Small))
+                Text(
+                    it.displayName(CountryLocale),
+                    color = TuneColors.Muted, fontSize = if (isCar) 14.sp else 12.sp,
+                    lineHeight = if (isCar) 20.sp else 18.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, style = TuneTextStyle
+                )
+            }
         }
     }
 }

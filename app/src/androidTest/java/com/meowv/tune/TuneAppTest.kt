@@ -269,11 +269,15 @@ class TuneAppTest {
 
         compose.onNodeWithTag("layout_card").performClick()
         compose.waitUntil(3000) { displayMode() == RadioDisplayMode.CARD }
-        compose.onNodeWithTag("station_cards").assertExists().performTouchInput { swipeLeft() }
+        compose.onNodeWithTag("station_status_${UUID(0, 1)}").assertIsDisplayed()
+        // 车机宽屏两侧露出相邻卡片，手势从当前卡片发起，避免命中预览页。
+        compose.onNodeWithTag("station_card_${UUID(0, 1)}").assertIsDisplayed()
+            .performTouchInput { swipeLeft() }
         compose.waitUntil(8000) {
             app.playerController.state.value.station?.uuid == UUID(0, 2) &&
                 app.playerController.state.value.phase == PlaybackPhase.PLAYING
         }
+        compose.onNodeWithTag("station_status_${UUID(0, 2)}").assertIsDisplayed()
         runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
     }
 

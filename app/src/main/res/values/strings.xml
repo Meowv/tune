@@ -120,6 +120,9 @@
   <string name="playback_resolving">正在连接</string>
   <string name="playback_retrying">正在重试</string>
   <string name="playback_buffering">缓冲中</string>
+  <string name="playback_playing">播放中</string>
+  <string name="playback_failed">播放失败</string>
+  <string name="playback_service_disconnected">播放服务未连接</string>
   <string name="playback_live">直播中</string>
   <string name="playback_paused">已暂停</string>
   <string name="playback_http">音源不可用（%1$d）</string>
