@@ -31,6 +31,7 @@ class AutoPlayResumeTest {
     @Before
     fun reset() = runBlocking<Unit> {
         app.failResume = false
+        app.clearRememberedStation()
         app.mockNetwork.value = NetworkState(NetworkType.WIFI, metered = false)
         app.userSettings.update { TuneSettings(scope = RadioScope(ScopeMode.COUNTRY, app.country), autoPlay = false) }
         app.radioQueue.clearScope()
@@ -142,6 +143,26 @@ class AutoPlayResumeTest {
             connection.dispatch(PlayerCommand.Play(com.meowv.tune.domain.Station(UUID(0, 2), "Test station 2", app.country)))
             withTimeout(8000) { connection.state.first { it.phase == PlaybackPhase.PLAYING } }
             withTimeout(3000) { app.userSettings.settings.first { it.lastSuccessfulStation == UUID(0, 2) } }
+        }
+    }
+
+    @Test fun remembersSuccessfulStationWithAutoPlayOff() = runBlocking {
+        launch {
+            withTimeout(5000) { app.radioQueue.activeScope.first { it != null } }
+            connection.dispatch(PlayerCommand.Play(com.meowv.tune.domain.Station(UUID(0, 2), "Test station 2", app.country)))
+            withTimeout(8000) { connection.state.first { it.phase == PlaybackPhase.PLAYING } }
+            withTimeout(3000) { app.userSettings.settings.first { it.lastPlayedStation?.uuid == UUID(0, 2) } }
+            connection.dispatch(PlayerCommand.TogglePause)
+            withTimeout(3000) { connection.state.first { it.phase == PlaybackPhase.PAUSED } }
+            connection.dispatch(PlayerCommand.Stop)
+        }
+        app.autoPlayAttempted = false
+        launch {
+            delay(1000)
+            assertEquals(PlaybackPhase.IDLE, connection.state.value.phase)
+            val saved = app.userSettings.settings.first()
+            assertEquals(UUID(0, 2), saved.lastPlayedStation?.uuid)
+            assertEquals(false, saved.autoPlay)
         }
     }
 

@@ -46,17 +46,17 @@ class DataStoreSettingsRepositoryTest {
                 repository.settings.first()
             )
             repository.update { it.copy(autoPlay = false, scope = RadioScope(ScopeMode.GLOBAL)) }
-            repository.recordSuccessfulStation(UUID.randomUUID())
+            repository.recordSuccessfulStation(uuid)
         }
         open(file) { repository ->
             val settings = repository.settings.first()
             assertFalse(settings.autoPlay)
-            assertNull(settings.lastSuccessfulStation)
+            assertEquals(uuid, settings.lastSuccessfulStation)
             assertEquals(ScopeMode.GLOBAL, settings.scope.mode)
             assertEquals(RadioDisplayMode.CARD, settings.displayMode)
             assertEquals(PlaybackOrder.SEQUENTIAL, settings.playbackOrder)
             repository.update { it.copy(autoPlay = true, lastSuccessfulStation = uuid) }
-            assertNull(repository.settings.first().lastSuccessfulStation)
+            assertEquals(uuid, repository.settings.first().lastSuccessfulStation)
         }
     }
 
@@ -85,6 +85,24 @@ class DataStoreSettingsRepositoryTest {
             assertEquals(TuneSettings(), repository.settings.first())
             repository.update { it.copy(scope = RadioScope(ScopeMode.GLOBAL)) }
             assertEquals(ScopeMode.GLOBAL, repository.settings.first().scope.mode)
+        }
+    }
+
+    @Test fun remembersStationMetadataWithoutAutoPlayAndAfterDisablingIt() = runBlocking {
+        val file = File(folder.root, "remember.preferences_pb")
+        val station = Station(UUID(0, 7), "Last Radio", CountryCode.parse("CN"), "https://example.test/logo.png")
+        open(file) { repo ->
+            repo.recordSuccessfulStation(station)
+            assertFalse(repo.settings.first().autoPlay)
+            repo.update { it.copy(autoPlay = true) }
+            repo.update { it.copy(autoPlay = false) }
+        }
+        open(file) { repo ->
+            assertFalse(repo.settings.first().autoPlay)
+            assertEquals(station.uuid, repo.settings.first().lastSuccessfulStation)
+            assertEquals(station, repo.settings.first().lastPlayedStation)
+            repo.refreshRememberedStation(station.copy(uuid = UUID(0, 99), name = "Old result"))
+            assertEquals(station, repo.settings.first().lastPlayedStation)
         }
     }
 

@@ -2,17 +2,13 @@ package com.meowv.tune.ui
 
 import android.provider.Settings
 import androidx.annotation.DrawableRes
-import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -21,14 +17,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -36,7 +30,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -47,10 +40,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.ScaleFactor
 import androidx.compose.ui.platform.LocalContext
@@ -58,11 +48,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
@@ -73,15 +61,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.meowv.tune.R
-import com.meowv.tune.domain.PlaybackPhase
-import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.Station
 import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.ui.theme.TuneShapes
 import com.meowv.tune.ui.theme.TuneSizes
 import com.meowv.tune.ui.theme.TuneTextStyle
-import kotlin.math.abs
-import kotlinx.coroutines.launch
 
 @Composable
 internal fun TuneIcon(@DrawableRes resource: Int, modifier: Modifier = Modifier, tint: Color = TuneColors.Primary) {
@@ -146,76 +130,6 @@ internal fun rememberMotionEnabled(): Boolean {
 private const val WAVE_BAR_COUNT = 4
 private val WAVE_STATIC_LEVELS = listOf(.42f, .78f, .55f, .9f)
 
-private enum class PlayerButtonVisual { Play, Playing, Loading, Retry, Unavailable }
-
-/** 底部播放器操作按钮的通用热区：48dp（车机 56dp），内容由调用方决定。 */
-@Composable
-private fun MiniPlayerAction(
-    tag: String,
-    label: String,
-    enabled: Boolean,
-    isCar: Boolean,
-    onClick: () -> Unit,
-    content: @Composable () -> Unit
-) {
-    Box(
-        Modifier.size(if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
-            .clip(CircleShape)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .testTag(tag)
-            .semantics {
-                role = Role.Button
-                contentDescription = label
-                if (!enabled) disabled()
-            },
-        contentAlignment = Alignment.Center
-    ) {
-        content()
-    }
-}
-
-/**
- * 播放器主操作按钮：48dp 热区（车机 56dp），不铺底色。
- * 播放中用轻量波形表达出声状态；缓冲是品牌紫加载环，失败转错误色重试键，未选台为灰色。
- */
-@Composable
-private fun PlayerActionButton(
-    visual: PlayerButtonVisual,
-    label: String,
-    enabled: Boolean,
-    isCar: Boolean,
-    onClick: () -> Unit
-) {
-    // 主操作图标比次级图标大一档，层级靠尺寸拉开，不额外铺底色。
-    val glyph = if (isCar) TuneSizes.IconXl else TuneSizes.IconLg
-    val tint = when (visual) {
-        PlayerButtonVisual.Play, PlayerButtonVisual.Playing -> TuneColors.Primary
-        PlayerButtonVisual.Loading -> TuneColors.Primary
-        PlayerButtonVisual.Retry -> TuneColors.Error
-        PlayerButtonVisual.Unavailable -> TuneColors.Muted.copy(alpha = TuneColors.DisabledAlpha)
-    }
-    MiniPlayerAction("player_pause", label, enabled, isCar, onClick) {
-        Crossfade(visual, animationSpec = tween(160), label = "player_action_glyph") { state ->
-            when (state) {
-                PlayerButtonVisual.Loading -> CircularProgressIndicator(
-                    Modifier.size(glyph - 2.dp),
-                    color = tint,
-                    strokeWidth = 2.dp,
-                    trackColor = tint.copy(alpha = .22f),
-                    strokeCap = StrokeCap.Round
-                )
-                PlayerButtonVisual.Playing -> PlayingWaveBars(Modifier.size(glyph), tint)
-                PlayerButtonVisual.Retry -> TuneIcon(
-                    R.drawable.ic_refresh, Modifier.size(glyph), tint
-                )
-                PlayerButtonVisual.Play, PlayerButtonVisual.Unavailable -> TuneIcon(
-                    R.drawable.ic_radio_play, Modifier.size(glyph), tint
-                )
-            }
-        }
-    }
-}
-
 /**
  * 台标容器：固定正方形 + 统一圆角，图片按容器边界裁切，不拉伸也不越界。
  * 缩放策略见 [BadgeContentScale]：近方形图铺满，其余完整展示。
@@ -254,7 +168,7 @@ internal fun badgeScale(width: Float, height: Float): ContentScale {
  * 按每张图的实际尺寸在绘制期决定缩放方式：不额外记录状态，也不触发重组，
  * 列表滚动时不会因为图片尺寸回写而抖动。
  */
-private object BadgeContentScale : ContentScale {
+internal object BadgeContentScale : ContentScale {
     override fun computeScaleFactor(srcSize: Size, dstSize: Size): ScaleFactor =
         badgeScale(srcSize.width, srcSize.height).computeScaleFactor(srcSize, dstSize)
 }
@@ -287,14 +201,14 @@ internal fun MeowvTopBar(isCar: Boolean) {
 }
 
 @Composable
-internal fun MeowvNavigationBar(page: TunePage, onPage: (TunePage) -> Unit) {
+internal fun MeowvNavigationBar(page: TunePage, modifier: Modifier = Modifier, onPage: (TunePage) -> Unit) {
     val items = TunePage.entries
     val index = items.indexOf(page).coerceAtLeast(0)
     // 手势块只在首次组合时启动，页码要用 rememberUpdatedState 读最新值，否则滑一次后方向会算错。
     val currentIndex by rememberUpdatedState(index)
     val swipeThreshold = with(LocalDensity.current) { 40.dp.toPx() }
     BoxWithConstraints(
-        Modifier.fillMaxWidth().height(64.dp).background(TuneColors.Background)
+        modifier.fillMaxWidth().height(64.dp).background(TuneColors.Background)
             .focusGroup().testTag("bottom_navigation")
             // 菜单条本身也能横滑：左滑下一个、右滑上一个，和内容区手势同向。
             .pointerInput(Unit) {
@@ -340,17 +254,41 @@ internal fun MeowvNavigationBar(page: TunePage, onPage: (TunePage) -> Unit) {
 }
 
 @Composable
-internal fun MeowvNavigationRail(page: TunePage, onPage: (TunePage) -> Unit) {
-    Column(
-        Modifier.width(180.dp).fillMaxHeight().background(TuneColors.Surface)
-            .verticalScroll(rememberScrollState())
-            .focusGroup().testTag("side_navigation")
-            .padding(horizontal = 12.dp, vertical = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        TunePage.entries.forEach { item ->
-            NavigationItem(item, item == page, isCar = true, Modifier.fillMaxWidth(), onPage, showBackground = true)
+internal fun MeowvNavigationRail(
+    page: TunePage,
+    playerEntry: @Composable () -> Unit,
+    onPage: (TunePage) -> Unit
+) {
+    BoxWithConstraints(Modifier.width(180.dp).fillMaxHeight().background(TuneColors.Surface).testTag("side_navigation")) {
+        val compact = maxHeight < 440.dp
+        Column(
+            Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = if (compact) 12.dp else 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Column(
+                Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).focusGroup(),
+                verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 16.dp)
+            ) {
+                TunePage.entries.forEach { item ->
+                    NavigationItem(item, item == page, isCar = true, Modifier.fillMaxWidth(), onPage, showBackground = true)
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            Box(Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) { playerEntry() }
         }
+    }
+}
+
+@Composable
+internal fun MeowvBottomDock(page: TunePage, playerEntry: @Composable () -> Unit, onPage: (TunePage) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().height(72.dp).background(TuneColors.Background)
+            .padding(horizontal = 12.dp).testTag("bottom_dock"),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.width(64.dp), contentAlignment = Alignment.Center) { playerEntry() }
+        Spacer(Modifier.width(8.dp))
+        MeowvNavigationBar(page, Modifier.weight(1f), onPage)
     }
 }
 
@@ -425,207 +363,6 @@ private fun NavigationItem(
     }
 }
 
-/**
- * 全局播放器保留台标、台名、播放顺序与播放状态按钮。
- * 信息区上滑展开，横滑换台，控制按钮独立响应，避免误触。
- */
-@Composable
-internal fun MeowvMiniPlayer(
-    isCar: Boolean,
-    state: PlayerUiState,
-    station: Station?,
-    connected: Boolean,
-    shuffle: Boolean,
-    onToggleOrder: () -> Unit,
-    onOpen: () -> Unit,
-    onToggle: () -> Unit,
-    onNext: () -> Unit,
-    onPrevious: () -> Unit
-) {
-    val phase = state.phase
-    val buffering = phase == PlaybackPhase.RESOLVING ||
-        phase == PlaybackPhase.RETRYING || phase == PlaybackPhase.BUFFERING
-    val playing = phase == PlaybackPhase.PLAYING
-    val failed = state.error != null && !buffering
-    val canToggle = connected && station != null && !buffering
-    val currentNext by rememberUpdatedState(onNext)
-    val currentPrevious by rememberUpdatedState(onPrevious)
-    val currentOpen by rememberUpdatedState(onOpen)
-    // 可切台能力由播放队列按当前顺序给出（随机模式下有当前台即可返回）。
-    val currentCanNext by rememberUpdatedState(state.canNext)
-    val currentCanPrevious by rememberUpdatedState(state.canPrevious)
-    val motionEnabled = rememberMotionEnabled()
-    val name = station?.name?.ifBlank { stringResource(R.string.station_unnamed) }
-        ?: stringResource(R.string.player_unselected)
-    val pauseLabel = stringResource(R.string.action_pause)
-    val playLabel = stringResource(R.string.action_play)
-    val retryLabel = stringResource(R.string.directory_retry)
-    val bufferingLabel = stringResource(R.string.playback_buffering)
-    val visual = when {
-        station == null || !connected -> PlayerButtonVisual.Unavailable
-        failed -> PlayerButtonVisual.Retry
-        buffering -> PlayerButtonVisual.Loading
-        playing -> PlayerButtonVisual.Playing
-        else -> PlayerButtonVisual.Play
-    }
-    val buttonLabel = when (visual) {
-        PlayerButtonVisual.Playing -> pauseLabel
-        PlayerButtonVisual.Loading -> bufferingLabel
-        PlayerButtonVisual.Retry -> retryLabel
-        PlayerButtonVisual.Play, PlayerButtonVisual.Unavailable -> playLabel
-    }
-    val nextLabel = stringResource(R.string.player_next)
-    val previousLabel = stringResource(R.string.player_previous)
-    val openLabel = stringResource(R.string.now_playing_open)
-    val orderLabel = stringResource(
-        if (shuffle) R.string.player_order_shuffle else R.string.player_order_sequential
-    )
-    val dragOffset = remember { Animatable(0f) }
-    val dragScope = rememberCoroutineScope()
-    val velocity = remember { VelocityTracker() }
-    val density = LocalDensity.current
-    val dragLimit = with(density) { 120.dp.toPx() }
-    val commitPx = with(density) { 56.dp.toPx() }
-    val flingPx = with(density) { 420.dp.toPx() }
-    val openPx = with(density) { 44.dp.toPx() }
-
-    Column(Modifier.fillMaxWidth().background(if (isCar) TuneColors.Player else TuneColors.Background)) {
-        if (isCar) HorizontalDivider(color = TuneColors.Divider, thickness = .5.dp)
-        Row(
-            Modifier.fillMaxWidth()
-                .padding(
-                    start = if (isCar) 0.dp else 12.dp, end = if (isCar) 0.dp else 12.dp,
-                    top = if (isCar) 0.dp else 8.dp, bottom = if (isCar) 0.dp else 8.dp
-                )
-                .height(if (isCar) 80.dp else 68.dp)
-                // 裁到播放器轮廓：横滑时台标和台名可以滑出边缘，但不会画到播放器外面。
-                .clip(if (isCar) RoundedCornerShape(0.dp) else TuneShapes.Player)
-                .background(
-                    TuneColors.Player,
-                    if (isCar) RoundedCornerShape(0.dp) else TuneShapes.Player
-                )
-                .testTag("global_player")
-                .padding(horizontal = if (isCar) 24.dp else 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // 手势先锁方向：横滑换台，上滑展开；点击仍交给独立的可点击节点。
-            val canSwipeNext by rememberUpdatedState(currentCanNext && !buffering && connected)
-            val canSwipePrevious by rememberUpdatedState(currentCanPrevious && !buffering && connected)
-            Box(
-                Modifier.weight(1f).fillMaxHeight()
-                    .testTag("player_info")
-                    .clickable(role = Role.Button, onClick = currentOpen)
-                    .pointerInput(station?.uuid) {
-                        var totalX = 0f
-                        var totalY = 0f
-                        var horizontal = false
-                        var vertical = false
-                        detectDragGestures(
-                            onDragStart = {
-                                totalX = 0f
-                                totalY = 0f
-                                horizontal = false
-                                vertical = false
-                                velocity.resetTracking()
-                            },
-                            onDrag = { change, amount ->
-                                change.consume()
-                                totalX += amount.x
-                                totalY += amount.y
-                                velocity.addPosition(change.uptimeMillis, change.position)
-                                if (!horizontal && !vertical && (abs(totalX) > 3f || abs(totalY) > 3f)) {
-                                    horizontal = abs(totalX) >= abs(totalY)
-                                    vertical = !horizontal
-                                }
-                                if (horizontal) {
-                                    // 该方向没有下一台时给强阻尼，拉起来像橡皮筋，而不是撞到硬墙。
-                                    val available = if (amount.x < 0) canSwipeNext else canSwipePrevious
-                                    val delta = if (available) amount.x else amount.x * .3f
-                                    dragScope.launch {
-                                        dragOffset.snapTo(
-                                            (dragOffset.value + delta).coerceIn(-dragLimit, dragLimit)
-                                        )
-                                    }
-                                }
-                            },
-                            onDragEnd = {
-                                // 位移够远或者甩得够快都算提交，快速轻扫不会没反应。
-                                val flung = velocity.calculateVelocity().x
-                                val settled = dragOffset.value
-                                when {
-                                    vertical && totalY <= -openPx -> currentOpen()
-                                    horizontal &&
-                                        (settled < -commitPx || flung < -flingPx) &&
-                                        canSwipeNext -> currentNext()
-                                    horizontal &&
-                                        (settled > commitPx || flung > flingPx) &&
-                                        canSwipePrevious -> currentPrevious()
-                                }
-                                dragScope.launch {
-                                    if (motionEnabled) dragOffset.animateTo(0f, SwipeSpring)
-                                    else dragOffset.snapTo(0f)
-                                }
-                            },
-                            onDragCancel = {
-                                dragScope.launch {
-                                    if (motionEnabled) dragOffset.animateTo(0f, SwipeSpring)
-                                    else dragOffset.snapTo(0f)
-                                }
-                            }
-                        )
-                    }
-                    .semantics {
-                        contentDescription = openLabel
-                        // 无障碍动作与横滑同源，均复用范围队列的真实切台能力。
-                        customActions = listOf(
-                            CustomAccessibilityAction(nextLabel) {
-                                if (canSwipeNext) { onNext(); true } else false
-                            },
-                            CustomAccessibilityAction(previousLabel) {
-                                if (canSwipePrevious) { onPrevious(); true } else false
-                            }
-                        )
-                    },
-                contentAlignment = Alignment.CenterStart
-            ) {
-                Row(
-                    Modifier.fillMaxWidth()
-                        .graphicsLayer {
-                            translationX = dragOffset.value
-                            // 拉得越远越淡，提示「松手就换台」，同时不遮挡底下的播放器底色。
-                            alpha = 1f - (abs(dragOffset.value) / dragLimit).coerceIn(0f, 1f) * .35f
-                        },
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    StationBadge(station, if (isCar) 52.dp else 46.dp)
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        name, color = TuneColors.Text, fontSize = if (isCar) 18.sp else 16.sp,
-                        fontWeight = FontWeight.SemiBold, maxLines = 1,
-                        overflow = TextOverflow.Ellipsis, style = TuneTextStyle,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-            MiniPlayerAction(
-                "player_order",
-                orderLabel,
-                enabled = true,
-                isCar = isCar,
-                onClick = onToggleOrder
-            ) {
-                TuneIcon(
-                    if (shuffle) R.drawable.ic_order_shuffle else R.drawable.ic_order_sequential,
-                    Modifier.size(if (isCar) TuneSizes.IconLg else TuneSizes.IconMd),
-                    TuneColors.Primary
-                )
-            }
-            PlayerActionButton(visual, buttonLabel, canToggle, isCar, onToggle)
-        }
-    }
-}
-
 /** 设置/列表共用的图标按钮，保留最小 48dp 热区。 */
 @Composable
 internal fun PreviewControl(
@@ -659,9 +396,3 @@ internal fun PreviewControl(
         }
     }
 }
-
-/** 底栏横滑松手后的回弹：阻尼接近临界，只留一点点回弹，不来回摆动。 */
-private val SwipeSpring = spring<Float>(
-    dampingRatio = .88f,
-    stiffness = Spring.StiffnessMedium
-)

@@ -186,18 +186,27 @@ class MainActivity : ComponentActivity() {
         if (hasFocus) applySystemBars()
     }
 
-    // 用户开启自播时恢复最后成功台；首页目录就绪后再尝试，失败保持可操作电台页。
+    // 恢复上次电台信息；仅在开启自动播放时，等待目录与服务就绪后起播。
     private fun resumeLastStation() {
         lifecycleScope.launch {
             val settings = settingsModel.settings.filterNotNull().first()
             val uuid = settings.lastSuccessfulStation
-            if (!settings.autoPlay || uuid == null) return@launch
+            // 旧记录只有 UUID 时补齐展示元数据；关闭自动播放也恢复目标，但不发播放命令。
+            if (uuid != null && settings.lastPlayedStation == null && !settings.autoPlay) {
+                val remembered = runCatching { tuneApp.radioRepository.stationByUuid(uuid) }.getOrNull()
+                if (remembered != null) tuneApp.userSettings.refreshRememberedStation(remembered)
+            }
+            if (!settings.autoPlay) return@launch
             withTimeoutOrNull(8000) {
                 radioModel.radioState.first { !it.isLoading && (it.stations.isNotEmpty() || it.error != null) }
             } ?: return@launch
             // 目录可能比媒体服务连接更快就绪，等控制器可用再发命令。
             withTimeoutOrNull(5000) { tuneApp.playerController.connected.first { it } } ?: return@launch
-            dispatchPlayback(PlayerCommand.Resume(uuid))
+            if (!tuneApp.userSettings.settings.first().autoPlay ||
+                tuneApp.playerController.state.value.phase != com.meowv.tune.domain.PlaybackPhase.IDLE
+            ) return@launch
+            if (uuid != null) dispatchPlayback(PlayerCommand.Resume(uuid))
+            else radioModel.radioState.value.stations.firstOrNull()?.let { dispatchPlayback(PlayerCommand.Play(it)) }
         }
     }
 

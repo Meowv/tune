@@ -70,7 +70,7 @@ class NowPlayingScreenshotTest {
         compose.waitUntil(8000) {
             app.playerController.state.value.phase == PlaybackPhase.PLAYING
         }
-        compose.onNodeWithTag("player_info").performClick()
+        compose.onNodeWithTag("circular_player_entry").performClick()
         compose.waitUntil(5000) {
             compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isNotEmpty()
         }

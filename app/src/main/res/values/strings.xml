@@ -14,6 +14,7 @@
   <string name="setting_licenses">开源许可</string>
   <string name="layout_list">列表</string>
   <string name="layout_card">卡片</string>
+  <string name="action_select_station">选择电台</string>
   <string name="player_unselected">未选择电台</string>
   <string name="about_source_body">电台目录与台标来自 Radio Browser（radio-browser.info），由社区维护的公开电台数据库提供。本应用不上传收听记录。</string>
   <string name="about_licenses_body">Kotlin 与协程：Apache 2.0\nJetpack Compose、Media3、DataStore：Apache 2.0\nOkHttp：Apache 2.0\ndnsjava：BSD 2-Clause\nCoil：Apache 2.0</string>

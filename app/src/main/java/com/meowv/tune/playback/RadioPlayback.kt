@@ -191,7 +191,7 @@ internal class RadioPlayback(
                 if (!committed) {
                     committed = queue.recordSuccessfulPlayback(currentSelection)
                     // 只有服务确认成功的台站才写回自播恢复点。
-                    if (committed) scope.launch { settings.recordSuccessfulStation(currentSelection.station.uuid) }
+                    if (committed) scope.launch { settings.recordSuccessfulStation(currentSelection.station) }
                 }
                 val clearFocusError = if (state.error == TuneError.AUDIO_FOCUS_LOST) null else state.error
                 update(state.copy(phase = PlaybackPhase.PLAYING, error = clearFocusError))
@@ -221,7 +221,7 @@ internal class RadioPlayback(
                     fail(TuneError.PLAYBACK, station = command.station)
                     return
                 }
-                val next = queue.select(activeScope, command.station.uuid) ?: run {
+                val next = queue.select(activeScope, command.station) ?: run {
                     fail(TuneError.PLAYBACK, station = command.station)
                     return
                 }

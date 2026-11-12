@@ -104,7 +104,7 @@ internal fun NowPlayingScreen(
     isCar: Boolean,
     connected: Boolean,
     state: PlayerUiState,
-    station: Station,
+    station: Station?,
     shuffle: Boolean,
     sleepTimer: SleepTimerState,
     onCollapse: () -> Unit,
@@ -113,7 +113,8 @@ internal fun NowPlayingScreen(
     onPrevious: () -> Unit,
     onToggleShuffle: () -> Unit,
     onSetSleepTimer: (Int?) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onSelectStation: () -> Unit = {}
 ) {
     val motionEnabled = rememberMotionEnabled()
     val animationMillis = if (motionEnabled) 220 else 0
@@ -155,7 +156,21 @@ internal fun NowPlayingScreen(
                     animationMillis = animationMillis,
                     onCollapse = onCollapse
                 )
-                if (wide) {
+                if (station == null) {
+                    Column(
+                        Modifier.weight(1f).fillMaxWidth().testTag("now_playing_empty"),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        BrandLogo(Modifier.size(if (isCar) 112.dp else 96.dp))
+                        Spacer(Modifier.height(24.dp))
+                        Text(stringResource(R.string.player_unselected), color = TuneColors.Text, style = TuneTextStyle)
+                        Spacer(Modifier.height(16.dp))
+                        androidx.compose.material3.TextButton(
+                            onClick = onSelectStation, modifier = Modifier.testTag("now_playing_select_station")
+                        ) { Text(stringResource(R.string.action_select_station)) }
+                    }
+                } else if (wide) {
                     WideNowPlayingContent(
                         isCar = isCar,
                         maxWidth = availableWidth,
@@ -199,7 +214,7 @@ internal fun NowPlayingScreen(
         }
     }
 
-    if (sleepPanelOpen) {
+    if (sleepPanelOpen && station != null) {
         SleepTimerPanel(
             isCar = isCar,
             timer = sleepTimer,
@@ -218,7 +233,7 @@ internal fun NowPlayingScreen(
             }
         )
     }
-    if (customSleepOpen) {
+    if (customSleepOpen && station != null) {
         CustomSleepTimerDialog(
             onDismiss = { customSleepOpen = false },
             onConfirm = {

@@ -1,6 +1,8 @@
 package com.meowv.tune
 
 import android.content.Context
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.test.runner.AndroidJUnitRunner
 import com.meowv.tune.domain.CountryCode
@@ -73,6 +75,13 @@ class TuneTestApplication : TuneApplication() {
         maxAlternateStations = 3,
         backoffMillis = listOf(20L, 40L)
     )
+
+    suspend fun clearRememberedStation() {
+        testSettings.edit {
+            it.remove(stringPreferencesKey("last_successful_station"))
+            it.remove(stringPreferencesKey("last_station_details"))
+        }
+    }
 
     override val mediaHttp by lazy {
         if (liveRadio) return@lazy super.mediaHttp

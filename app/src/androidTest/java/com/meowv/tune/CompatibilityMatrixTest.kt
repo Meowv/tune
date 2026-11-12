@@ -1,5 +1,6 @@
 package com.meowv.tune
 
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -40,8 +41,9 @@ class CompatibilityMatrixTest {
                 "orientation=${config.orientation}"
         )
 
-        compose.onNodeWithTag("brand_header").assertIsDisplayed()
+        compose.onNodeWithTag("brand_header").assertDoesNotExist()
         compose.onNodeWithTag("nav_radio").assertIsDisplayed()
+        compose.onNodeWithTag("circular_player_entry").assertIsDisplayed()
         assertTrue(
             "尚未选择音频时不应显示迷你播放器",
             compose.onAllNodesWithTag("global_player").fetchSemanticsNodes().isEmpty()
@@ -50,9 +52,8 @@ class CompatibilityMatrixTest {
         val navigationTag = if (
             compose.onAllNodesWithTag("shell_car").fetchSemanticsNodes().isNotEmpty()
         ) "side_navigation" else "bottom_navigation"
-        val brand = compose.onNodeWithTag("brand_header").getUnclippedBoundsInRoot()
         val navigation = compose.onNodeWithTag(navigationTag).getUnclippedBoundsInRoot()
-        assertTrue("品牌栏不应压到导航", brand.bottom <= navigation.top)
+        assertTrue("导航不得侵入状态栏", navigation.top >= 0.dp)
 
         // 列表可用：滚到第 4 项且条目可点击。
         compose.onNodeWithTag("station_list").performScrollToIndex(3)

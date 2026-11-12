@@ -11,6 +11,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.meowv.tune.domain.*
 import java.util.UUID
+import kotlinx.serialization.json.*
+import com.meowv.tune.radio.RadioBrowserMapping
 import kotlinx.coroutines.flow.map
 
 private val Context.tunePreferences by preferencesDataStore(
@@ -34,15 +36,41 @@ internal class DataStoreSettingsRepository(private val store: DataStore<Preferen
             prefs[DisplayMode] = updated.displayMode.name
             prefs[Order] = updated.playbackOrder.name
             prefs[AutoPlay] = updated.autoPlay
-            if (!updated.autoPlay) prefs.remove(LastStation)
         }
     }
 
     override suspend fun recordSuccessfulStation(uuid: UUID) {
         store.edit { prefs ->
-            if (prefs.read(AutoPlay) == true) prefs[LastStation] = uuid.toString()
+            if (prefs[LastStation] != uuid.toString()) prefs.remove(LastStationDetails)
+            prefs[LastStation] = uuid.toString()
         }
     }
+
+    override suspend fun recordSuccessfulStation(station: Station) {
+        store.edit { prefs ->
+            prefs[LastStation] = station.uuid.toString()
+            prefs[LastStationDetails] = stationDetails(station)
+        }
+    }
+
+    override suspend fun refreshRememberedStation(station: Station) {
+        store.edit { prefs ->
+            if (prefs[LastStation] == station.uuid.toString()) {
+                prefs[LastStationDetails] = stationDetails(station)
+            }
+        }
+    }
+
+    // 与目录缓存一致，只保存展示信息；播放时仍按 UUID 重新解析音源。
+    private fun stationDetails(station: Station): String = buildJsonObject {
+        put("stationuuid", station.uuid.toString())
+        put("name", station.name)
+        station.countryCode?.let { put("countrycode", it.value) }
+        station.iconUrl?.let { put("favicon", it.substringBefore('?').substringBefore('#')) }
+        station.codec?.let { put("codec", it) }
+        station.bitrate?.let { put("bitrate", it) }
+        put("hls", station.isHls)
+    }.toString()
 
     private fun decode(prefs: Preferences): TuneSettings {
         // 一次取快照，避免每个字段都重新 asMap()。
@@ -64,7 +92,14 @@ internal class DataStoreSettingsRepository(private val store: DataStore<Preferen
         return TuneSettings(
             scope = scope,
             autoPlay = autoPlay,
-            lastSuccessfulStation = if (autoPlay) last else null,
+            lastSuccessfulStation = last,
+            lastPlayedStation = last?.let { uuid ->
+                (values[LastStationDetails] as? String)?.let { encoded ->
+                    runCatching {
+                        RadioBrowserMapping.station(Json.parseToJsonElement(encoded))?.takeIf { it.uuid == uuid }
+                    }.getOrNull()
+                }
+            },
             displayMode = RadioDisplayMode.entries.firstOrNull { it.name == values[DisplayMode] }
                 ?: RadioDisplayMode.LIST,
             playbackOrder = PlaybackOrder.entries.firstOrNull { it.name == values[Order] }
@@ -72,13 +107,12 @@ internal class DataStoreSettingsRepository(private val store: DataStore<Preferen
         )
     }
 
-    private inline fun <reified T> Preferences.read(key: Preferences.Key<T>): T? = asMap()[key] as? T
-
     private companion object {
         val Scope = stringPreferencesKey("scope")
         val Country = stringPreferencesKey("country")
         val AutoPlay = booleanPreferencesKey("auto_play")
         val LastStation = stringPreferencesKey("last_successful_station")
+        val LastStationDetails = stringPreferencesKey("last_station_details")
         val DisplayMode = stringPreferencesKey("radio_display_mode")
         val Order = stringPreferencesKey("playback_order")
     }

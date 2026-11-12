@@ -59,6 +59,7 @@ data class TuneSettings(
     val scope: RadioScope = RadioScope(),
     val autoPlay: Boolean = false,
     val lastSuccessfulStation: UUID? = null,
+    val lastPlayedStation: Station? = null,
     val displayMode: RadioDisplayMode = RadioDisplayMode.LIST,
     val playbackOrder: PlaybackOrder = PlaybackOrder.SHUFFLE
 )
@@ -71,6 +72,10 @@ interface SettingsRepository {
 
     // 仅由确认播放成功的服务调用。
     suspend fun recordSuccessfulStation(uuid: UUID)
+    suspend fun recordSuccessfulStation(station: Station) { recordSuccessfulStation(station.uuid) }
+
+    // 补齐旧记录的展示信息，不得覆盖后来成功播放的新电台。
+    suspend fun refreshRememberedStation(station: Station) {}
 }
 
 fun interface CountryDirectory {
