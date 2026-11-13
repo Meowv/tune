@@ -35,8 +35,6 @@ internal class HttpUpdateRepository(
 /** 只校验 JSON 结构与类型；包名、渠道、格式与兼容性交给 [UpdateChecker]。 */
 internal object UpdateManifest {
     private const val SCHEMA_VERSION = 1L
-    private const val MAX_NOTES = 30
-    private const val MAX_NOTE_LENGTH = 500
 
     fun parse(body: String): UpdateInfo {
         val root = try {
@@ -52,8 +50,7 @@ internal object UpdateManifest {
         val apk = root.obj("apk") ?: throw UpdateException(UpdateFailure.MALFORMED)
         val notes = root.array("releaseNotes")?.mapNotNull { element ->
             (element as? JsonPrimitive)?.takeIf { it.isString }?.content
-                ?.trim()?.takeIf { it.isNotEmpty() }?.take(MAX_NOTE_LENGTH)
-        }.orEmpty().take(MAX_NOTES)
+        }.orEmpty()
 
         return UpdateInfo(
             packageName = root.text("packageName") ?: throw UpdateException(UpdateFailure.MALFORMED),

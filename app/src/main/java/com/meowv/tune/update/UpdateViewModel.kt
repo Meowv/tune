@@ -143,7 +143,8 @@ class UpdateViewModel internal constructor(
     fun installApk() {
         val record = pending ?: return
         if (installJob?.isActive == true ||
-            install.value !in setOf(InstallState.Downloaded, InstallState.InstallPermissionRequired)
+            install.value !in setOf(InstallState.Downloaded, InstallState.InstallPermissionRequired,
+                InstallState.Failed(InstallFailure.INSTALL_CANCELLED))
         ) return
         if (!installer.canRequestInstall()) {
             install.value = InstallState.InstallPermissionRequired
@@ -183,8 +184,8 @@ class UpdateViewModel internal constructor(
                     if (targetInstalled(record)) {
                         finishInstalled(record)
                     } else {
-                        // 用户取消了系统确认框：保留已校验的包，允许再装一次。
-                        install.value = InstallState.Downloaded
+                        // 用户取消了系统确认框：明确反馈并保留已校验的包，允许再装一次。
+                        install.value = InstallState.Failed(InstallFailure.INSTALL_CANCELLED)
                     }
                 install.value is InstallState.InstallPermissionRequired ->
                     if (installer.canRequestInstall()) installApk()

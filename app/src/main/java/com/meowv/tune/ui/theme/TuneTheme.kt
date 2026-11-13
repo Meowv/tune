@@ -92,7 +92,7 @@ object TuneShapes {
     val Navigation = RoundedCornerShape(16.dp)
     val Chip = RoundedCornerShape(18.dp)
     val Dialog = RoundedCornerShape(20.dp)
-    val SettingsGroup = RoundedCornerShape(20.dp)
+    val SettingsGroup = RoundedCornerShape(22.dp)
     val Player = RoundedCornerShape(24.dp)
     val Card = RoundedCornerShape(28.dp)
 }

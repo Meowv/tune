@@ -1,5 +1,7 @@
 package com.meowv.tune.update
 
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -49,12 +51,14 @@ class UpdateManifestTest {
     }
 
     @Test
-    fun releaseNotesKeepOnlyStringsAndTrim() {
+    fun releaseNotesPreserveOriginalTextAndAllEntries() {
+        val notes = listOf("  🆕 **原文**\n- 条目  \n", "", "  ", "长日志".repeat(200)) +
+            (1..32).map { "日志 $it" }
         val json = validJson().replace(
             "\"releaseNotes\": [\"优化电台播放体验\", \"修复部分问题\"]",
-            "\"releaseNotes\": [\"  优化电台播放体验  \", 42, \"\", \"修复部分问题\"]"
+            "\"releaseNotes\": ${JsonArray(notes.map(::JsonPrimitive) + JsonPrimitive(42))}"
         )
-        assertEquals(listOf("优化电台播放体验", "修复部分问题"), UpdateManifest.parse(json).releaseNotes)
+        assertEquals(notes, UpdateManifest.parse(json).releaseNotes)
     }
 
     @Test

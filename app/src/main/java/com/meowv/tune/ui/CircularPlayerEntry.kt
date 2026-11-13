@@ -139,7 +139,7 @@ internal fun CircularPlayerEntry(
             val url = station?.iconUrl
             var artworkFailed by remember(station?.uuid, url) { mutableStateOf(false) }
             if (url.isNullOrBlank() || artworkFailed) {
-                BrandLogo(Modifier.fillMaxSize().testTag("circular_player_logo"))
+                BrandLogo(Modifier.fillMaxSize().padding(2.dp).testTag("circular_player_logo"))
             } else {
                 key(station.uuid, url) {
                     val fallback = painterResource(R.drawable.ic_meowvtune_logo)

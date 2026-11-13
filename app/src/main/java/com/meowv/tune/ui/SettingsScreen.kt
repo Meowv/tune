@@ -3,20 +3,19 @@ package com.meowv.tune.ui
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -31,13 +30,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.meowv.tune.R
@@ -60,47 +59,52 @@ internal fun SettingsScreen(
     onOpenUpdate: () -> Unit
 ) {
     var dialog by rememberSaveable { mutableStateOf(SettingsDialog.NONE) }
-    LazyColumn(Modifier.fillMaxSize().testTag("page_settings"),
-        contentPadding = PaddingValues(horizontal = if (isCar) 40.dp else 24.dp, vertical = if (isCar) 12.dp else 20.dp),
-        verticalArrangement = Arrangement.spacedBy(if (isCar) 8.dp else 12.dp)) {
-        item(key = "playback_settings") {
-            SettingsGroup {
-                SettingRow(R.drawable.ic_ui_autoplay, R.string.setting_autoplay, isCar, checked = settings.autoPlay) {
-                    onSettingsChange { current -> current.copy(autoPlay = !current.autoPlay) }
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+        LazyColumn(Modifier.widthIn(max = 720.dp).fillMaxSize().testTag("page_settings"),
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = if (isCar) 12.dp else 20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            item(key = "playback_settings") {
+                SettingsGroup {
+                    SettingRow(R.drawable.ic_ui_autoplay, R.string.setting_autoplay, isCar, checked = settings.autoPlay) {
+                        onSettingsChange { current -> current.copy(autoPlay = !current.autoPlay) }
+                    }
                 }
             }
-        }
-        item(key = "about_settings") {
-            SettingsGroup {
-                // 刷新期间行内转圈并禁用，重复点击不会叠加请求。
-                SettingRow(
-                    R.drawable.ic_ui_refresh, R.string.setting_refresh, isCar,
-                    enabled = !refreshing,
-                    trailing = if (refreshing) ({ InlineSpinner(isCar) }) else null,
-                    onClick = onRefreshDirectory
-                )
-                SettingsDivider()
-                SettingRow(R.drawable.ic_ui_trash, R.string.setting_cache, isCar, onClick = onClearDirectoryCache)
-                SettingsDivider()
-                SettingRow(
-                    R.drawable.ic_ui_database, R.string.setting_source, isCar,
-                    trailing = { Chevron(isCar) },
-                    onClick = { dialog = SettingsDialog.SOURCE }
-                )
-                SettingsDivider()
-                SettingRow(
-                    R.drawable.ic_ui_scroll, R.string.setting_licenses, isCar,
-                    trailing = { Chevron(isCar) },
-                    onClick = { dialog = SettingsDialog.LICENSES }
-                )
-                SettingsDivider()
-                // 版本与更新：副标题跟随检查状态，入口只在设置页，不新增主菜单。
-                SettingRow(
-                    R.drawable.ic_ui_arrow_up_circle, R.string.setting_update, isCar,
-                    subtitle = updateSubtitle,
-                    trailing = { Chevron(isCar) },
-                    onClick = onOpenUpdate
-                )
+            item(key = "data_settings") {
+                SettingsGroup {
+                    // 刷新期间行内转圈并禁用，重复点击不会叠加请求。
+                    SettingRow(
+                        R.drawable.ic_ui_refresh, R.string.setting_refresh, isCar,
+                        enabled = !refreshing,
+                        trailing = if (refreshing) ({ InlineSpinner(isCar) }) else null,
+                        onClick = onRefreshDirectory
+                    )
+                    SettingsDivider()
+                    SettingRow(R.drawable.ic_ui_trash, R.string.setting_cache, isCar, onClick = onClearDirectoryCache)
+                }
+            }
+            item(key = "about_settings") {
+                SettingsGroup {
+                    SettingRow(
+                        R.drawable.ic_ui_database, R.string.setting_source, isCar,
+                        trailing = { Chevron(isCar) },
+                        onClick = { dialog = SettingsDialog.SOURCE }
+                    )
+                    SettingsDivider()
+                    SettingRow(
+                        R.drawable.ic_ui_scroll, R.string.setting_licenses, isCar,
+                        trailing = { Chevron(isCar) },
+                        onClick = { dialog = SettingsDialog.LICENSES }
+                    )
+                    SettingsDivider()
+                    // 版本与更新：副标题跟随检查状态，入口只在设置页，不新增主菜单。
+                    SettingRow(
+                        R.drawable.ic_ui_arrow_up_circle, R.string.setting_update, isCar,
+                        subtitle = updateSubtitle,
+                        trailing = { Chevron(isCar) },
+                        onClick = onOpenUpdate
+                    )
+                }
             }
         }
     }
@@ -150,13 +154,13 @@ private fun TextDialog(@StringRes title: Int, @StringRes body: Int, onDismiss: (
 @Composable
 private fun SettingsGroup(content: @Composable ColumnScope.() -> Unit) {
     Surface(color = TuneColors.Surface, shape = TuneShapes.SettingsGroup) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp), content = content)
+        Column(Modifier.fillMaxWidth(), content = content)
     }
 }
 
 @Composable
 private fun SettingsDivider() {
-    HorizontalDivider(Modifier.padding(horizontal = 4.dp), color = TuneColors.Border, thickness = .5.dp)
+    HorizontalDivider(Modifier.padding(start = 74.dp, end = 16.dp), color = TuneColors.Divider, thickness = .5.dp)
 }
 
 @Composable
@@ -171,28 +175,18 @@ private fun SettingRow(
     onClick: () -> Unit
 ) {
     val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
     var focused by remember { mutableStateOf(false) }
-    val shape = TuneShapes.Control
-    // 与电台列表一致：按住时整行圆角高亮，焦点态补描边，波纹裁进圆角内。
+    // 行反馈铺满菜单项，由外层卡片统一裁切圆角，避免出现内缩的独立色块。
+    val shape = RectangleShape
     val background by animateColorAsState(
-        when {
-            pressed -> TuneColors.Primary.copy(alpha = .12f)
-            focused -> TuneColors.Selected
-            else -> Color.Transparent
-        },
+        if (focused && enabled) TuneColors.Selected else Color.Transparent,
         animationSpec = tween(180), label = "setting_row_background"
     )
-    val iconBackground by animateColorAsState(
-        if (pressed || focused) TuneColors.Primary.copy(alpha = .16f) else TuneColors.Primary.copy(alpha = .10f),
-        animationSpec = tween(180), label = "setting_row_icon"
-    )
     val contentAlpha = if (enabled) 1f else .55f
-    val rowModifier = Modifier.fillMaxWidth().heightIn(min = if (isCar) 56.dp else 52.dp)
-        .padding(vertical = TuneSpacing.Hairline)
+    val rowModifier = Modifier.fillMaxWidth().heightIn(min = if (subtitle != null) 80.dp else 68.dp)
         .clip(shape)
         .background(background)
-        .then(if (focused) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)
+        .then(if (focused && enabled) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)
         .onFocusChanged { focused = it.isFocused }
         .testTag("setting_$label")
     val action = if (checked != null) {
@@ -212,25 +206,24 @@ private fun SettingRow(
         )
     }
     Row(
-        rowModifier.then(action),
+        rowModifier.then(action).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Medium)
+        horizontalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Box(Modifier.size(40.dp).background(iconBackground, TuneShapes.Control), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(42.dp).background(TuneColors.Primary.copy(alpha = .10f), TuneShapes.Control), contentAlignment = Alignment.Center) {
             TuneIcon(resource, Modifier.size(TuneSizes.IconLg), TuneColors.Primary.copy(alpha = contentAlpha))
         }
         Column(Modifier.weight(1f)) {
             Text(
                 stringResource(label), color = TuneColors.Text.copy(alpha = contentAlpha),
                 fontSize = if (isCar) 17.sp else 15.sp, fontWeight = FontWeight.SemiBold,
-                style = TuneTextStyle, maxLines = 1, overflow = TextOverflow.Ellipsis
+                style = TuneTextStyle
             )
             if (subtitle != null) {
                 Spacer(Modifier.height(2.dp))
                 Text(
                     subtitle, color = TuneColors.Muted.copy(alpha = contentAlpha),
-                    fontSize = if (isCar) 14.sp else 12.sp, style = TuneTextStyle,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                    fontSize = if (isCar) 14.sp else 12.sp, style = TuneTextStyle
                 )
             }
         }
@@ -242,27 +235,19 @@ private fun SettingRow(
     }
 }
 
-/** 自绘开关：轨道与滑块都做颜色/位移过渡，点按后立即有反馈。 */
+/** 点击由整行统一处理，Switch 只展示状态，避免重复触发。 */
 @Composable
 private fun ToggleSwitch(checked: Boolean) {
-    val trackColor by animateColorAsState(
-        if (checked) TuneColors.Accent else TuneColors.Border,
-        animationSpec = tween(180), label = "switch_track"
+    Switch(
+        checked = checked,
+        onCheckedChange = null,
+        modifier = Modifier.clearAndSetSemantics { },
+        colors = SwitchDefaults.colors(
+            checkedTrackColor = TuneColors.Accent,
+            checkedThumbColor = TuneColors.Text,
+            uncheckedTrackColor = TuneColors.Raised,
+            uncheckedThumbColor = TuneColors.Muted,
+            uncheckedBorderColor = TuneColors.Border
+        )
     )
-    val thumbColor by animateColorAsState(
-        if (checked) TuneColors.Text else TuneColors.Muted,
-        animationSpec = tween(180), label = "switch_thumb"
-    )
-    val thumbOffset by animateDpAsState(
-        if (checked) 25.dp else 5.dp,
-        animationSpec = tween(180), label = "switch_thumb_offset"
-    )
-    Box(Modifier.size(56.dp, 48.dp).clearAndSetSemantics { }, contentAlignment = Alignment.Center) {
-        Box(Modifier.size(50.dp, 28.dp).background(trackColor, CircleShape)) {
-            Box(
-                Modifier.align(Alignment.CenterStart).offset(x = thumbOffset)
-                    .size(20.dp).background(thumbColor, CircleShape)
-            )
-        }
-    }
 }

@@ -292,8 +292,8 @@ internal fun MeowvBottomDock(page: TunePage, playerEntry: @Composable () -> Unit
     }
 }
 
-/** 手机底栏选中块是固定方块，三个条目共用，滑动指示块与它严格同尺寸。 */
-private val NavPillSize = 48.dp
+/** 手机底栏共用的滑动选中背景，尺寸独立于条目的触控区域。 */
+private val NavPillSize = 44.dp
 
 @Composable
 private fun NavigationItem(
@@ -332,7 +332,7 @@ private fun NavigationItem(
     ) {
         // 车机侧栏各自铺底色；手机底栏的底色由外层滑动指示块统一画，条目只留焦点描边。
         Box(
-            Modifier.then(if (isCar) Modifier.fillMaxWidth() else Modifier.size(NavPillSize))
+            Modifier.then(if (isCar) Modifier.fillMaxWidth() else Modifier.fillMaxSize())
                 .clip(shape)
                 .background(background)
                 .then(if (focused) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)

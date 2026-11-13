@@ -49,10 +49,10 @@ class UpdatePageTest {
         compose.waitForIdle()
         compose.onNodeWithTag("update_status_title").assertIsDisplayed()
         compose.onNodeWithText("发现新版本 1.1.0").assertIsDisplayed()
-        compose.onNodeWithText("MeowvTune 1.1.0").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("构建版本").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("优化电台播放体验").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("2026-11-15").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("stable").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("2026-11-15").assertDoesNotExist()
+        compose.onNodeWithText("稳定版").performScrollTo().assertIsDisplayed()
 
         compose.onNodeWithTag("update_back").performClick()
         compose.waitUntil(4000) {

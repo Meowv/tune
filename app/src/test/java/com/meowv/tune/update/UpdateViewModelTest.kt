@@ -168,7 +168,10 @@ class UpdateViewModelTest {
                     assertEquals(InstallState.Installing, model.installState.value)
                     model.onResume()
                     yield()
-                    assertEquals(InstallState.Downloaded, model.installState.value)
+                    assertEquals(InstallState.Failed(InstallFailure.INSTALL_CANCELLED), model.installState.value)
+                    model.installApk()
+                    yield()
+                    assertEquals(InstallState.Installing, model.installState.value)
                     assertNull(model.upgradedTo.value)
                 }
             }
