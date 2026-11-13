@@ -21,8 +21,8 @@ android {
         applicationId = "com.meowv.tune"
         minSdk = 28
         targetSdk = 35
-        versionCode = 12
-        versionName = "1.2.1"
+        versionCode = 13
+        versionName = "1.2.2"
         testInstrumentationRunner = "com.meowv.tune.TuneTestRunner"
 
         // 版本清单地址与发布渠道属于客户端配置，换渠道/换域名只需改这两行。
