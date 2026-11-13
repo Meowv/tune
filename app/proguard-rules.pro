@@ -7,9 +7,7 @@
 -keep class com.meowv.tune.MainActivity { *; }
 -keep class com.meowv.tune.playback.RadioPlaybackService { *; }
 
-# Media3 会话服务通过反射读取会话回调与播放器代理。
--keep class androidx.media3.session.** { *; }
--keep class androidx.media3.exoplayer.** { *; }
+# Media3 的反射入口由依赖自带的 consumer 规则保留，避免整包 keep 阻止裁剪与优化。
 
 # 可选依赖在运行期不存在时的告警，不影响功能。
 -dontwarn org.conscrypt.**

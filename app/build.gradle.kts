@@ -73,6 +73,13 @@ android {
     }
 }
 
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        // 压缩独立分发的 Release APK；Debug 保持原有打包方式。
+        variant.packaging.dex.useLegacyPackaging.set(true)
+    }
+}
+
 dependencies {
     implementation(libs.core.splashscreen)
     implementation(platform(libs.compose.bom))
