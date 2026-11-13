@@ -12,10 +12,13 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -26,6 +29,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -233,21 +237,23 @@ internal fun MeowvNavigationBar(page: TunePage, modifier: Modifier = Modifier, o
             }
     ) {
         val cell = maxWidth / items.size
+        val pillWidth = (cell - 12.dp).coerceIn(0.dp, NavPillWidth)
         // 选中块在三个格子之间滑动，代替每个条目各自淡入淡出的底色。
         val indicatorX by animateDpAsState(
-            targetValue = cell * index + (cell - NavPillSize) / 2,
+            targetValue = cell * index + (cell - pillWidth) / 2,
             animationSpec = tween(260, easing = FastOutSlowInEasing),
             label = "nav_indicator"
         )
         Box(
-            Modifier.offset(x = indicatorX, y = (64.dp - NavPillSize) / 2)
-                .size(NavPillSize)
+            Modifier.offset(x = indicatorX, y = (64.dp - NavPillHeight) / 2)
+                .size(pillWidth, NavPillHeight)
                 .clip(TuneShapes.Navigation)
                 .background(TuneColors.NavSelected)
         )
         Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
             items.forEach { item ->
-                NavigationItem(item, item == page, isCar = false, Modifier.weight(1f), onPage)
+                NavigationItem(item, item == page, isCar = false, Modifier.weight(1f), onPage,
+                    indicatorWidth = pillWidth)
             }
         }
     }
@@ -293,7 +299,8 @@ internal fun MeowvBottomDock(page: TunePage, playerEntry: @Composable () -> Unit
 }
 
 /** 手机底栏共用的滑动选中背景，尺寸独立于条目的触控区域。 */
-private val NavPillSize = 44.dp
+private val NavPillWidth = 64.dp
+private val NavPillHeight = 52.dp
 
 @Composable
 private fun NavigationItem(
@@ -302,8 +309,10 @@ private fun NavigationItem(
     isCar: Boolean,
     modifier: Modifier,
     onPage: (TunePage) -> Unit,
-    showBackground: Boolean = false
+    showBackground: Boolean = false,
+    indicatorWidth: Dp = NavPillWidth
 ) {
+    val interaction = remember { MutableInteractionSource() }
     var focused by remember { mutableStateOf(false) }
     val label = stringResource(page.label)
     val color by animateColorAsState(
@@ -325,17 +334,30 @@ private fun NavigationItem(
             .then(if (isCar) Modifier.fillMaxWidth() else Modifier.padding(horizontal = 6.dp))
             .clip(shape)
             .onFocusChanged { focused = it.isFocused }
-            .selectable(selected, role = Role.Tab, onClick = { onPage(page) })
+            .selectable(
+                selected = selected,
+                interactionSource = interaction,
+                indication = if (isCar) LocalIndication.current else null,
+                role = Role.Tab,
+                onClick = { onPage(page) }
+            )
             .testTag("nav_${page.name.lowercase()}")
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center
     ) {
-        // 车机侧栏各自铺底色；手机底栏的底色由外层滑动指示块统一画，条目只留焦点描边。
+        // 手机按压与焦点反馈和滑动选中块同尺寸，整格仍保持原有触控区域。
+        if (!isCar) {
+            Box(
+                Modifier.size(indicatorWidth, NavPillHeight).clip(shape)
+                    .indication(interaction, ripple(bounded = false, color = TuneColors.Primary))
+                    .then(if (focused) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)
+            )
+        }
         Box(
             Modifier.then(if (isCar) Modifier.fillMaxWidth() else Modifier.fillMaxSize())
                 .clip(shape)
                 .background(background)
-                .then(if (focused) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)
+                .then(if (isCar && focused) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)
                 .padding(
                     horizontal = if (isCar) 16.dp else 0.dp,
                     vertical = if (isCar) 10.dp else 0.dp
