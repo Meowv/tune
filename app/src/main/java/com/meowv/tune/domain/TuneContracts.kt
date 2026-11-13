@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.StateFlow
 interface RadioRepository : CountryDirectory {
     suspend fun stationsForCountry(country: CountryCode, offset: Int, limit: Int): StationPage
     suspend fun randomGlobalStations(limit: Int): List<Station>
+    suspend fun globalStations(offset: Int, limit: Int): StationPage
 
     // 启动恢复只按 UUID 重新解析元数据，不建立可浏览历史。
     suspend fun stationByUuid(uuid: UUID): Station?
@@ -19,8 +20,7 @@ interface RadioQueue {
     val canNext: StateFlow<Boolean>
     val activeScope: StateFlow<ResolvedRadioScope?>
 
-    // 用户选择的播放顺序：随机模式下 next/previous 都随机取台，且只要存在当前台就允许返回；
-    // 顺序模式沿用列表与历史。
+    // 下一台遵循顺序设置，上一台始终返回成功播放历史。
     fun setPlaybackOrder(order: PlaybackOrder)
 
     fun updateDirectory(scope: ResolvedRadioScope, page: StationPage)

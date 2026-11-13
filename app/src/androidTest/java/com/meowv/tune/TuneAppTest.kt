@@ -134,7 +134,7 @@ class TuneAppTest {
     }
 
     @Test
-    fun networkLossPausesAndReconnectDoesNotAutoResume() {
+    fun networkLossPausesAndBriefReconnectResumes() {
         val first = "station_${UUID(0, 1)}"
         compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(first))
         compose.onNodeWithTag(first).performClick()
@@ -148,8 +148,7 @@ class TuneAppTest {
 
         app.mockNetwork.value = NetworkState(NetworkType.WIFI, metered = false)
         compose.waitUntil(3000) { app.playerController.state.value.error == null }
-        Thread.sleep(500)
-        assertEquals(PlaybackPhase.PAUSED, app.playerController.state.value.phase)
+        compose.waitUntil(8000) { app.playerController.state.value.phase == PlaybackPhase.PLAYING }
         runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
     }
 
@@ -192,7 +191,8 @@ class TuneAppTest {
         compose.waitUntil(3000) {
             app.playerController.state.value.error == null
         }
-        compose.onNodeWithTag("now_playing_play").assertContentDescriptionEquals("继续播放")
+        compose.waitUntil(8000) { app.playerController.state.value.phase == PlaybackPhase.PLAYING }
+        compose.onNodeWithTag("now_playing_play").assertContentDescriptionEquals(compose.activity.getString(R.string.now_playing_pause_accessibility))
         runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
     }
 
@@ -248,8 +248,7 @@ class TuneAppTest {
             app.playerController.state.value.station?.uuid == UUID(0, 1) &&
                 app.playerController.state.value.phase == PlaybackPhase.PLAYING
         }
-        // 随机模式下有当前台即可返回，借此确认设置已同步到播放队列再滑动。
-        compose.waitUntil(3000) { app.radioQueue.canPrevious.value }
+        assertFalse("没有播放历史时不能返回", app.radioQueue.canPrevious.value)
 
         changeStation(next = true)
         compose.waitUntil(8000) {

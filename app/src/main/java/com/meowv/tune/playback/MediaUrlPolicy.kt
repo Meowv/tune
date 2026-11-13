@@ -45,13 +45,14 @@ internal object MediaUrlPolicy {
         }
     }
 
-    fun client(httpsOnly: Boolean = false): OkHttpClient {
+    fun client(httpsOnly: Boolean = false, playback: Boolean = false): OkHttpClient {
         fun check(url: HttpUrl) {
             if (!allows(url) || httpsOnly && !url.isHttps) throw IOException("Blocked media URL")
         }
         return OkHttpClient.Builder()
             .dns(checkedDns()).proxy(Proxy.NO_PROXY).retryOnConnectionFailure(false)
-            .connectTimeout(3, TimeUnit.SECONDS).readTimeout(5, TimeUnit.SECONDS)
+            .connectTimeout(3, TimeUnit.SECONDS)
+            .readTimeout(if (playback) 15 else 5, TimeUnit.SECONDS)
             .followSslRedirects(!httpsOnly)
             .addInterceptor { chain ->
                 check(chain.request().url)

@@ -78,7 +78,9 @@ enum class NetworkType { OFFLINE, WIFI, ETHERNET, CELLULAR, OTHER }
 
 data class NetworkState(
     val type: NetworkType = NetworkType.OFFLINE,
-    val metered: Boolean = false
+    val metered: Boolean = false,
+    val validated: Boolean = true,
+    val captivePortal: Boolean = false
 ) {
     val available: Boolean get() = type != NetworkType.OFFLINE
 }
@@ -91,8 +93,11 @@ data class PlayerUiState(
     val isLive: Boolean = false,
     val canPrevious: Boolean = false,
     val canNext: Boolean = false,
-    val statusCode: Int? = null
+    val statusCode: Int? = null,
+    val operationFailure: PlaybackOperationFailure? = null
 )
+
+data class PlaybackOperationFailure(val id: Long, val error: TuneError, val statusCode: Int? = null)
 
 data class RadioCountry(val code: CountryCode, val stationCount: Int) {
     init {

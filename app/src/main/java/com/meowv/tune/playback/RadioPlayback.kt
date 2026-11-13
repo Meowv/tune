@@ -14,6 +14,7 @@ import androidx.media3.datasource.HttpDataSource
 import com.meowv.tune.R
 import com.meowv.tune.domain.NetworkState
 import com.meowv.tune.domain.PlaybackPhase
+import com.meowv.tune.domain.PlaybackOperationFailure
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.QueueSelection
 import com.meowv.tune.domain.RadioQueue
@@ -21,8 +22,11 @@ import com.meowv.tune.domain.RadioRepository
 import com.meowv.tune.domain.ResolvedRadioScope
 import com.meowv.tune.domain.SettingsRepository
 import com.meowv.tune.domain.Station
+import com.meowv.tune.domain.StationPage
 import com.meowv.tune.domain.TuneError
 import com.meowv.tune.domain.TuneFailure
+import com.meowv.tune.radio.CountryResolver
+import com.meowv.tune.radio.appendCountryPage
 import java.net.SocketTimeoutException
 import java.util.Locale
 import java.util.UUID
@@ -67,10 +71,18 @@ internal class RadioPlayback(
     private var playbackScope: ResolvedRadioScope? = null
     private var committed = false
     private var recovering = false
-    private val interruptions = PlaybackInterruptionState()
+    private val interruptions = PlaybackInterruptionState(android.os.SystemClock::elapsedRealtime)
     private var sameRetries = 0
     private var alternateCount = 0
     private var generation = 0L
+    private var operationFailureId = 0L
+    private var attemptTimeout: Job? = null
+    private var awaitingFirstPlayback = false
+    private var attemptStartedAt = 0L
+    private var resolveStartedAt = 0L
+    private var prepareStartedAt = 0L
+    internal var timing: PlaybackTiming? = null
+        private set
     private var state = PlayerUiState()
     private val stallMonitor = PlaybackStallMonitor(
         scope = scope,
@@ -88,7 +100,7 @@ internal class RadioPlayback(
         scope.launch {
             network.collect(::reactToNetworkChange)
         }
-        // 顺序/随机同时决定队列的 next/previous 取台方式与可返回能力，设置变化即时同步。
+        // 顺序设置只决定下一台策略，上一台始终沿成功播放历史返回。
         scope.launch {
             settings.settings.map { it.playbackOrder }.distinctUntilChanged().collect(queue::setPlaybackOrder)
         }
@@ -116,7 +128,9 @@ internal class RadioPlayback(
 
     override fun onSessionPlay() {
         // 重复的系统播放命令不能取消正在执行的解析或重试。
-        if (state.phase !in PendingPhases) submit { resume() }
+        if (state.phase !in PendingPhases && state.phase != PlaybackPhase.BUFFERING &&
+            state.phase != PlaybackPhase.PLAYING
+        ) submit { resume() }
     }
 
     override fun onSessionPause() = submit { pause() }
@@ -128,6 +142,7 @@ internal class RadioPlayback(
     override fun onSessionStop() = stop()
 
     fun cancelPending() {
+        finishAttempt()
         supersedeRequest()
         interruptions.reset()
         recovering = false
@@ -158,6 +173,7 @@ internal class RadioPlayback(
     }
 
     fun stop() {
+        finishAttempt()
         supersedeRequest()
         audioFocus.abandon()
         player.stop()
@@ -174,6 +190,7 @@ internal class RadioPlayback(
     }
 
     fun close() {
+        finishAttempt()
         supersedeRequest()
         audioFocus.abandon()
         routeMonitor.close()
@@ -188,6 +205,11 @@ internal class RadioPlayback(
         if (state.phase in SettlingPhases) return
         when {
             player.isPlaying -> {
+                if (awaitingFirstPlayback) {
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    timing = timing?.copy(prepareMillis = now - prepareStartedAt, totalMillis = now - attemptStartedAt)
+                    finishAttempt()
+                }
                 if (!committed) {
                     committed = queue.recordSuccessfulPlayback(currentSelection)
                     // 只有服务确认成功的台站才写回自播恢复点。
@@ -215,14 +237,15 @@ internal class RadioPlayback(
 
     private suspend fun run(command: Command) {
         if (!networkAllows(command.targetStation)) return
+        if (command != Command.Toggle && attemptTimeout == null) startAttempt()
         when (command) {
             is Command.Play -> {
                 val activeScope = queue.activeScope.value ?: run {
-                    fail(TuneError.PLAYBACK, station = command.station)
+                    failWhileKeepingCurrent(TuneFailure(TuneError.PLAYBACK), command.station)
                     return
                 }
                 val next = queue.select(activeScope, command.station) ?: run {
-                    fail(TuneError.PLAYBACK, station = command.station)
+                    failWhileKeepingCurrent(TuneFailure(TuneError.PLAYBACK), command.station)
                     return
                 }
                 playbackScope = activeScope
@@ -231,7 +254,7 @@ internal class RadioPlayback(
             Command.Next -> {
                 syncPlaybackOrder()
                 val activeScope = queue.activeScope.value ?: run {
-                    fail(TuneError.PLAYBACK)
+                    failWhileKeepingCurrent(TuneFailure(TuneError.PLAYBACK))
                     return
                 }
                 val next = try {
@@ -240,7 +263,7 @@ internal class RadioPlayback(
                     failWhileKeepingCurrent(failure)
                     return
                 } ?: run {
-                    fail(TuneError.PLAYBACK)
+                    failWhileKeepingCurrent(TuneFailure(TuneError.PLAYBACK))
                     return
                 }
                 playbackScope = activeScope
@@ -249,8 +272,8 @@ internal class RadioPlayback(
             Command.Previous -> {
                 syncPlaybackOrder()
                 // 系统媒体键不感知按钮启用状态，无可返回项时保持当前播放而不报错。
-                val activeScope = queue.activeScope.value ?: return
-                val next = queue.previous(activeScope) ?: return
+                val activeScope = queue.activeScope.value ?: run { finishAttempt(); return }
+                val next = queue.previous(activeScope) ?: run { finishAttempt(); return }
                 playbackScope = activeScope
                 resolveAndPlay(next, PlaybackPhase.RESOLVING)
             }
@@ -284,13 +307,21 @@ internal class RadioPlayback(
 
     private suspend fun resume() {
         when (state.phase) {
-            PlaybackPhase.IDLE -> return
+            PlaybackPhase.IDLE -> {
+                restoreFromSession()
+                return
+            }
             PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING -> return
             PlaybackPhase.ERROR -> {
-                val currentIntent = intent ?: return
-                val currentSelection = selection ?: return
+                val currentIntent = intent
+                val currentSelection = selection
+                if (currentIntent == null || currentSelection == null) {
+                    restoreFromSession()
+                    return
+                }
                 if (!networkAllows()) return
                 resetRetryBudget()
+                startAttempt()
                 resolveAndPlay(currentSelection, PlaybackPhase.RETRYING, currentIntent)
             }
             else -> {
@@ -306,10 +337,37 @@ internal class RadioPlayback(
                     return
                 }
                 interruptions.reset()
+                startAttempt()
+                awaitingFirstPlayback = true
+                prepareStartedAt = android.os.SystemClock.elapsedRealtime()
                 update(state.copy(error = null, statusCode = null))
                 player.play()
             }
         }
+    }
+
+    private suspend fun restoreFromSession() {
+        if (!networkAllows()) return
+        startAttempt()
+        val user = settings.settings.first()
+        if (queue.activeScope.value == null) {
+            for (candidate in CountryResolver(context).candidates(user.scope, repository)) {
+                val page = candidate.country?.let {
+                    appendCountryPage(repository, it, StationPage(nextOffset = 0))
+                } ?: StationPage(repository.randomGlobalStations(30))
+                currentCoroutineContext().ensureActive()
+                if (queue.activeScope.value != null) break
+                if (page.stations.isEmpty()) continue
+                queue.updateDirectory(candidate, page)
+                break
+            }
+        }
+        val activeScope = queue.activeScope.value ?: run { finishAttempt(); return }
+        val remembered = user.lastSuccessfulStation?.let { repository.stationByUuid(it) }
+            ?: user.lastPlayedStation
+        val station = remembered?.takeIf { activeScope.country == null || it.countryCode == activeScope.country }
+        resetRetryBudget()
+        if (station != null) run(Command.Play(station)) else run(Command.Next)
     }
 
     private suspend fun networkAllows(target: Station? = null): Boolean {
@@ -328,7 +386,9 @@ internal class RadioPlayback(
     private suspend fun reactToNetworkChange(current: NetworkState) {
         if (selection == null) return
         if (NetworkPolicy.evaluate(current) == NetworkDecision.ALLOWED) {
+            val shouldResume = interruptions.consumeNetworkResume()
             if (isNetworkError(state.error)) update(state.copy(error = null, statusCode = null))
+            if (shouldResume) submit { resume() }
             return
         }
         pausePlayback(PauseReason.NETWORK)
@@ -340,6 +400,8 @@ internal class RadioPlayback(
         request = scope.launch {
             commandMutex.withLock {
                 if (id != generation) return@withLock
+                finishAttempt()
+                update(state.copy(operationFailure = null))
                 try {
                     block()
                 } catch (cancelled: CancellationException) {
@@ -358,6 +420,10 @@ internal class RadioPlayback(
         existingIntent: PlaybackIntent? = null
     ) {
         val id = generation
+        if (attemptTimeout == null) startAttempt()
+        val resolutionStarted = android.os.SystemClock.elapsedRealtime()
+        if (resolveStartedAt == 0L) timing = timing?.copy(directoryMillis = resolutionStarted - attemptStartedAt)
+        resolveStartedAt = resolutionStarted
         interruptions.reset()
         stallMonitor.reset()
         audioFocus.abandon()
@@ -370,7 +436,12 @@ internal class RadioPlayback(
         update(PlayerUiState(phase = phase, station = next.station, isLive = true))
 
         val stream = try {
-            resolve(playbackIntent)
+            try {
+                resolve(playbackIntent)
+            } finally {
+                if (id == generation) timing = timing?.copy(resolveMillis =
+                    (timing?.resolveMillis ?: 0L) + android.os.SystemClock.elapsedRealtime() - resolutionStarted)
+            }
         } catch (failure: TuneFailure) {
             currentCoroutineContext().ensureActive()
             if (id == generation) recoverFromFailure(next, playbackIntent, failure)
@@ -378,6 +449,8 @@ internal class RadioPlayback(
         }
         currentCoroutineContext().ensureActive()
         if (id != generation) return
+        prepareStartedAt = android.os.SystemClock.elapsedRealtime()
+        awaitingFirstPlayback = true
         val item = MediaItem.Builder()
             .setMediaId(next.station.uuid.toString())
             .setUri(stream.url.toString())
@@ -398,6 +471,7 @@ internal class RadioPlayback(
         val currentSelection = selection ?: return
         val currentIntent = intent ?: PlaybackIntent(currentSelection.station)
         if (recovering) return
+        if (attemptTimeout == null) startAttempt()
         recovering = true
         val id = ++generation
         request?.cancel()
@@ -504,6 +578,7 @@ internal class RadioPlayback(
 
     private fun pausePlayback(reason: PauseReason, cancelPending: Boolean = true) {
         if (selection == null) return
+        finishAttempt()
         val paused = interruptions.pause(state, reason, player.playWhenReady)
         if (cancelPending) supersedeRequest()
         if (reason != PauseReason.TRANSIENT_FOCUS) audioFocus.abandon()
@@ -534,17 +609,20 @@ internal class RadioPlayback(
 
     internal fun onExternalOutputRemoved() {
         scope.launch {
-            if (player.isPlaying || player.playWhenReady || state.phase in PendingPhases) {
+            if (player.isPlaying || player.playWhenReady || state.phase in PendingPhases || interruptions.hasNetworkResume) {
                 pausePlayback(PauseReason.OUTPUT)
             }
         }
     }
 
-    private fun failWhileKeepingCurrent(failure: TuneFailure) {
+    private fun failWhileKeepingCurrent(failure: TuneFailure, station: Station? = state.station) {
+        finishAttempt()
         if (player.isPlaying) {
-            update(state.copy(error = failure.kind, statusCode = failure.statusCode))
+            update(state.copy(operationFailure = PlaybackOperationFailure(
+                ++operationFailureId, failure.kind, failure.statusCode
+            )))
         } else {
-            fail(failure.kind, failure.statusCode)
+            fail(failure.kind, failure.statusCode, station)
         }
     }
 
@@ -560,9 +638,32 @@ internal class RadioPlayback(
     }
 
     private fun fail(kind: TuneError, status: Int? = null, station: Station? = state.station) {
+        finishAttempt()
         stallMonitor.reset()
         audioFocus.abandon()
         update(state.copy(phase = PlaybackPhase.ERROR, station = station, error = kind, statusCode = status))
+    }
+
+    private fun startAttempt() {
+        finishAttempt()
+        attemptStartedAt = android.os.SystemClock.elapsedRealtime()
+        resolveStartedAt = 0L
+        timing = PlaybackTiming()
+        attemptTimeout = scope.launch {
+            delay(retryPolicy.totalTimeoutMillis)
+            supersedeRequest()
+            if (player.isPlaying) failWhileKeepingCurrent(TuneFailure(TuneError.TIMEOUT))
+            else {
+                fail(TuneError.TIMEOUT)
+                player.pause()
+            }
+        }
+    }
+
+    private fun finishAttempt() {
+        attemptTimeout?.cancel()
+        attemptTimeout = null
+        awaitingFirstPlayback = false
     }
 
     private fun update(value: PlayerUiState) {

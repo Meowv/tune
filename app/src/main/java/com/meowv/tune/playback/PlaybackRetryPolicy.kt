@@ -6,12 +6,14 @@ import com.meowv.tune.domain.TuneFailure
 internal data class PlaybackRetryPolicy(
     val maxSameStationRetries: Int = 2,
     val maxAlternateStations: Int = 3,
-    val backoffMillis: List<Long> = listOf(1_000L, 2_000L)
+    val backoffMillis: List<Long> = listOf(1_000L, 2_000L),
+    val totalTimeoutMillis: Long = 45_000L
 ) {
     init {
         require(maxSameStationRetries >= 0)
         require(maxAlternateStations >= 0)
         require(backoffMillis.isNotEmpty())
+        require(totalTimeoutMillis > 0)
     }
 
     fun delayFor(retry: Int): Long = backoffMillis[(retry - 1).coerceIn(backoffMillis.indices)]

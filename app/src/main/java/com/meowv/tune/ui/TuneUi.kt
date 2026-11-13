@@ -108,6 +108,12 @@ fun TuneApp(
         }
     }
     val errorText = playbackErrorText(playbackState.error, playbackState.statusCode)
+    val operationErrorText = playbackErrorText(
+        playbackState.operationFailure?.error, playbackState.operationFailure?.statusCode
+    )
+    LaunchedEffect(playbackState.operationFailure) {
+        if (operationErrorText != null) snackbar.showSnackbar(operationErrorText, duration = SnackbarDuration.Short)
+    }
     LaunchedEffect(playbackState.error, nowPlayingOpen) {
         if (!nowPlayingOpen && errorText != null) {
             snackbar.showSnackbar(errorText, duration = SnackbarDuration.Short)
@@ -116,7 +122,6 @@ fun TuneApp(
 
     val target = resolvePlayerTarget(playbackState, radioState, settings.lastPlayedStation,
         settings.lastSuccessfulStation)
-    val paused = playbackState.phase == PlaybackPhase.PAUSED
     val idle = playbackState.phase == PlaybackPhase.IDLE
     val displayRadioState = radioState.copy(
         selectedStationUuid = radioState.selectedStationUuid ?: settings.lastSuccessfulStation
@@ -126,18 +131,19 @@ fun TuneApp(
     val next: () -> Unit = { onPlayback(PlayerCommand.Next) }
     val previous: () -> Unit = { onPlayback(PlayerCommand.Previous) }
     val toggle: () -> Unit = {
-        val station = playbackState.station ?: target
+        // 全屏始终操作它展示的台；目录浏览选择由卡片点击显式起播。
+        val station = target
         when {
             station == null -> Unit
             // 失败态一律按目标台重新起播：引擎侧可能从未建立播放意图（例如离线起播），
             // 复用 TogglePause 会退化成空操作。
             playbackState.phase == PlaybackPhase.ERROR -> onPlayback(PlayerCommand.Play(station))
-            idle || (paused && station.uuid != playbackState.station?.uuid) ->
+            idle ->
                 onPlayback(PlayerCommand.Play(station))
             else -> onPlayback(PlayerCommand.TogglePause)
         }
     }
-    val visibleStation = playbackState.station ?: target
+    val visibleStation = target
     val fullscreenTransition = remember { MutableTransitionState(false) }
     LaunchedEffect(nowPlayingOpen) {
         fullscreenTransition.targetState = nowPlayingOpen

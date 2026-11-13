@@ -29,6 +29,40 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PlaybackReliabilityTest {
+    @Test fun stalledResolutionStopsAtOverallBudgetWithoutTryingMoreStations() = runBlocking {
+        launchReady(1L..3L) {
+            val first = station(1)
+            app.playbackDelays[first.uuid] = 20_000
+            try {
+                connection.dispatch(PlayerCommand.Play(first))
+                val failed = withTimeout(11_000) { connection.state.first { it.phase == PlaybackPhase.ERROR } }
+                assertEquals(TuneError.TIMEOUT, failed.error)
+                assertEquals(first.uuid, failed.station?.uuid)
+                delay(200)
+                assertEquals(1, app.resolveCalls[first.uuid]?.get())
+                assertTrue((2L..3L).all { app.resolveCalls[UUID(0, it)] == null })
+            } finally {
+                app.playbackDelays.clear()
+            }
+        }
+    }
+
+    @Test fun manualPauseDuringNetworkLossPreventsReconnectPlayback() = runBlocking {
+        launchReady(1L..2L) {
+            connection.dispatch(PlayerCommand.Play(station(1)))
+            waitFor(station(1))
+            app.mockNetwork.value = NetworkState()
+            withTimeout(3000) { connection.state.first { it.error == TuneError.NETWORK_OFFLINE } }
+            InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                requireNotNull(connection.engine).onSessionPause()
+            }
+            delay(100)
+            app.mockNetwork.value = NetworkState(NetworkType.WIFI)
+            delay(500)
+            assertEquals(PlaybackPhase.PAUSED, connection.state.value.phase)
+        }
+    }
+
     private val app get() =
         InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as TuneTestApplication
     private val connection get() = app.playerController
@@ -75,8 +109,9 @@ class PlaybackReliabilityTest {
             try {
                 connection.dispatch(PlayerCommand.Next)
                 withTimeout(3000) {
-                    connection.state.first { it.error == TuneError.CONNECTION }
+                    connection.state.first { it.operationFailure?.error == TuneError.CONNECTION }
                 }
+                assertEquals(null, connection.state.value.error)
                 assertEquals(PlaybackPhase.PLAYING, connection.state.value.phase)
                 assertEquals(first.uuid, connection.state.value.station?.uuid)
             } finally {
@@ -174,6 +209,10 @@ class PlaybackReliabilityTest {
                 block()
             } finally {
                 connection.dispatch(PlayerCommand.Stop)
+                app.resolveFailures.clear()
+                app.playbackDelays.clear()
+                app.latePlaybackDelays.clear()
+                app.resolutionStarts.clear()
             }
         }
     }

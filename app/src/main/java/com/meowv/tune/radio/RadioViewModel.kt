@@ -23,6 +23,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class CountryOptions(
@@ -65,13 +68,10 @@ class RadioViewModel(
     private var page = StationPage()
 
     init {
-        // 播放器确认的台站回写为 UI 选中项，媒体键/自动恢复时列表与播放器保持一致。
+        // 只跟随真正的换台；同台的暂停、能力和错误变化不能覆盖用户正在浏览的选择。
         scope.launch {
-            player.state.collect { state ->
-                val station = state.station ?: return@collect
-                if (directory.value.selectedStationUuid != station.uuid) {
-                    directory.value = directory.value.copy(selectedStationUuid = station.uuid)
-                }
+            player.state.map { it.station?.uuid }.distinctUntilChanged().collect { uuid ->
+                if (uuid != null) directory.update { it.copy(selectedStationUuid = uuid) }
             }
         }
     }
@@ -79,7 +79,7 @@ class RadioViewModel(
     /** 暂停或空闲时滑动只更新目标台，不触发播放。 */
     @MainThread
     fun selectTarget(station: Station) {
-        directory.value = directory.value.copy(selectedStationUuid = station.uuid)
+        directory.update { it.copy(selectedStationUuid = station.uuid) }
     }
 
     @MainThread
@@ -177,14 +177,14 @@ class RadioViewModel(
     }
 
     private fun startLoad(block: suspend CoroutineScope.() -> Unit) {
-        directory.value = directory.value.copy(isLoading = true, error = null)
+        directory.update { it.copy(isLoading = true, error = null) }
         // 目录请求的 JSON 解析与列表映射都在这条协程里，放到 Default 避免占用主线程。
         load = viewModelScope.launch(Dispatchers.Default) {
             try {
                 block()
             } catch (failure: TuneFailure) {
                 ensureActive()
-                directory.value = directory.value.copy(isLoading = false, error = failure.kind)
+                directory.update { it.copy(isLoading = false, error = failure.kind) }
             }
         }
     }
@@ -202,16 +202,18 @@ class RadioViewModel(
         page = result
         queue?.updateDirectory(candidate, result)
         // 同范围刷新时保留仍存在的选中台，避免暂停状态下目标被清空。
-        val selected = directory.value.selectedStationUuid
-            ?.takeIf { id -> result.stations.any { it.uuid == id } }
-        directory.value = RadioUiState(
-            scope = candidate.scope,
-            resolvedCountryCode = candidate.country,
-            stations = result.stations,
-            selectedStationUuid = selected,
-            hasMore = result.nextOffset != null,
-            cacheState = cacheState,
-            isLoading = isLoading
-        )
+        directory.update { current ->
+            val selected = current.selectedStationUuid
+                ?.takeIf { id -> result.stations.any { it.uuid == id } }
+            RadioUiState(
+                scope = candidate.scope,
+                resolvedCountryCode = candidate.country,
+                stations = result.stations,
+                selectedStationUuid = selected,
+                hasMore = result.nextOffset != null,
+                cacheState = cacheState,
+                isLoading = isLoading
+            )
+        }
     }
 }

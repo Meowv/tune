@@ -18,6 +18,35 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RadioContractsTest {
+    @Test fun browsingSelectionSurvivesSameStationUpdatesButFollowsRealStationChanges() = runBlocking {
+        val first = Station(UUID(0, 1), "A", CountryCode.parse("JP"))
+        val second = first.copy(uuid = UUID(0, 2), name = "B")
+        val player = object : PlayerController {
+            override val state = MutableStateFlow(PlayerUiState(PlaybackPhase.PAUSED, first))
+            override suspend fun dispatch(command: PlayerCommand) = Unit
+        }
+        val repository = com.meowv.tune.radio.StubRadioRepository()
+        val lifetime = CoroutineScope(coroutineContext + SupervisorJob())
+        try {
+            val model = RadioViewModel(repository, player, CountryResolver({ null }, { null }), lifetime)
+            kotlinx.coroutines.yield()
+            model.selectTarget(second)
+            player.state.value = player.state.value.copy(canNext = true, error = TuneError.NETWORK_OFFLINE)
+            kotlinx.coroutines.yield()
+            assertEquals(second.uuid, model.radioState.value.selectedStationUuid)
+            player.state.value = PlayerUiState(PlaybackPhase.PLAYING, first)
+            kotlinx.coroutines.yield()
+            assertEquals(second.uuid, model.radioState.value.selectedStationUuid)
+            player.state.value = PlayerUiState(PlaybackPhase.RESOLVING, second)
+            kotlinx.coroutines.yield()
+            player.state.value = PlayerUiState(PlaybackPhase.RESOLVING, first)
+            kotlinx.coroutines.yield()
+            assertEquals(first.uuid, model.radioState.value.selectedStationUuid)
+        } finally {
+            lifetime.cancel()
+        }
+    }
+
     @Test fun countryCodesAreNormalizedAndValidated() {
         assertEquals("US", CountryCode.parse(" us ")?.value)
         assertNull(CountryCode.parse("ZZ"))
@@ -46,6 +75,7 @@ class RadioContractsTest {
                 override suspend fun randomGlobalStations(limit: Int): List<Station> =
                     throw TuneFailure(TuneError.SERVER, 503)
                 override suspend fun stationByUuid(uuid: UUID): Station? = null
+                override suspend fun globalStations(offset: Int, limit: Int) = StationPage()
             }
             val lifetime = CoroutineScope(coroutineContext + SupervisorJob())
             try {

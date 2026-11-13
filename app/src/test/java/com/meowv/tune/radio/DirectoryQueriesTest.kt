@@ -17,12 +17,14 @@ internal class StubRadioRepository(
     private val countryList: suspend () -> List<RadioCountry> = { emptyList() },
     private val countryPage: suspend (CountryCode, Int, Int) -> StationPage = { _, _, _ -> error("Unexpected country call") },
     private val random: suspend () -> List<Station> = { error("Unexpected random call") },
-    private val byUuid: suspend (UUID) -> Station? = { null }
+    private val byUuid: suspend (UUID) -> Station? = { null },
+    private val globalPage: suspend (Int, Int) -> StationPage = { _, _ -> StationPage(random()) }
 ) : RadioRepository {
     override suspend fun countries() = countryList()
     override suspend fun stationsForCountry(country: CountryCode, offset: Int, limit: Int) =
         countryPage(country, offset, limit)
     override suspend fun randomGlobalStations(limit: Int) = random()
+    override suspend fun globalStations(offset: Int, limit: Int) = globalPage(offset, limit)
     override suspend fun stationByUuid(uuid: UUID) = byUuid(uuid)
 }
 
@@ -32,6 +34,14 @@ internal val idlePlayer = object : PlayerController {
 }
 
 class DirectoryQueriesTest {
+    @Test fun globalSequentialQueryUsesPopularityOrderAndRawPagination() = runBlocking {
+        val repository = RadioBrowserRepository({ emptyList() }) { _, query ->
+            assertEquals(mapOf("hidebroken" to "true", "order" to "clickcount", "reverse" to "true",
+                "limit" to "1", "offset" to "30"), query)
+            """[{"stationuuid":"${testStation(1).uuid}","countrycode":"JP","name":"Station 1"}]"""
+        }
+        assertEquals(StationPage(listOf(testStation(1)), 31), repository.globalStations(30, 1))
+    }
     @Test fun manualRefreshFollowsReplacementLoadToCompletion() = runBlocking {
         withTimeout(5000) {
             val firstStarted = CompletableDeferred<Unit>()

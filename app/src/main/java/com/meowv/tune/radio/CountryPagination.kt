@@ -14,12 +14,22 @@ internal suspend fun appendCountryPage(
     country: CountryCode,
     current: StationPage
 ): StationPage {
+    return appendStationPage(current, { it.countryCode == country }) { offset ->
+        repository.stationsForCountry(country, offset, DIRECTORY_PAGE_SIZE)
+    }
+}
+
+internal suspend fun appendStationPage(
+    current: StationPage,
+    accepts: (com.meowv.tune.domain.Station) -> Boolean = { true },
+    fetch: suspend (Int) -> StationPage
+): StationPage {
     var offset = current.nextOffset ?: return current
     val known = current.stations.mapTo(hashSetOf()) { it.uuid }
     repeat(3) {
-        val page = repository.stationsForCountry(country, offset, DIRECTORY_PAGE_SIZE)
+        val page = fetch(offset)
         currentCoroutineContext().ensureActive()
-        val new = page.stations.filter { it.countryCode == country && known.add(it.uuid) }
+        val new = page.stations.filter { accepts(it) && known.add(it.uuid) }
         val next = page.nextOffset?.takeIf { it > offset }
         if (new.isNotEmpty() || next == null) return StationPage(current.stations + new, next)
         offset = next

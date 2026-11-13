@@ -165,7 +165,7 @@ class PlaybackAudioPolicyTest {
         }
     }
 
-    @Test fun networkLossDuringResolutionCanResume() = runBlocking {
+    @Test fun networkLossDuringResolutionAutomaticallyResumesOnBriefReconnect() = runBlocking {
         launchReady {
             val target = station(1)
             app.playbackDelays[target.uuid] = 800
@@ -176,7 +176,6 @@ class PlaybackAudioPolicyTest {
                 withTimeout(2000) { connection.state.first { it.error == TuneError.NETWORK_OFFLINE } }
                 app.mockNetwork.value = com.meowv.tune.domain.NetworkState(com.meowv.tune.domain.NetworkType.WIFI)
                 withTimeout(2000) { connection.state.first { it.error == null } }
-                connection.dispatch(PlayerCommand.TogglePause)
                 withTimeout(5000) { connection.state.first { it.phase == PlaybackPhase.PLAYING } }
             } finally {
                 app.playbackDelays.clear()

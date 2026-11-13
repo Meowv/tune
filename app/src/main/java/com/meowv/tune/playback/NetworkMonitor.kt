@@ -52,7 +52,9 @@ internal class NetworkMonitor(context: Context) {
             hasWifi = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI),
             hasEthernet = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET),
             hasCellular = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR),
-            unmetered = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+            unmetered = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED),
+            validated = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+            captivePortal = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)
         )
     }
 
@@ -62,7 +64,9 @@ internal class NetworkMonitor(context: Context) {
             hasWifi: Boolean,
             hasEthernet: Boolean,
             hasCellular: Boolean,
-            unmetered: Boolean
+            unmetered: Boolean,
+            validated: Boolean = true,
+            captivePortal: Boolean = false
         ): NetworkState {
             if (!hasInternet) return NetworkState()
             val type = when {
@@ -73,7 +77,9 @@ internal class NetworkMonitor(context: Context) {
             }
             return NetworkState(
                 type = type,
-                metered = !unmetered
+                metered = !unmetered,
+                validated = validated,
+                captivePortal = captivePortal
             )
         }
     }

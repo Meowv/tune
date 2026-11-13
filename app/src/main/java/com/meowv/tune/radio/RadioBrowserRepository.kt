@@ -32,6 +32,14 @@ internal class RadioBrowserRepository(
             .mapNotNull(RadioBrowserMapping::station).distinctBy { it.uuid }
     }
 
+    override suspend fun globalStations(offset: Int, limit: Int): StationPage {
+        require(offset >= 0 && limit in 1..30 && offset <= Int.MAX_VALUE - limit)
+        val rows = search(mapOf("hidebroken" to "true", "order" to "clickcount", "reverse" to "true",
+            "limit" to limit.toString(), "offset" to offset.toString()))
+        return StationPage(rows.mapNotNull(RadioBrowserMapping::station).distinctBy { it.uuid },
+            if (rows.size >= limit) offset + limit else null)
+    }
+
     override suspend fun stationByUuid(uuid: UUID): Station? =
         RadioBrowserMapping.rows(get("/json/stations/byuuid/$uuid", emptyMap()))
             .firstNotNullOfOrNull(RadioBrowserMapping::station)

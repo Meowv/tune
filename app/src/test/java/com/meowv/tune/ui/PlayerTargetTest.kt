@@ -8,6 +8,12 @@ import org.junit.Test
 class PlayerTargetTest {
     private val one = Station(UUID(0, 1), "One", CountryCode.parse("CN"))
     private val two = Station(UUID(0, 2), "Two", CountryCode.parse("CN"))
+    @Test fun fullscreenKeepsPausedStationWhileDirectoryBrowsesAnother() {
+        val playback = PlayerUiState(PlaybackPhase.PAUSED, one)
+        val radio = RadioUiState(stations = listOf(one, two), selectedStationUuid = two.uuid)
+        assertEquals(one, resolvePlayerTarget(playback, radio, two, two.uuid))
+        assertEquals(two, resolvePlayerTarget(PlayerUiState(), radio, one, one.uuid))
+    }
     @Test fun selectsRememberedThenFirstWithoutStartingPlayback() {
         val radio = RadioUiState(stations = listOf(one, two))
         assertEquals(two, resolvePlayerTarget(PlayerUiState(), radio, two, two.uuid))

@@ -82,10 +82,6 @@ class RadioQueueManager(private val repository: RadioRepository) : RadioQueue {
 
     override fun previous(scope: ResolvedRadioScope): QueueSelection? = synchronized(stateLock) {
         val active = session?.takeIf { it.scope == scope } ?: return@synchronized null
-        if (order == PlaybackOrder.SHUFFLE) {
-            val station = pickShuffle(active, active.current?.uuid) ?: return@synchronized null
-            return@synchronized active.select(station)
-        }
         val station = active.history.lastOrNull() ?: return@synchronized null
         active.select(station, fromHistory = true)
     }
@@ -101,24 +97,43 @@ class RadioQueueManager(private val repository: RadioRepository) : RadioQueue {
                     revision = ++active.revision,
                     cursor = cursor ?: active.current?.uuid,
                     page = active.page,
+                    orderedGlobal = active.orderedGlobal,
                     preview = active.preview.also { active.preview = emptyList() },
                     excluded = active.recent.toSet() + listOfNotNull(cursor, active.current?.uuid),
                     shuffle = order == PlaybackOrder.SHUFFLE
                 )
             }
             val country = scope.country
-            if (country == null) {
+            if (country == null && request.shuffle) {
                 active.random.offer(request.preview)
                 val station = active.random.take(request.excluded)
                 currentCoroutineContext().ensureActive()
                 synchronized(stateLock) {
                     if (!isCurrent(active, request)) null else station?.let { active.select(it) }
                 }
-            } else if (request.shuffle) {
-                val station = synchronized(stateLock) { pickShuffle(active, request.cursor) }
+            } else if (country == null) {
+                val page = request.orderedGlobal
+                val fetched = if (after(page, request.cursor) == null && page.nextOffset != null) {
+                    appendStationPage(page) { repository.globalStations(it, DIRECTORY_PAGE_SIZE) }
+                } else page
                 currentCoroutineContext().ensureActive()
                 synchronized(stateLock) {
-                    if (!isCurrent(active, request)) null else station?.let { active.select(it) }
+                    if (!isCurrent(active, request)) return@synchronized null
+                    active.orderedGlobal = fetched
+                    val station = after(fetched, request.cursor)
+                        ?: fetched.stations.firstOrNull().takeIf { fetched.nextOffset == null }
+                    station?.let { active.select(it) }
+                }
+            } else if (request.shuffle) {
+                // 每次最多补一批，随机切台不必依赖用户滚动目录才能覆盖后续页。
+                val fetched = if (request.page.nextOffset != null) {
+                    appendCountryPage(repository, country, request.page)
+                } else null
+                currentCoroutineContext().ensureActive()
+                synchronized(stateLock) {
+                    if (!isCurrent(active, request)) return@synchronized null
+                    if (fetched != null && active.page === request.page) active.page = fetched
+                    pickShuffle(active, request.cursor)?.let { active.select(it) }
                 }
             } else {
                 val successor = after(request.page, request.cursor)
@@ -174,7 +189,6 @@ class RadioQueueManager(private val repository: RadioRepository) : RadioQueue {
         nextAvailable.value = stations.isNotEmpty()
         previousAvailable.value = when {
             active == null -> false
-            order == PlaybackOrder.SHUFFLE -> active.current != null && stations.isNotEmpty()
             else -> active.history.isNotEmpty()
         }
     }
@@ -182,6 +196,7 @@ class RadioQueueManager(private val repository: RadioRepository) : RadioQueue {
     private inner class Session(val scope: ResolvedRadioScope) {
         var page = StationPage(nextOffset = if (scope.country != null) 0 else null)
         var preview = emptyList<Station>()
+        var orderedGlobal = StationPage(nextOffset = 0)
         val nextLock = Mutex()
         val random = RandomStationPool { repository.randomGlobalStations(DIRECTORY_PAGE_SIZE) }
         val history = ArrayDeque<Station>()
@@ -202,6 +217,7 @@ class RadioQueueManager(private val repository: RadioRepository) : RadioQueue {
         val revision: Long,
         val cursor: UUID?,
         val page: StationPage,
+        val orderedGlobal: StationPage,
         val preview: List<Station>,
         val excluded: Set<UUID>,
         val shuffle: Boolean

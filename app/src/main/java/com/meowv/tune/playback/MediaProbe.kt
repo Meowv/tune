@@ -27,7 +27,7 @@ internal enum class PlaylistFormat { M3U, PLS, ASX }
 
 internal class MediaProbe(client: OkHttpClient) {
     private val http = client.newBuilder().followRedirects(false).followSslRedirects(false)
-        .callTimeout(4, TimeUnit.SECONDS).build()
+        .readTimeout(4, TimeUnit.SECONDS).callTimeout(4, TimeUnit.SECONDS).build()
 
     suspend fun get(url: HttpUrl): MediaProbeResult = suspendCancellableCoroutine { continuation ->
         val request = Request.Builder().url(url).header("User-Agent", "MeowvTune").build()

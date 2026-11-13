@@ -5,11 +5,20 @@ import com.meowv.tune.domain.NetworkState
 import com.meowv.tune.domain.NetworkType
 import com.meowv.tune.playback.NetworkMonitor
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class NetworkMonitorTest {
+    @Test fun retainsValidationAndCaptivePortalSeparatelyFromTransport() {
+        val state = NetworkMonitor.snapshot(hasInternet = true, hasWifi = true, hasEthernet = false,
+            hasCellular = false, unmetered = true, validated = false, captivePortal = true)
+        assertTrue(state.available)
+        assertFalse(state.validated)
+        assertTrue(state.captivePortal)
+    }
     @Test fun mapsWifiEthernetCellularAndMissingInternet() {
         assertEquals(NetworkState(NetworkType.WIFI, metered = false),
             NetworkMonitor.snapshot(hasInternet = true, hasWifi = true, hasEthernet = false,

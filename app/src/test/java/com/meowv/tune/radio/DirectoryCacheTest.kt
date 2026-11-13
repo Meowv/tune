@@ -13,6 +13,31 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 class DirectoryCacheTest {
+    @Test fun accumulatedPagesKeepAllStationsAndCursorAcrossRestart() = runBlocking {
+        val stations = (1L..300L).map { testStation(it) }
+        open { cache, _ ->
+            val started = System.nanoTime()
+            (30..300 step 30).forEach { size ->
+                cache.refreshStations(manual) { StationPage(stations.take(size), size) }
+            }
+            assertEquals(StationPage(stations, 300), cache.stations(manual)?.value)
+            println("DirectoryCache: ten cumulative writes and read took ${(System.nanoTime() - started) / 1_000_000} ms")
+        }
+        open { cache, _ -> assertEquals(StationPage(stations, 300), cache.stations(manual)?.value) }
+    }
+
+    @Test fun oversizedSnapshotKeepsPreviousPageAndCursorAcrossRestart() = runBlocking {
+        val previous = StationPage(listOf(testStation(1)), 30)
+        open { cache, _ ->
+            cache.refreshStations(manual) { previous }
+            val huge = testStation(2).copy(iconUrl = "https://example.org/" + "a".repeat(256_000))
+            val returned = cache.refreshStations(manual) { StationPage(listOf(huge), 60) }
+            assertEquals(60, returned.nextOffset)
+            assertEquals(previous, cache.stations(manual)?.value)
+        }
+        open { cache, _ -> assertEquals(previous, cache.stations(manual)?.value) }
+    }
+
     @get:Rule val folder = TemporaryFolder()
     private val jp = requireNotNull(CountryCode.parse("JP"))
     private val manual = ResolvedRadioScope(RadioScope(ScopeMode.COUNTRY, jp), jp)

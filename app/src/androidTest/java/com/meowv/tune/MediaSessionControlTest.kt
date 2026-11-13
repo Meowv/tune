@@ -36,6 +36,25 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class MediaSessionControlTest {
+    @Test fun systemPlayRestoresRememberedStationWithoutLaunchingActivity() = runBlocking {
+        val remembered = station(2)
+        app.userSettings.recordSuccessfulStation(remembered)
+        app.userSettings.update { it.copy(autoPlay = false) }
+        val lease = onMain { connection.acquire() }
+        try {
+            withTimeout(5000) { connection.connected.first { it } }
+            connection.dispatch(PlayerCommand.Stop)
+            app.radioQueue.clearScope()
+            val media = connect()
+            onMain { media.play() }
+            awaitStation(2)
+            assertEquals(false, app.userSettings.settings.first().autoPlay)
+        } finally {
+            connection.dispatch(PlayerCommand.Stop)
+            onMain { lease.close() }
+        }
+    }
+
     private val app get() =
         InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as TuneTestApplication
     private val connection get() = app.playerController
@@ -43,6 +62,10 @@ class MediaSessionControlTest {
 
     @Before
     fun prepareQueue() = runBlocking<Unit> {
+        app.resolveFailures.clear()
+        app.playbackDelays.clear()
+        app.latePlaybackDelays.clear()
+        app.mockNetwork.value = com.meowv.tune.domain.NetworkState(com.meowv.tune.domain.NetworkType.WIFI)
         app.userSettings.update {
             it.copy(scope = RadioScope(ScopeMode.COUNTRY, app.country), playbackOrder = PlaybackOrder.SEQUENTIAL)
         }
@@ -92,8 +115,8 @@ class MediaSessionControlTest {
             withPlayer {
                 playStation(1)
                 val media = connect()
-                // 随机模式下有当前台即可返回，同时确认顺序已同步到播放队列。
-                withTimeout(3000) { app.radioQueue.canPrevious.first { it } }
+                // 没有播放历史时，随机模式同样不能返回。
+                assertFalse(app.radioQueue.canPrevious.value)
 
                 onMain { media.seekToNextMediaItem() }
                 val next = withTimeout(8000) {
@@ -106,7 +129,7 @@ class MediaSessionControlTest {
                 onMain { media.seekToPreviousMediaItem() }
                 withTimeout(8000) {
                     connection.state.first {
-                        it.phase == PlaybackPhase.PLAYING && it.station?.uuid != next.station?.uuid
+                        it.phase == PlaybackPhase.PLAYING && it.station?.uuid == UUID(0, 1)
                     }
                 }
             }

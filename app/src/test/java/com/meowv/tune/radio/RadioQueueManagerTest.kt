@@ -18,6 +18,35 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RadioQueueManagerTest {
+    @Test fun globalSequentialUsesOrderedPagesInsteadOfRandomPoolAndWraps() = runBlocking {
+        val stations = (1L..3L).map { testStation(it) }
+        val offsets = mutableListOf<Int>()
+        val queue = RadioQueueManager(StubRadioRepository(globalPage = { offset, _ ->
+            offsets += offset
+            if (offset == 0) StationPage(stations.take(2), 30) else StationPage(stations.drop(2))
+        }))
+        queue.updateDirectory(global, StationPage(listOf(testStation(99))))
+        repeat(4) { index ->
+            val selection = requireNotNull(queue.next(global, null))
+            assertEquals(stations[index % 3], selection.station)
+            queue.recordSuccessfulPlayback(selection)
+        }
+        assertEquals(listOf(0, 30), offsets)
+    }
+
+    @Test fun countryShuffleLoadsFollowingPageWithoutDirectoryScrolling() = runBlocking {
+        val first = testStation(1)
+        val second = testStation(2)
+        val queue = RadioQueueManager(StubRadioRepository(countryPage = { _, offset, _ ->
+            assertEquals(30, offset)
+            StationPage(listOf(second))
+        }))
+        queue.setPlaybackOrder(PlaybackOrder.SHUFFLE)
+        queue.updateDirectory(japan, StationPage(listOf(first), 30))
+        queue.recordSuccessfulPlayback(requireNotNull(queue.select(japan, first)))
+        assertEquals(second, queue.next(japan, null)?.station)
+    }
+
     private val jp = requireNotNull(CountryCode.parse("JP"))
     private val us = requireNotNull(CountryCode.parse("US"))
     private val japan = ResolvedRadioScope(RadioScope(ScopeMode.COUNTRY, jp), jp)
@@ -94,6 +123,7 @@ class RadioQueueManagerTest {
             calls++
             listOf(preview.last(), preview[1], preview[1], preview.first(), newStation)
         }))
+        queue.setPlaybackOrder(PlaybackOrder.SHUFFLE)
         queue.updateDirectory(global, StationPage(preview))
         preview.forEach { expected ->
             val selection = requireNotNull(queue.next(global, null))
@@ -108,7 +138,7 @@ class RadioQueueManagerTest {
         assertEquals(1, calls)
     }
 
-    @Test fun shuffleModeRandomizesBothDirectionsAndRestoresHistoryWhenSwitchingBack() = runBlocking {
+    @Test fun shuffleNextUsesHistoryForPrevious() = runBlocking {
         val stations = (1L..6L).map { testStation(it) }
         val queue = RadioQueueManager(StubRadioRepository())
         queue.updateDirectory(japan, StationPage(stations))
@@ -116,18 +146,18 @@ class RadioQueueManagerTest {
         assertFalse("顺序模式没有历史时不可返回", queue.canPrevious.value)
 
         queue.setPlaybackOrder(PlaybackOrder.SHUFFLE)
-        assertTrue("随机模式有当前台即可返回", queue.canPrevious.value)
+        assertFalse("没有历史时不能返回", queue.canPrevious.value)
 
         val next = requireNotNull(queue.next(japan, null))
         assertNotEquals(stations.first(), next.station)
         assertTrue(queue.recordSuccessfulPlayback(next))
 
         val previous = requireNotNull(queue.previous(japan))
-        assertNotEquals(next.station, previous.station)
+        assertEquals(stations.first(), previous.station)
         assertTrue(queue.recordSuccessfulPlayback(previous))
 
         queue.setPlaybackOrder(PlaybackOrder.SEQUENTIAL)
-        assertEquals("切回顺序后按历史返回", next.station, queue.previous(japan)?.station)
+        assertNull("返回首台后历史耗尽", queue.previous(japan))
     }
 
     @Test fun shuffleModeWithSingleStationReplaysIt() = runBlocking {
@@ -136,9 +166,9 @@ class RadioQueueManagerTest {
         queue.setPlaybackOrder(PlaybackOrder.SHUFFLE)
         queue.updateDirectory(japan, StationPage(listOf(only)))
         assertTrue(queue.recordSuccessfulPlayback(requireNotNull(queue.select(japan, only.uuid))))
-        assertTrue(queue.canPrevious.value)
+        assertFalse(queue.canPrevious.value)
         assertEquals(only, requireNotNull(queue.next(japan, null)).station)
-        assertEquals(only, requireNotNull(queue.previous(japan)).station)
+        assertNull(queue.previous(japan))
     }
 
     @Test fun successfulPlaybackHistoryIsBounded() {

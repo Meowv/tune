@@ -92,7 +92,7 @@ open class TuneApplication : Application(), SingletonImageLoader.Factory {
 
     val radioQueue: RadioQueue by lazy { RadioQueueManager(radioRepository) }
 
-    internal open val mediaHttp by lazy { MediaUrlPolicy.client() }
+    internal open val mediaHttp by lazy { MediaUrlPolicy.client(playback = true) }
     private val streamResolver by lazy { RadioStreamResolver(radioBrowser, MediaProbe(mediaHttp)) }
     internal open suspend fun resolveStream(intent: PlaybackIntent) = streamResolver.resolve(intent)
     internal val playerController by lazy { RadioMediaConnection(this) }

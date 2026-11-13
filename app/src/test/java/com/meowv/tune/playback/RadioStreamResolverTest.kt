@@ -20,6 +20,11 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RadioStreamResolverTest {
+    @Test fun playbackReadTimeoutIsIndependentFromOtherMediaRequests() {
+        assertEquals(15_000, MediaUrlPolicy.client(playback = true).readTimeoutMillis)
+        assertEquals(5_000, MediaUrlPolicy.client().readTimeoutMillis)
+        assertEquals(3_000, MediaUrlPolicy.client(playback = true).connectTimeoutMillis)
+    }
     private val station = Station(UUID.randomUUID(), "Test", null)
 
     @Test fun publicUrlAndDnsChecksRejectPrivateAndSpecialTargets() {

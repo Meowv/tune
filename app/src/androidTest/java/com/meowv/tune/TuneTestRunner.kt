@@ -73,7 +73,8 @@ class TuneTestApplication : TuneApplication() {
     private val testRetryPolicy = PlaybackRetryPolicy(
         maxSameStationRetries = 2,
         maxAlternateStations = 3,
-        backoffMillis = listOf(20L, 40L)
+        backoffMillis = listOf(20L, 40L),
+        totalTimeoutMillis = 8_000L
     )
 
     suspend fun clearRememberedStation() {
@@ -174,6 +175,13 @@ class TuneTestApplication : TuneApplication() {
             if (country != this@TuneTestApplication.country) return StationPage()
             val page = stations.drop(offset).take(limit)
             return StationPage(page, (offset + limit).takeIf { it < stations.size })
+        }
+
+        override suspend fun globalStations(offset: Int, limit: Int): StationPage {
+            queries.incrementAndGet()
+            if (failQueries) throw TuneFailure(TuneError.CONNECTION)
+            return StationPage(stations.drop(offset).take(limit),
+                (offset + limit).takeIf { it < stations.size })
         }
 
         override suspend fun randomGlobalStations(limit: Int): List<Station> {

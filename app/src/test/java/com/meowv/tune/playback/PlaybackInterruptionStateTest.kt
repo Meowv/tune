@@ -7,6 +7,36 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PlaybackInterruptionStateTest {
+    @Test fun briefNetworkLossResumesOnceButLongLossDoesNot() {
+        var now = 0L
+        val policy = PlaybackInterruptionState { now }
+        val playing = PlayerUiState(PlaybackPhase.PLAYING)
+        val paused = policy.pause(playing, PauseReason.NETWORK, true)
+        now = 20_000
+        policy.pause(paused, PauseReason.NETWORK, false)
+        now = 30_000
+        assertTrue(policy.consumeNetworkResume())
+        assertFalse(policy.consumeNetworkResume())
+        policy.pause(playing, PauseReason.NETWORK, true)
+        now += 30_001
+        assertFalse(policy.consumeNetworkResume())
+    }
+
+    @Test fun explicitInterruptionsCancelNetworkResumeAndFocusGainDoesNotConsumeIt() {
+        listOf(PauseReason.USER, PauseReason.OUTPUT, PauseReason.PERMANENT_FOCUS).forEach { reason ->
+            val policy = PlaybackInterruptionState { 0L }
+            val paused = policy.pause(PlayerUiState(PlaybackPhase.PLAYING), PauseReason.NETWORK, true)
+            policy.pause(paused, reason, false)
+            assertFalse(policy.consumeNetworkResume())
+        }
+        val policy = PlaybackInterruptionState { 0L }
+        policy.pause(PlayerUiState(PlaybackPhase.PLAYING), PauseReason.NETWORK, true)
+        assertFalse(policy.consumeFocusResume())
+        assertTrue(policy.consumeNetworkResume())
+        policy.pause(PlayerUiState(PlaybackPhase.PAUSED), PauseReason.NETWORK, false)
+        assertFalse(policy.consumeNetworkResume())
+    }
+
     @Test fun everyInterruptionEndsResolutionAndClearsHttpStatus() {
         PauseReason.entries.forEach { reason ->
             val policy = PlaybackInterruptionState()

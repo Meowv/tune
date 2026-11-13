@@ -374,6 +374,14 @@ private fun CardMode(
         initialPage = queue.indexOfFirst { it.uuid == selectedId }.coerceAtLeast(0),
         pageCount = { queue.size }
     )
+    var userScrollPending by remember { mutableStateOf(false) }
+    LaunchedEffect(pagerState) {
+        pagerState.interactionSource.interactions.collect { interaction ->
+            if (interaction is androidx.compose.foundation.interaction.DragInteraction.Start) {
+                userScrollPending = true
+            }
+        }
+    }
     LaunchedEffect(selectedId) {
         val index = queue.indexOfFirst { it.uuid == selectedId }
         if (index >= 0 && index != pagerState.currentPage) pagerState.scrollToPage(index)
@@ -383,7 +391,9 @@ private fun CardMode(
     val currentOnSelectTarget by rememberUpdatedState(onSelectTarget)
     // 播放中（含连接/缓冲/重试）滑动后自动续播；暂停或空闲只换目标，不主动起播。
     val currentPlaying by rememberUpdatedState(playback.phase in ActivePhases)
-    LaunchedEffect(pagerState.settledPage) {
+    LaunchedEffect(pagerState.settledPage, pagerState.isScrollInProgress) {
+        if (pagerState.isScrollInProgress || !userScrollPending) return@LaunchedEffect
+        userScrollPending = false
         val page = pagerState.settledPage
         val station = queue.getOrNull(page) ?: return@LaunchedEffect
         if (station.uuid != currentSelectedId) {
@@ -391,10 +401,12 @@ private fun CardMode(
             if (currentPlaying) {
                 // 快速连续滑动时，页变化会取消上一个协程，只有最终停留的台真正发起播放。
                 delay(CARD_AUTOPLAY_DEBOUNCE_MS)
-                currentOnPlayback?.invoke(PlayerCommand.Play(station))
+                if (currentSelectedId == station.uuid) currentOnPlayback?.invoke(PlayerCommand.Play(station))
             }
         }
-        if (page >= queue.lastIndex - 2) onLoadMore()
+    }
+    LaunchedEffect(pagerState.settledPage, queue.size) {
+        if (pagerState.settledPage >= queue.lastIndex - 2) onLoadMore()
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val statusGap = if (isCar) TuneSpacing.Large else TuneSpacing.Medium
