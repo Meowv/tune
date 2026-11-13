@@ -6,11 +6,14 @@ import com.meowv.tune.radio.RadioViewModel
 import java.util.UUID
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -60,6 +63,7 @@ class RadioContractsTest {
     @Test fun directoryFailureDoesNotReplacePlaybackAndCancelledResultCannotWin() = runBlocking {
         withTimeout(5000) {
             val started = CompletableDeferred<Unit>()
+            val request = CompletableDeferred<Job>()
             val stale = CompletableDeferred<List<Station>>()
             val station = Station(UUID.randomUUID(), "Test", CountryCode.parse("JP"))
             val player = object : PlayerController {
@@ -69,6 +73,7 @@ class RadioContractsTest {
             val repository = object : RadioRepository {
                 override suspend fun countries() = emptyList<RadioCountry>()
                 override suspend fun stationsForCountry(country: CountryCode, offset: Int, limit: Int): StationPage {
+                    request.complete(currentCoroutineContext().job)
                     started.complete(Unit)
                     return StationPage(withContext(NonCancellable) { stale.await() })
                 }
@@ -81,9 +86,6 @@ class RadioContractsTest {
             try {
                 val queue = RadioQueueManager(repository)
                 val model = RadioViewModel(repository, player, CountryResolver({ null }, { null }), lifetime, queue = queue)
-                // 先让 init 的播放器状态收集协程启动，后续只把刷新任务当作取消目标。
-                kotlinx.coroutines.yield()
-                val baseline = lifetime.coroutineContext[kotlinx.coroutines.Job]!!.children.toSet()
                 val local = RadioScope(ScopeMode.COUNTRY, station.countryCode)
                 model.refresh(local)
                 started.await()
@@ -93,11 +95,12 @@ class RadioContractsTest {
                 assertTrue(queue.recordSuccessfulPlayback(requireNotNull(queue.select(localScope, previous.uuid))))
                 assertTrue(queue.recordSuccessfulPlayback(requireNotNull(queue.select(localScope, station.uuid))))
                 assertTrue(queue.canPrevious.value)
-                val cancelledRequest = lifetime.coroutineContext[kotlinx.coroutines.Job]!!.children.single { it !in baseline }
+                val cancelledRequest = request.await()
                 val global = RadioScope(ScopeMode.GLOBAL)
                 model.refresh(global)
                 assertFalse(queue.canPrevious.value)
                 val failed = model.radioState.first { it.error == TuneError.SERVER }
+                assertTrue(cancelledRequest.isCancelled)
                 assertEquals(global, failed.scope)
                 stale.complete(listOf(station))
                 cancelledRequest.join()

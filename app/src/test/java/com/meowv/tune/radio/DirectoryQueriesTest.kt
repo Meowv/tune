@@ -212,6 +212,7 @@ class DirectoryQueriesTest {
     @Test fun returningToTheFirstCountryRejectsAnOlderResponseForThatSameCountry() = runBlocking {
         withTimeout(5000) {
             val oldRequestStarted = CompletableDeferred<Unit>()
+            val oldRequest = CompletableDeferred<Job>()
             val oldResponse = CompletableDeferred<Unit>()
             var japanQueries = 0
             val old = testStation(1)
@@ -219,25 +220,36 @@ class DirectoryQueriesTest {
             val repository = StubRadioRepository(countryPage = { country, _, _ ->
                 when {
                     country == US -> StationPage(listOf(testStation(3, US)))
-                    ++japanQueries == 1 -> withContext(NonCancellable) {
-                        oldRequestStarted.complete(Unit)
-                        oldResponse.await()
-                        StationPage(listOf(old))
+                    ++japanQueries == 1 -> {
+                        // 在进入不可取消区前记录请求任务，不依赖同一作用域内其他协程的调度顺序。
+                        oldRequest.complete(currentCoroutineContext().job)
+                        withContext(NonCancellable) {
+                            oldRequestStarted.complete(Unit)
+                            oldResponse.await()
+                            StationPage(listOf(old))
+                        }
                     }
                     else -> StationPage(listOf(latest))
                 }
             })
             val lifetime = CoroutineScope(coroutineContext + SupervisorJob())
             try {
-                val model = RadioViewModel(repository, idlePlayer, CountryResolver({ null }, { null }), lifetime)
-                kotlinx.coroutines.yield()
-                val baseline = lifetime.coroutineContext.job.children.toSet()
+                val player = object : PlayerController {
+                    override val state = MutableStateFlow(PlayerUiState())
+                    override suspend fun dispatch(command: PlayerCommand) {
+                        check(command == PlayerCommand.CancelPending)
+                        // 保持取消命令在途，确保测试不再把它误认成目录加载任务。
+                        awaitCancellation()
+                    }
+                }
+                val model = RadioViewModel(repository, player, CountryResolver({ null }, { null }), lifetime)
                 val japan = RadioScope(ScopeMode.COUNTRY, JP)
                 model.setScope(japan)
                 oldRequestStarted.await()
-                val original = lifetime.coroutineContext.job.children.single { it !in baseline }
+                val original = oldRequest.await()
                 model.setScope(RadioScope(ScopeMode.COUNTRY, US))
                 model.radioState.first { it.resolvedCountryCode == US }
+                assertTrue(original.isCancelled)
                 model.setScope(japan)
                 model.radioState.first { latest in it.stations }
                 oldResponse.complete(Unit)
