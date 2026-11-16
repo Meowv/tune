@@ -10,6 +10,8 @@ import com.meowv.tune.domain.*
 import com.meowv.tune.domain.music.*
 import com.meowv.tune.music.MusicQueueManager
 import com.meowv.tune.music.MusicSelection
+import com.meowv.tune.music.MusicRequestGate
+import com.meowv.tune.music.musicRetryAfterSeconds
 import java.time.Instant
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.StateFlow
@@ -39,6 +41,7 @@ internal class MusicPlaybackEngine(
     private var itemId: String? = null
     private var endedItem: String? = null
     private var confirmed = false
+    private val requestGate = MusicRequestGate()
     private var failures = 0
     private var state = PlayerUiState(source = PlaybackSource.MUSIC)
     val snapshot: PlayerUiState get() = state
@@ -65,7 +68,7 @@ internal class MusicPlaybackEngine(
     fun deactivate() { if (active) stop(); active = false }
 
     fun play(track: MusicTrack? = null, resetSession: Boolean = true) {
-        if (!active) return
+        if (!active || !mayRequest()) return
         failures = 0
         interruptions.reset()
         if (resetSession || !queue.canNext) queue.reset()
@@ -73,13 +76,13 @@ internal class MusicPlaybackEngine(
     }
 
     fun next() {
-        if (!active) return
+        if (!active || !mayRequest()) return
         interruptions.reset()
         begin { queue.next() }
     }
 
     fun previous() {
-        if (!active || !queue.canPrevious) return
+        if (!active || !queue.canPrevious || !mayRequest()) return
         interruptions.reset()
         begin(preserveCurrent = true) { queue.previous() }
     }
@@ -131,6 +134,7 @@ internal class MusicPlaybackEngine(
 
     private fun loadFailed(failure: MusicException, preserve: Boolean, old: PlayerUiState, selected: Boolean) {
         loading = false
+        if (failure.failure == MusicFailure.RATE_LIMITED) requestGate.block(failure.retryAfterSeconds)
         if (preserve && itemMatches() && player.playbackState != Player.STATE_ENDED) {
             queue.invalidate()
             desiredPlay = player.playWhenReady
@@ -169,6 +173,10 @@ internal class MusicPlaybackEngine(
                     403 -> MusicFailure.FORBIDDEN
                     429 -> MusicFailure.RATE_LIMITED
                     else -> MusicFailure.PLAYBACK_UNAVAILABLE
+                }
+                if (reason == MusicFailure.RATE_LIMITED) {
+                    val retry = musicRetryAfterSeconds(http?.headerFields?.entries?.firstOrNull { it.key.equals("Retry-After", ignoreCase = true) }?.value?.firstOrNull())
+                    requestGate.block(retry)
                 }
                 // 解码/连接失败可跳过候选；权限和限流必须停止，不跨源绕过。
                 if (desiredPlay && reason == MusicFailure.PLAYBACK_UNAVAILABLE && ++failures < 5 && queue.canNext) next()
@@ -250,6 +258,11 @@ internal class MusicPlaybackEngine(
     fun close() {
         if (active) deactivate()
         scope.cancel(); route.close(); focus.abandon(); player.removeListener(this)
+    }
+
+    private fun mayRequest(): Boolean = try { requestGate.check(); true } catch (_: MusicException) {
+        fail(MusicFailure.RATE_LIMITED)
+        false
     }
 
     private fun fail(failure: MusicFailure) {

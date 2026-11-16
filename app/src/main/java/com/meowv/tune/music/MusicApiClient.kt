@@ -25,7 +25,8 @@ internal class MusicApiClient(
     private val accessToken: suspend () -> String?,
     client: OkHttpClient? = null,
     private val now: () -> Instant = Instant::now,
-    allowLocalHttp: Boolean = false
+    allowLocalHttp: Boolean = false,
+    private val requestGate: MusicRequestGate = MusicRequestGate()
 ) : MusicRepository {
     private val localHttp = allowLocalHttp && BuildConfig.DEBUG && isDebugMusicHost(baseUrl.host)
     private val transport = client ?: if (localHttp && !baseUrl.isHttps) OkHttpClient.Builder().proxy(Proxy.NO_PROXY)
@@ -67,6 +68,7 @@ internal class MusicApiClient(
     }
 
     private suspend fun execute(builder: Request.Builder): String {
+        requestGate.check()
         val token = accessToken()?.takeIf { it.length in 32..1024 && it.none(Char::isISOControl) }
             ?: throw MusicException(MusicFailure.NOT_CONFIGURED)
         val request = builder.header("Authorization", "Bearer $token").header("Accept", "application/json")
@@ -81,6 +83,7 @@ internal class MusicApiClient(
                 override fun onResponse(call: Call, response: Response) {
                     try {
                         val result = response.use { value ->
+                            if (value.code == 429) retryAfter(value.header("Retry-After"))?.let(requestGate::block)
                             val source = value.body?.source() ?: throw MusicException(MusicFailure.INVALID_RESPONSE)
                             val buffer = Buffer()
                             while (buffer.size <= MAX_BYTES) {
@@ -88,13 +91,19 @@ internal class MusicApiClient(
                             }
                             if (buffer.size > MAX_BYTES) throw MusicException(MusicFailure.INVALID_RESPONSE)
                             val body = buffer.readUtf8()
-                            if (!value.isSuccessful) throw MusicJson.error(body, value.code, retryAfter(value.header("Retry-After")))
+                            if (!value.isSuccessful) {
+                                val failure = MusicJson.error(body, value.code, retryAfter(value.header("Retry-After")))
+                                if (value.code == 429) requestGate.block(failure.retryAfterSeconds)
+                                throw failure
+                            }
                             body
                         }
                         if (continuation.isActive) continuation.resume(result)
                     } catch (failure: MusicException) {
+                        if (response.code == 429 && failure.failure != MusicFailure.RATE_LIMITED) requestGate.block(retryAfter(response.header("Retry-After")))
                         if (continuation.isActive) continuation.resumeWithException(failure)
                     } catch (error: IOException) {
+                        if (response.code == 429) requestGate.block(retryAfter(response.header("Retry-After")))
                         if (continuation.isActive) continuation.resumeWithException(ioFailure(error))
                     }
                 }
@@ -108,11 +117,15 @@ internal class MusicApiClient(
         else -> MusicFailure.CONNECTION
     })
 
-    private fun retryAfter(value: String?): Long? = value?.toLongOrNull()?.takeIf { it >= 0 }
-        ?: runCatching { ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().epochSecond - now().epochSecond }.getOrNull()?.coerceAtLeast(1)
+    private fun retryAfter(value: String?): Long? = musicRetryAfterSeconds(value, now())
 
     private companion object { const val MAX_BYTES = 256L * 1024 }
 }
 
 internal fun isDebugMusicHost(host: String): Boolean = host in setOf("localhost", "127.0.0.1", "10.0.2.2", "10.0.3.2") ||
     host.matches(Regex("10\\.[0-9.]+|192\\.168\\.[0-9.]+|172\\.(1[6-9]|2[0-9]|3[01])\\.[0-9.]+"))
+
+internal fun musicRetryAfterSeconds(value: String?, now: Instant = Instant.now()): Long? =
+    value?.toLongOrNull()?.takeIf { it >= 0 }
+        ?: runCatching { ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().epochSecond - now.epochSecond }
+            .getOrNull()?.coerceAtLeast(1)

@@ -203,12 +203,19 @@ class MusicPlaybackIntegrationTest {
             assertEquals(5, resolves.values.sumOf { it.get() })
         }
         resolves.clear()
-        resolveOverride = { throw MusicException(MusicFailure.RATE_LIMITED, 30) }
+        resolveOverride = { throw MusicException(MusicFailure.RATE_LIMITED, 1) }
         withMusic {
             connection.dispatch(PlayerCommand.PlayMusic())
             awaitPhase(PlaybackPhase.ERROR)
             assertEquals(MusicFailure.RATE_LIMITED, connection.state.value.musicFailure)
             assertEquals(1, resolves.values.sumOf { it.get() })
+            repeat(3) {
+                connection.dispatch(PlayerCommand.Next)
+                connection.dispatch(PlayerCommand.TogglePause)
+            }
+            delay(200)
+            assertEquals(1, resolves.values.sumOf { it.get() })
+            delay(1100) // 等待本用例的一秒冷却自然结束，避免污染其他服务集成用例。
         }
     }
 

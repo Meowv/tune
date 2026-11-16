@@ -72,11 +72,15 @@ class MusicRepositoryTest {
             val limited = failureSuspend { repository.recommendations() }
             assertEquals(MusicFailure.RATE_LIMITED, limited.failure)
             assertEquals(30L, limited.retryAfterSeconds)
+            assertEquals(MusicFailure.RATE_LIMITED, failureSuspend { repository.resolve("original-001") }.failure)
+            assertEquals(1, server.requestCount)
+        }
+        server { server, repository ->
             server.enqueue(MockResponse().setResponseCode(401).setBody("private upstream details"))
             val unauthorized = failureSuspend { repository.resolve("original-001") }
             assertEquals(MusicFailure.UNAUTHORIZED, unauthorized.failure)
             assertEquals("UNAUTHORIZED", unauthorized.message)
-            assertEquals(2, server.requestCount)
+            assertEquals(1, server.requestCount)
         }
     }
 
