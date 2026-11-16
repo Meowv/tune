@@ -81,9 +81,7 @@ internal fun MusicScreen(
                 val needsConfiguration = state == MusicUiState.NotConfigured ||
                     state is MusicUiState.Error && state.failure in setOf(MusicFailure.UNAUTHORIZED, MusicFailure.NOT_CONFIGURED)
                 when {
-                    needsConfiguration -> Button(onClick = onOpenSettings, modifier = Modifier.heightIn(min = 56.dp).testTag("music_configure")) {
-                        Text(stringResource(R.string.music_configure))
-                    }
+                    needsConfiguration -> Unit
                     state == MusicUiState.Loading -> {
                         CircularProgressIndicator(Modifier.size(24.dp).testTag("music_loading"))
                         TextButton(onClick = onCancel, modifier = Modifier.heightIn(min = 56.dp).testTag("music_cancel")) {

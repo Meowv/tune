@@ -19,13 +19,13 @@ class MusicScreenTest {
     @get:Rule val compose = createComposeRule()
     private val isCar get() = InstrumentationRegistry.getInstrumentation().targetContext.resources.configuration.screenWidthDp >= 600
 
-    @Test fun unconfiguredShowsSettingsAndDoesNotStartPlayback() {
+    @Test fun unconfiguredShowsUnavailableWithoutConfigurationPage() {
         var configured = 0
         compose.setContent { TuneTheme { MusicScreen(isCar, MusicUiState.NotConfigured, { error("Must not start") }, {}, { configured++ }) } }
-        compose.onNodeWithText("音乐服务尚未配置").assertIsDisplayed()
+        compose.onNodeWithText("音乐服务暂未就绪").assertIsDisplayed()
         compose.onNodeWithTag("music_start").assertDoesNotExist()
-        compose.onNodeWithTag("music_configure").performScrollTo().performClick()
-        assertEquals(1, configured)
+        compose.onNodeWithTag("music_configure").assertDoesNotExist()
+        assertEquals(0, configured)
         capture("unconfigured")
     }
 
@@ -58,7 +58,7 @@ class MusicScreenTest {
         compose.runOnIdle { state.value = MusicUiState.Empty }
         compose.onNodeWithText("暂时没有可播放的音乐").assertExists()
         compose.runOnIdle { state.value = MusicUiState.Error(MusicFailure.UNAUTHORIZED) }
-        compose.onNodeWithTag("music_configure").performScrollTo().assertIsEnabled()
+        compose.onNodeWithTag("music_configure").assertDoesNotExist()
         compose.onNodeWithTag("music_start").assertDoesNotExist()
     }
 

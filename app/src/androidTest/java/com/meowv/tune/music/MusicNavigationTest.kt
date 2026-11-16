@@ -9,10 +9,11 @@ import org.junit.Test
 class MusicNavigationTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
-    @Test fun unconfiguredMusicOpensSettingsWithoutStartingPlayback() {
+    @Test fun unconfiguredMusicHasNoConfigurationEntry() {
         compose.onNodeWithTag("nav_music").performClick()
-        compose.onNodeWithText("音乐服务尚未配置").assertIsDisplayed()
-        compose.onNodeWithTag("music_configure").performScrollTo().performClick()
+        compose.onNodeWithText("音乐服务暂未就绪").assertIsDisplayed()
+        compose.onNodeWithTag("music_configure").assertDoesNotExist()
+        compose.onNodeWithTag("nav_settings").performClick()
         compose.onNodeWithTag("page_settings").assertIsDisplayed()
     }
 }

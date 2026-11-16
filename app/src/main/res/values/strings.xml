@@ -8,7 +8,7 @@
   <string name="action_play">播放</string>
   <string name="player_idle">未播放</string>
   <string name="music_coming_soon">开发中</string>
-  <string name="music_not_configured">音乐服务尚未配置</string>
+  <string name="music_not_configured">音乐服务暂未就绪</string>
   <string name="music_configure">前往设置</string>
   <string name="music_start">开始听</string>
   <string name="music_previous">上一曲</string>
@@ -18,7 +18,7 @@
   <string name="music_cancel">取消</string>
   <string name="music_empty">暂时没有可播放的音乐</string>
   <string name="music_failed">暂时无法播放，请稍后重试</string>
-  <string name="music_unauthorized">音乐服务凭据已失效，请重新配置</string>
+  <string name="music_unauthorized">音乐服务访问已失效，请联系维护者更新应用</string>
   <string name="music_rate_limited">请求较多，请稍后再试</string>
   <string name="music_retry">重试</string>
   <string name="music_ready">待播放</string>

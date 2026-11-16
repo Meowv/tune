@@ -1,4 +1,5 @@
 import java.util.Properties
+import java.net.URI
 
 plugins {
     alias(libs.plugins.android.application)
@@ -12,6 +13,28 @@ val releaseProperties = Properties().apply {
     if (releaseKeystore.exists()) releaseKeystore.inputStream().use { load(it) }
 }
 
+// 共用凭据只从未跟踪的本机构建配置注入，不提交原文。
+val musicProperties = Properties().apply {
+    val source = rootProject.file("music-service.properties")
+    if (source.exists()) source.inputStream().use { load(it) }
+}
+val musicBaseUrl = providers.environmentVariable("MUSIC_API_BASE_URL").orNull
+    ?: musicProperties.getProperty("MUSIC_API_BASE_URL", "https://studio.meowv.com/api/")
+val musicDeviceToken = providers.environmentVariable("MUSIC_DEVICE_TOKEN").orNull
+    ?: musicProperties.getProperty("MUSIC_DEVICE_TOKEN", "")
+require(musicDeviceToken.isBlank() || musicBaseUrl.isNotBlank()) { "请配置音乐服务地址。" }
+val normalizedMusicUrl = if (musicBaseUrl.isBlank()) "" else {
+    val uri = runCatching { URI(musicBaseUrl) }.getOrElse { throw GradleException("音乐服务地址格式无效。") }
+    require(uri.scheme == "https" && uri.host != null && uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null) { "音乐地址必须是无凭据的 HTTPS 地址。" }
+    require(musicDeviceToken.isEmpty() || musicDeviceToken.matches(Regex("mvm_[A-Za-z0-9_-]{43}"))) { "请使用音乐模块签发的专用凭据。" }
+    musicBaseUrl.trimEnd('/') + when {
+        uri.path.isNullOrEmpty() || uri.path == "/" -> "/api/music/"
+        uri.path.trimEnd('/').endsWith("/api") -> "/music/"
+        else -> "/"
+    }
+}
+fun musicBuildString(value: String): String = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
 android {
     namespace = "com.meowv.tune"
     compileSdk = 35
@@ -24,6 +47,9 @@ android {
         versionCode = 13
         versionName = "1.2.2"
         testInstrumentationRunner = "com.meowv.tune.TuneTestRunner"
+
+        buildConfigField("String", "MUSIC_API_BASE_URL", musicBuildString(normalizedMusicUrl))
+        buildConfigField("String", "MUSIC_DEVICE_TOKEN", musicBuildString(musicDeviceToken))
 
         // 版本清单地址与发布渠道属于客户端配置，换渠道/换域名只需改这两行。
         buildConfigField("String", "UPDATE_MANIFEST_URL", "\"https://studio.meowv.com/data/meowvtune/stable.json\"")
