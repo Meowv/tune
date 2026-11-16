@@ -38,6 +38,7 @@ import com.meowv.tune.update.install.ApkVerifier
 import com.meowv.tune.update.install.InstallStore
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.StateFlow
+import com.meowv.tune.domain.music.MusicRepository
 import com.meowv.tune.domain.NetworkState
 
 private val Context.mirrorPreferences by preferencesDataStore(
@@ -55,6 +56,9 @@ private val Context.installPreferences by preferencesDataStore(
 private val LastMirror = stringPreferencesKey("last_good_host")
 
 open class TuneApplication : Application(), SingletonImageLoader.Factory {
+    // 未配置时不创建音乐网络客户端；测试可注入 Fake，后续配置任务接入真实仓储。
+    internal open val musicRepository: MusicRepository? get() = null
+
     // 同一进程只尝试一次启动恢复，避免 Activity 重建或回前台重复开流。
     internal var autoPlayAttempted = false
 

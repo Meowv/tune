@@ -19,6 +19,7 @@ import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.meowv.tune.music.MusicViewModel
 import com.meowv.tune.settings.SettingsViewModel
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
@@ -55,6 +56,9 @@ class MainActivity : ComponentActivity() {
                 Toast.makeText(this, R.string.notification_permission_denied, Toast.LENGTH_SHORT).show()
             }
         }
+    private val musicModel by viewModels<MusicViewModel> {
+        viewModelFactory { initializer { MusicViewModel(tuneApp.musicRepository) } }
+    }
     private val settingsModel by viewModels<SettingsViewModel> {
         viewModelFactory { initializer { SettingsViewModel(tuneApp.userSettings) } }
     }
@@ -126,6 +130,7 @@ class MainActivity : ComponentActivity() {
             resumeLastStation()
         }
         setContent {
+            val musicState by musicModel.state.collectAsStateWithLifecycle()
             val settings by settingsModel.settings.collectAsStateWithLifecycle()
             val storageError by settingsModel.storageError.collectAsStateWithLifecycle()
             val countries by radioModel.countries.collectAsStateWithLifecycle()
@@ -137,6 +142,9 @@ class MainActivity : ComponentActivity() {
             TuneTheme {
                 TuneApp(
                     settings = settings ?: TuneSettings(),
+                    musicState = musicState,
+                    onStartMusic = musicModel::startListening,
+                    onCancelMusic = musicModel::cancel,
                     storageError = storageError,
                     radio = radioModel.radioState,
                     playback = tuneApp.playerController.state,

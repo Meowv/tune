@@ -1,0 +1,134 @@
+package com.meowv.tune.music
+
+import com.meowv.tune.domain.music.*
+import java.net.InetAddress
+import java.net.Proxy
+import java.time.Instant
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.*
+import kotlinx.serialization.json.*
+import okhttp3.Dns
+import okhttp3.OkHttpClient
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.SocketPolicy
+import okhttp3.tls.HandshakeCertificates
+import okhttp3.tls.HeldCertificate
+import org.junit.Assert.*
+import org.junit.Test
+
+class MusicRepositoryTest {
+    private val fixture get() = Json.parseToJsonElement(javaClass.getResource("/music-v1.json")!!.readText()).jsonObject
+    private val token = "YOUR_SYNTHETIC_MUSIC_DEVICE_TOKEN_FOR_TESTS_ONLY"
+
+    @Test fun goldenWireFieldsMapToDomainWithoutInventingConfidence() {
+        val page = MusicJson.page(fixture.getValue("search").toString())
+        assertEquals(12000L, page.items.single().durationMs)
+        assertNull(page.items.single().matches.single().confidence)
+        val resolved = MusicJson.resolved(fixture.getValue("resolved").toString())
+        assertEquals(page.items.single().id, resolved.trackId)
+        assertTrue(resolved.seekable)
+    }
+
+    @Test fun unknownFieldsAreIgnoredButMissingOrWrongRequiredFieldsFail() {
+        val page = fixture.getValue("search").jsonObject
+        assertEquals(1, MusicJson.page(JsonObject(page + ("future" to JsonPrimitive(true))).toString()).items.size)
+        assertEquals(MusicFailure.INVALID_RESPONSE, failure { MusicJson.page("{}") }.failure)
+        val track = page.getValue("items").jsonArray.single().jsonObject
+        for (field in listOf("id", "title", "artists", "sources", "availability")) {
+            val body = JsonObject(page + ("items" to JsonArray(listOf(JsonObject(track - field)))))
+            assertEquals(MusicFailure.INVALID_RESPONSE, failure { MusicJson.page(body.toString()) }.failure)
+        }
+        assertEquals(MusicFailure.INVALID_RESPONSE, failure { MusicJson.resolved("{}") }.failure)
+        val resolved = fixture.getValue("resolved").jsonObject
+        val audio = resolved.getValue("audio").jsonObject
+        for (url in listOf("http://media.example.org/a.mp3", "https://127.0.0.1/a.mp3", "https://user:password@media.example.org/a.mp3")) {
+            val body = JsonObject(resolved + ("audio" to JsonObject(audio + ("url" to JsonPrimitive(url)))))
+            assertEquals(MusicFailure.INVALID_RESPONSE, failure { MusicJson.resolved(body.toString()) }.failure)
+        }
+    }
+
+    @Test fun httpsRequestsEncodeQueriesAndResolveThroughTheSameContract() = runBlocking {
+        server { server, repository ->
+            server.enqueue(MockResponse().setBody(fixture.getValue("search").toString()))
+            val page = repository.search("睡醒 & qix")
+            assertEquals("original-001", page.items.single().id)
+            val request = server.takeRequest(1, TimeUnit.SECONDS)!!
+            assertEquals("/api/music/search", request.requestUrl!!.encodedPath)
+            assertEquals("睡醒 & qix", request.requestUrl!!.queryParameter("q"))
+            assertNotNull(request.handshake)
+            assertEquals("Bearer $token", request.getHeader("Authorization"))
+            server.enqueue(MockResponse().setBody(fixture.getValue("resolved").toString()))
+            assertEquals("original-001", repository.resolve("original-001").trackId)
+            val resolve = server.takeRequest(1, TimeUnit.SECONDS)!!
+            assertEquals("POST", resolve.method)
+            assertEquals("original-001", Json.parseToJsonElement(resolve.body.readUtf8()).jsonObject["trackId"]!!.jsonPrimitive.content)
+        }
+    }
+
+    @Test fun limitedAndUnauthorizedRequestsAreNotRetried() = runBlocking {
+        server { server, repository ->
+            server.enqueue(MockResponse().setResponseCode(429).setHeader("Retry-After", "30").setBody(fixture.getValue("error").toString()))
+            val limited = failureSuspend { repository.recommendations() }
+            assertEquals(MusicFailure.RATE_LIMITED, limited.failure)
+            assertEquals(30L, limited.retryAfterSeconds)
+            server.enqueue(MockResponse().setResponseCode(401).setBody("private upstream details"))
+            val unauthorized = failureSuspend { repository.resolve("original-001") }
+            assertEquals(MusicFailure.UNAUTHORIZED, unauthorized.failure)
+            assertEquals("UNAUTHORIZED", unauthorized.message)
+            assertEquals(2, server.requestCount)
+        }
+    }
+
+    @Test fun redirectsAndOversizedResponsesAreRejectedWithoutFollowing() = runBlocking {
+        server { server, repository ->
+            server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "https://untrusted.example.org/private"))
+            assertEquals(MusicFailure.INTERNAL_ERROR, failureSuspend { repository.recommendations() }.failure)
+            server.enqueue(MockResponse().setBody("x".repeat(256 * 1024 + 1)))
+            assertEquals(MusicFailure.INVALID_RESPONSE, failureSuspend { repository.recommendations() }.failure)
+            assertEquals(2, server.requestCount)
+        }
+    }
+
+    @Test fun cancellationCancelsTheInFlightRequest() = runBlocking {
+        server { server, repository ->
+            server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+            val pending = launch { repository.recommendations() }
+            assertNotNull(withContext(Dispatchers.IO) { server.takeRequest(1, TimeUnit.SECONDS) })
+            pending.cancelAndJoin()
+            assertTrue(pending.isCancelled)
+            assertEquals(1, server.requestCount)
+        }
+    }
+
+    @Test fun fakeCatalogExhaustsAndNeverInventsAudio() = runBlocking {
+        val tracks = listOf(MusicTrack("a", "A", listOf("qix")), MusicTrack("b", "B", listOf("qix")))
+        val repository = FakeMusicRepository(tracks)
+        val first = repository.recommendations(limit = 1)
+        assertEquals("a", first.items.single().id)
+        val second = repository.recommendations(limit = 1, cursor = first.nextCursor)
+        assertEquals("b", second.items.single().id)
+        assertNull(second.nextCursor)
+        assertEquals(MusicFailure.SOURCE_UNAVAILABLE, failureSuspend { repository.resolve("a") }.failure)
+    }
+
+    private fun failure(block: () -> Any?): MusicException {
+        try { block(); error("Expected MusicException") } catch (error: MusicException) { return error }
+    }
+    private suspend fun failureSuspend(block: suspend () -> Any?): MusicException {
+        try { block(); error("Expected MusicException") } catch (error: MusicException) { return error }
+    }
+    private suspend fun server(block: suspend (MockWebServer, MusicRepository) -> Unit) {
+        val certificate = HeldCertificate.Builder().addSubjectAlternativeName("localhost").build()
+        val serverTls = HandshakeCertificates.Builder().heldCertificate(certificate).build()
+        val clientTls = HandshakeCertificates.Builder().addTrustedCertificate(certificate.certificate).build()
+        MockWebServer().use { server ->
+            server.useHttps(serverTls.sslSocketFactory(), false)
+            server.start()
+            val http = OkHttpClient.Builder().proxy(Proxy.NO_PROXY)
+                .sslSocketFactory(clientTls.sslSocketFactory(), clientTls.trustManager)
+                .dns(object : Dns { override fun lookup(hostname: String) = listOf(InetAddress.getLoopbackAddress()) }).build()
+            block(server, MusicApiClient(server.url("/api/music/"), { token }, http, { Instant.parse("2026-11-16T00:00:00Z") }))
+        }
+    }
+}

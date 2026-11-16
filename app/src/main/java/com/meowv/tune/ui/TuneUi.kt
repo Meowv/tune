@@ -37,6 +37,7 @@ import com.meowv.tune.domain.PlaybackOrder
 import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.RadioDisplayMode
+import com.meowv.tune.music.MusicUiState
 import com.meowv.tune.domain.RadioUiState
 import com.meowv.tune.domain.Station
 import com.meowv.tune.domain.TuneError
@@ -79,7 +80,10 @@ fun TuneApp(
     onSettingsChange: ((TuneSettings) -> TuneSettings) -> Unit,
     onClearDirectoryCache: () -> Unit,
     onShellChanged: (Boolean) -> Unit,
-    onFirstLayout: () -> Unit
+    onFirstLayout: () -> Unit,
+    musicState: MusicUiState = MusicUiState.NotConfigured,
+    onStartMusic: () -> Unit = {},
+    onCancelMusic: () -> Unit = {}
 ) {
     val connected by playbackConnected.collectAsStateWithLifecycle()
     val playbackState by playback.collectAsStateWithLifecycle()
@@ -196,6 +200,8 @@ fun TuneApp(
                             updateSubtitle, onPlayback, onSelectTarget, onDisplayModeChange,
                             onSettingsChange, onRefreshRadio, onRefreshFromSettings, onLoadMore,
                             onClearDirectoryCache, { showUpdate = true }, { showScopePicker = true },
+                            musicState = musicState, onStartMusic = onStartMusic, onCancelMusic = onCancelMusic,
+                            onOpenMusicSettings = { page = TunePage.Settings },
                             radioAnimationsEnabled = !fullscreenOccupied && !showUpdate && !showScopePicker
                         )
                     }
@@ -206,6 +212,8 @@ fun TuneApp(
                         updateSubtitle, onPlayback, onSelectTarget, onDisplayModeChange,
                         onSettingsChange, onRefreshRadio, onRefreshFromSettings, onLoadMore,
                         onClearDirectoryCache, { showUpdate = true }, { showScopePicker = true },
+                        musicState = musicState, onStartMusic = onStartMusic, onCancelMusic = onCancelMusic,
+                        onOpenMusicSettings = { page = TunePage.Settings },
                         radioAnimationsEnabled = !fullscreenOccupied && !showUpdate && !showScopePicker
                     )
                 }
@@ -357,7 +365,11 @@ private fun TunePager(
     onClearDirectoryCache: () -> Unit,
     onOpenUpdate: () -> Unit,
     onScopeClick: () -> Unit,
-    radioAnimationsEnabled: Boolean
+    radioAnimationsEnabled: Boolean,
+    onOpenMusicSettings: () -> Unit,
+    musicState: MusicUiState,
+    onStartMusic: () -> Unit,
+    onCancelMusic: () -> Unit
 ) {
     HorizontalPager(state = state, modifier = modifier, key = { TunePage.entries[it].name }) { index ->
         val target = TunePage.entries[index]
@@ -368,7 +380,8 @@ private fun TunePager(
                 onDisplayModeChange, onSettingsChange, onRefreshRadio,
                 onRefreshFromSettings, onLoadMore, onClearDirectoryCache,
                 onOpenUpdate, onScopeClick,
-                radioAnimationsEnabled && index == state.settledPage && !state.isScrollInProgress
+                radioAnimationsEnabled && index == state.settledPage && !state.isScrollInProgress,
+                onOpenMusicSettings, musicState, onStartMusic, onCancelMusic
             )
         }
     }
@@ -395,7 +408,11 @@ private fun pageContent(
     onClearDirectoryCache: () -> Unit,
     onOpenUpdate: () -> Unit,
     onScopeClick: () -> Unit,
-    radioAnimationsEnabled: Boolean
+    radioAnimationsEnabled: Boolean,
+    onOpenMusicSettings: () -> Unit,
+    musicState: MusicUiState,
+    onStartMusic: () -> Unit,
+    onCancelMusic: () -> Unit
 ) {
     pageStates.SaveableStateProvider(page) {
         when (page) {
@@ -413,7 +430,7 @@ private fun pageContent(
                 onScopeClick = onScopeClick,
                 animationsEnabled = radioAnimationsEnabled
             )
-            TunePage.Music -> MusicScreen(isCar)
+            TunePage.Music -> MusicScreen(isCar, musicState, onStartMusic, onCancelMusic, onOpenMusicSettings)
             TunePage.Settings -> SettingsScreen(
                 isCar = isCar,
                 settings = settings,
