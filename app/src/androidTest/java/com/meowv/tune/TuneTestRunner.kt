@@ -88,8 +88,11 @@ class TuneTestApplication : TuneApplication() {
 
     override val mediaHttp by lazy {
         if (liveRadio) return@lazy super.mediaHttp
-        OkHttpClient.Builder().addInterceptor { chain ->
+        val https = com.meowv.tune.music.MusicHttpsTestTransport
+        val builder = if (https.enabled()) https.client().newBuilder() else OkHttpClient.Builder()
+        builder.addInterceptor { chain ->
             val request = chain.request()
+            if (https.enabled() && request.url.host == https.MEDIA_HOST) return@addInterceptor chain.proceed(request)
             val file = request.url.pathSegments.last()
             val response = Response.Builder().request(request).protocol(Protocol.HTTP_1_1)
             if (file == "missing") {
