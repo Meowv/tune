@@ -15,15 +15,18 @@ import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import com.google.common.collect.ImmutableList
 import com.meowv.tune.MainActivity
 import com.meowv.tune.R
 import com.meowv.tune.TuneApplication
+import com.meowv.tune.domain.PlaybackSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 @OptIn(UnstableApi::class)
@@ -43,6 +46,7 @@ class RadioPlaybackService : MediaSessionService() {
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSources))
             .setAudioAttributes(audio, false)
             .build()
+        var coordinator: PlaybackCoordinator? = null
         val engine = RadioPlayback(
             this,
             player,
@@ -52,24 +56,49 @@ class RadioPlaybackService : MediaSessionService() {
             app.radioRepository,
             app.playbackRetryPolicy,
             app::resolveStream,
-            app.playerController::publish
+            { state -> coordinator?.publishRadio(state) ?: app.playerController.publish(state) }
         )
+        val music = MusicPlaybackEngine(this, player, { app.musicRepository }, app.networkState,
+            { state -> coordinator?.publishMusic(state) })
+        coordinator = PlaybackCoordinator(engine, music, app.playerController::publish)
+        app.playerController.coordinator = coordinator
         app.playerController.engine = engine
         val activity = PendingIntent.getActivity(this, 0,
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val mediaSession = MediaSession.Builder(this, RadioSessionPlayer(player, engine))
+        val mediaSession = MediaSession.Builder(this, RadioSessionPlayer(player, coordinator))
             .setSessionActivity(activity)
             .setCallback(SessionCallback())
             .build()
         session = mediaSession
         setMediaNotificationProvider(
-            DefaultMediaNotificationProvider(
+            object : DefaultMediaNotificationProvider(
                 this,
                 { DefaultMediaNotificationProvider.DEFAULT_NOTIFICATION_ID },
                 CHANNEL_ID,
                 R.string.notification_channel_playback
-            ).apply { setSmallIcon(R.drawable.ic_stat_tune) }
+            ) {
+                override fun getMediaButtons(
+                    session: MediaSession,
+                    playerCommands: Player.Commands,
+                    mediaButtonPreferences: ImmutableList<CommandButton>,
+                    showPauseButton: Boolean
+                ): ImmutableList<CommandButton> {
+                    val buttons = super.getMediaButtons(session, playerCommands, mediaButtonPreferences, showPauseButton)
+                    if (!applicationSourceIsMusic) return buttons
+                    // Media3 的标准前后曲按钮不采用偏好中的 displayName，通知需在此同步文案。
+                    return ImmutableList.copyOf(buttons.map { button ->
+                        val label = when (button.playerCommand) {
+                            Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM, Player.COMMAND_SEEK_TO_PREVIOUS -> R.string.music_previous
+                            Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM, Player.COMMAND_SEEK_TO_NEXT -> R.string.music_next
+                            else -> null
+                        }
+                        if (label == null) button else CommandButton.Builder(button.icon)
+                            .setPlayerCommand(button.playerCommand).setDisplayName(getString(label))
+                            .setEnabled(button.isEnabled).setExtras(button.extras).setSlots(*button.slots.toArray()).build()
+                    })
+                }
+            }.apply { setSmallIcon(R.drawable.ic_stat_tune) }
         )
         // 会话只在事件里转发底层 ExoPlayer 的命令集，这里在命令集变化后回填队列能力。
         mediaSession.player.addListener(object : Player.Listener {
@@ -79,6 +108,10 @@ class RadioPlaybackService : MediaSessionService() {
                 publishCapabilities(mediaSession)
             }
         })
+        scope.launch {
+            app.playerController.state.map { listOf(it.source, it.canPrevious, it.canNext, it.canSeek) }
+                .distinctUntilChanged().collect { publishCapabilities(mediaSession) }
+        }
         scope.launch {
             combine(app.radioQueue.canPrevious, app.radioQueue.canNext) { previous, next -> previous to next }
                 .distinctUntilChanged()
@@ -113,7 +146,8 @@ class RadioPlaybackService : MediaSessionService() {
         (application as TuneApplication).apply {
             sleepTimer.cancel()
             playerController.apply {
-                engine?.close()
+                coordinator?.close()
+                coordinator = null
                 engine = null
             }
         }
@@ -130,7 +164,7 @@ class RadioPlaybackService : MediaSessionService() {
     private fun mediaButtons(): List<CommandButton> = listOf(
         CommandButton.Builder(CommandButton.ICON_PREVIOUS)
             .setPlayerCommand(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
-            .setDisplayName(getString(R.string.player_previous))
+            .setDisplayName(getString(if (applicationSourceIsMusic) R.string.music_previous else R.string.player_previous))
             .setSlots(CommandButton.SLOT_BACK)
             .setEnabled(sessionPlayer.canPrevious)
             .build(),
@@ -141,11 +175,14 @@ class RadioPlaybackService : MediaSessionService() {
             .build(),
         CommandButton.Builder(CommandButton.ICON_NEXT)
             .setPlayerCommand(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
-            .setDisplayName(getString(R.string.player_next))
+            .setDisplayName(getString(if (applicationSourceIsMusic) R.string.music_next else R.string.player_next))
             .setSlots(CommandButton.SLOT_FORWARD)
             .setEnabled(sessionPlayer.canNext)
             .build()
     )
+
+    private val applicationSourceIsMusic: Boolean
+        get() = (application as TuneApplication).playerController.coordinator?.activeSource == PlaybackSource.MUSIC
 
     private val sessionPlayer: RadioSessionPlayer
         get() = session?.player as RadioSessionPlayer

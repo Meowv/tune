@@ -1,0 +1,259 @@
+package com.meowv.tune.music
+
+import android.app.Notification
+import android.app.NotificationManager
+import android.content.ComponentName
+import androidx.lifecycle.Lifecycle
+import androidx.media3.common.Player
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
+import androidx.test.core.app.ActivityScenario
+import androidx.test.platform.app.InstrumentationRegistry
+import com.meowv.tune.MainActivity
+import com.meowv.tune.TuneTestApplication
+import com.meowv.tune.domain.*
+import com.meowv.tune.domain.music.*
+import com.meowv.tune.playback.RadioPlaybackService
+import com.meowv.tune.playback.SleepTimerController
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
+import org.junit.Assert.*
+import org.junit.Test
+
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+class MusicPlaybackIntegrationTest {
+    private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
+    private val app get() = instrumentation.targetContext.applicationContext as TuneTestApplication
+    private val connection get() = app.playerController
+    private val tracks = (1..3).map { MusicTrack("original-$it", "Original song $it", listOf("qix"), durationMs = 12000) }
+    private var catalog = tracks
+    private val resolves = ConcurrentHashMap<String, AtomicInteger>()
+    private var resolveOverride: (suspend (String) -> Unit)? = null
+    private var media: MediaController? = null
+
+    @Test fun musicSeeksContinuesAtEofAndPreviousUsesConfirmedHistory() = runBlocking {
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            val controller = connect()
+            val token = main { controller.connectedToken }
+            val manager = app.getSystemService(NotificationManager::class.java)
+            val notification = withTimeout(4000) {
+                var result: Notification? = null
+                while (result == null) {
+                    result = manager.activeNotifications.firstOrNull {
+                        it.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() == tracks[0].title
+                    }?.notification
+                    if (result == null) delay(50)
+                }
+                result
+            }
+            assertEquals(listOf("上一曲", "暂停", "下一曲"), notification.actions.map { it.title.toString() })
+            assertTrue(main { controller.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM) })
+            main { controller.pause() }
+            awaitPhase(PlaybackPhase.PAUSED)
+            main { controller.seekTo(4000) }
+            withTimeout(3000) { connection.state.first { (it.positionMs ?: 0) >= 3500 } }
+            main { controller.play() }
+            awaitMusic(1)
+            // 让Media3实际读到EOF，而不是直接调用业务Next模拟歌曲结束。
+            main { controller.seekTo(11000) }
+            awaitMusic(2)
+            assertEquals(token, main { controller.connectedToken })
+            assertEquals(1, resolves[tracks[1].id]?.get())
+            assertTrue(connection.state.value.canPrevious)
+            main { controller.seekToPreviousMediaItem() }
+            awaitMusic(1)
+        }
+    }
+
+    @Test fun radioAndMusicShareOneSessionWithSourceSpecificSeek() = runBlocking {
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            val controller = connect()
+            val token = main { controller.connectedToken }
+            connection.dispatch(PlayerCommand.Play(Station(UUID(0, 1), "Test station 1", app.country)))
+            withTimeout(6000) { connection.state.first { it.source == PlaybackSource.RADIO && it.phase == PlaybackPhase.PLAYING } }
+            assertNull(connection.state.value.music)
+            assertFalse(main { controller.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM) })
+            connection.dispatch(PlayerCommand.PlayMusic(tracks[1]))
+            awaitMusic(2)
+            assertNull(connection.state.value.station)
+            assertEquals(token, main { controller.connectedToken })
+        }
+    }
+
+    @Test fun rapidNextRejectsLateUncancellableResolveResults() = runBlocking {
+        val gates = listOf(CompletableDeferred<Unit>(), CompletableDeferred<Unit>())
+        val started = listOf(CompletableDeferred<Unit>(), CompletableDeferred<Unit>())
+        resolveOverride = { id ->
+            val index = tracks.indexOfFirst { it.id == id }
+            if (index < 2) { started[index].complete(Unit); withContext(NonCancellable) { gates[index].await() } }
+        }
+        try {
+            withMusic {
+                connection.dispatch(PlayerCommand.PlayMusic())
+                withTimeout(4000) { started[0].await() }
+                connection.dispatch(PlayerCommand.Next)
+                withTimeout(4000) { started[1].await() }
+                connection.dispatch(PlayerCommand.Next)
+                awaitMusic(3)
+                gates.forEach { it.complete(Unit) }
+                delay(400)
+                assertEquals(tracks[2].id, connection.state.value.music?.id)
+                assertFalse(connection.state.value.canPrevious)
+            }
+        } finally { gates.forEach { it.complete(Unit) } }
+    }
+
+    @Test fun switchingToRadioWhileResolvingCannotBeOverwritten() = runBlocking {
+        val gate = CompletableDeferred<Unit>()
+        val started = CompletableDeferred<Unit>()
+        resolveOverride = { started.complete(Unit); withContext(NonCancellable) { gate.await() } }
+        try {
+            withMusic {
+                connection.dispatch(PlayerCommand.PlayMusic())
+                withTimeout(4000) { started.await() }
+                connection.dispatch(PlayerCommand.Play(Station(UUID(0, 1), "Test station 1", app.country)))
+                withTimeout(6000) { connection.state.first { it.source == PlaybackSource.RADIO && it.phase == PlaybackPhase.PLAYING } }
+                gate.complete(Unit); delay(400)
+                assertEquals(PlaybackSource.RADIO, connection.state.value.source)
+                assertNull(connection.state.value.music)
+            }
+        } finally { gate.complete(Unit) }
+    }
+
+    @Test fun userPauseDuringNetworkLossPreventsRecoveryAndSleepStopsWithoutNext() = runBlocking {
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            val controller = connect()
+            app.mockNetwork.value = NetworkState()
+            withTimeout(4000) { connection.state.first { it.error == TuneError.NETWORK_OFFLINE } }
+            main { controller.pause() }
+            app.mockNetwork.value = NetworkState(NetworkType.WIFI)
+            delay(400)
+            assertEquals(PlaybackPhase.PAUSED, connection.state.value.phase)
+            main { controller.play() }
+            awaitMusic(1)
+            val timer = SleepTimerController(onExpired = { connection.stopActive() }, tickMillis = 5, minutesToMillis = { 100 })
+            try {
+                timer.start(1)
+                awaitPhase(PlaybackPhase.IDLE)
+                delay(300)
+                assertEquals(PlaybackPhase.IDLE, connection.state.value.phase)
+                assertEquals(null, resolves[tracks[1].id])
+                connection.dispatch(PlayerCommand.Play(Station(UUID(0, 1), "Test station 1", app.country)))
+                withTimeout(6000) { connection.state.first { it.source == PlaybackSource.RADIO && it.phase == PlaybackPhase.PLAYING } }
+                timer.start(1)
+                awaitPhase(PlaybackPhase.IDLE)
+                assertEquals(PlaybackSource.RADIO, connection.state.value.source)
+            } finally { timer.close() }
+        }
+    }
+
+    @Test fun failedPreviousKeepsCurrentAudioAndHistory() = runBlocking {
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            connection.dispatch(PlayerCommand.Next)
+            awaitMusic(2)
+            resolveOverride = { id -> if (id == tracks[0].id) throw MusicException(MusicFailure.FORBIDDEN) }
+            connection.dispatch(PlayerCommand.Previous)
+            withTimeout(4000) { connection.state.first { it.operationFailure != null } }
+            assertEquals(tracks[1].id, connection.state.value.music?.id)
+            assertEquals(PlaybackPhase.PLAYING, connection.state.value.phase)
+            assertTrue(connection.state.value.canPrevious)
+            connection.dispatch(PlayerCommand.TogglePause)
+            awaitPhase(PlaybackPhase.PAUSED)
+            connection.dispatch(PlayerCommand.Previous)
+            withTimeout(4000) { connection.state.first { it.operationFailure != null } }
+            assertEquals(PlaybackPhase.PAUSED, connection.state.value.phase)
+            connection.dispatch(PlayerCommand.TogglePause)
+            awaitMusic(2)
+        }
+    }
+
+    @Test fun musicKeepsPlayingAcrossActivityRecreation() = runBlocking {
+        withMusic { scenario ->
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            val controller = connect()
+            val token = main { controller.connectedToken }
+            scenario.recreate()
+            withTimeout(4000) { connection.connected.first { it } }
+            assertEquals(token, main { controller.connectedToken })
+            assertEquals(1, resolves[tracks[0].id]?.get())
+            assertEquals(PlaybackSource.MUSIC, connection.state.value.source)
+        }
+    }
+
+    @Test fun consecutiveFailuresStopAtFiveAndRateLimitsNeverSkipAroundTheLimit() = runBlocking {
+        catalog = (1..20).map { MusicTrack("failed-$it", "Failed $it", listOf("qix")) }
+        resolveOverride = { throw MusicException(MusicFailure.SOURCE_UNAVAILABLE) }
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitPhase(PlaybackPhase.ERROR)
+            assertEquals(5, resolves.values.sumOf { it.get() })
+            delay(300)
+            assertEquals(5, resolves.values.sumOf { it.get() })
+        }
+        resolves.clear()
+        resolveOverride = { throw MusicException(MusicFailure.RATE_LIMITED, 30) }
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitPhase(PlaybackPhase.ERROR)
+            assertEquals(MusicFailure.RATE_LIMITED, connection.state.value.musicFailure)
+            assertEquals(1, resolves.values.sumOf { it.get() })
+        }
+    }
+
+    private suspend fun withMusic(block: suspend (ActivityScenario<MainActivity>) -> Unit) {
+        val fake = FakeMusicRepository(catalog)
+        app.testMusicRepository = object : MusicRepository {
+            override suspend fun search(query: String, limit: Int, cursor: String?) = fake.search(query, limit, cursor)
+            override suspend fun recommendations(limit: Int, cursor: String?) = fake.recommendations(limit, cursor)
+            override suspend fun resolve(trackId: String, preferredProviderId: String?): PlayableAudio {
+                resolves.computeIfAbsent(trackId) { AtomicInteger() }.incrementAndGet()
+                resolveOverride?.invoke(trackId)
+                val originals = InstrumentationRegistry.getArguments().getString("musicOriginals") == "true"
+                val file = if (trackId == tracks[1].id) "original-002.mp3" else "original-001.mp3"
+                return PlayableAudio(trackId, "test", trackId, 1.0,
+                    if (originals) "https://original.test/$file" else "https://test.example/radio.mp3", "audio/mpeg", 12000, seekable = true)
+            }
+        }
+        app.mockNetwork.value = NetworkState(NetworkType.WIFI)
+        app.userSettings.update { it.copy(autoPlay = false, scope = RadioScope(ScopeMode.COUNTRY, app.country)) }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            withTimeout(5000) { connection.connected.first { it } }
+            withTimeout(5000) { app.radioQueue.activeScope.first { it != null } }
+            try { block(scenario) }
+            finally {
+                connection.dispatch(PlayerCommand.Stop)
+                // 后续电台基线用例从电台空闲态开始，不继承本用例的音乐归属。
+                connection.dispatch(PlayerCommand.Play(Station(UUID(0, 1), "Test station 1", app.country)))
+                connection.dispatch(PlayerCommand.Stop)
+                main { media?.release() }; media = null
+                app.testMusicRepository = null
+            }
+        }
+    }
+
+    private suspend fun awaitMusic(number: Int) = withTimeout(6000) {
+        connection.state.first { it.source == PlaybackSource.MUSIC && it.phase == PlaybackPhase.PLAYING && it.music?.id == tracks[number - 1].id }
+    }
+    private suspend fun awaitPhase(phase: PlaybackPhase) = withTimeout(4000) { connection.state.first { it.phase == phase } }
+    private fun connect(): MediaController {
+        val future = main { MediaController.Builder(app, SessionToken(app, ComponentName(app, RadioPlaybackService::class.java))).buildAsync() }
+        return future.get().also { media = it }
+    }
+    private fun <T> main(block: () -> T): T {
+        var result: Result<T>? = null
+        instrumentation.runOnMainSync { result = runCatching(block) }
+        return result!!.getOrThrow()
+    }
+}

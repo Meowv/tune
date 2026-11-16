@@ -86,6 +86,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.meowv.tune.R
+import com.meowv.tune.domain.PlaybackSource
+import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.Station
@@ -114,7 +116,8 @@ internal fun NowPlayingScreen(
     onToggleShuffle: () -> Unit,
     onSetSleepTimer: (Int?) -> Unit,
     modifier: Modifier = Modifier,
-    onSelectStation: () -> Unit = {}
+    onSelectStation: () -> Unit = {},
+    onSeek: (Long) -> Unit = {}
 ) {
     val motionEnabled = rememberMotionEnabled()
     val animationMillis = if (motionEnabled) 220 else 0
@@ -156,7 +159,17 @@ internal fun NowPlayingScreen(
                     animationMillis = animationMillis,
                     onCollapse = onCollapse
                 )
-                if (station == null) {
+                if (state.source == PlaybackSource.MUSIC) {
+                    MusicNowPlayingContent(isCar, state, connected, { command ->
+                        when (command) {
+                            PlayerCommand.TogglePause -> onToggle()
+                            PlayerCommand.Next -> onNext()
+                            PlayerCommand.Previous -> onPrevious()
+                            is PlayerCommand.Seek -> onSeek(command.positionMs)
+                            else -> Unit
+                        }
+                    }, Modifier.weight(1f), onSleepTimer = { sleepPanelOpen = true })
+                } else if (station == null) {
                     Column(
                         Modifier.weight(1f).fillMaxWidth().testTag("now_playing_empty"),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -214,7 +227,7 @@ internal fun NowPlayingScreen(
         }
     }
 
-    if (sleepPanelOpen && station != null) {
+    if (sleepPanelOpen && (station != null || state.music != null)) {
         SleepTimerPanel(
             isCar = isCar,
             timer = sleepTimer,
@@ -233,7 +246,7 @@ internal fun NowPlayingScreen(
             }
         )
     }
-    if (customSleepOpen && station != null) {
+    if (customSleepOpen && (station != null || state.music != null)) {
         CustomSleepTimerDialog(
             onDismiss = { customSleepOpen = false },
             onConfirm = {

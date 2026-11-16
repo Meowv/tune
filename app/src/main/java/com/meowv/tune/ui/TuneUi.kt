@@ -38,6 +38,7 @@ import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.RadioDisplayMode
 import com.meowv.tune.music.MusicUiState
+import com.meowv.tune.domain.PlaybackSource
 import com.meowv.tune.domain.RadioUiState
 import com.meowv.tune.domain.Station
 import com.meowv.tune.domain.TuneError
@@ -138,6 +139,7 @@ fun TuneApp(
         // 全屏始终操作它展示的台；目录浏览选择由卡片点击显式起播。
         val station = target
         when {
+            playbackState.source == PlaybackSource.MUSIC -> onPlayback(PlayerCommand.TogglePause)
             station == null -> Unit
             // 失败态一律按目标台重新起播：引擎侧可能从未建立播放意图（例如离线起播），
             // 复用 TogglePause 会退化成空操作。
@@ -260,7 +262,8 @@ fun TuneApp(
                         }
                     },
                     onSetSleepTimer = onSetSleepTimer,
-                    onSelectStation = { nowPlayingOpen = false; page = TunePage.Radio },
+                    onSeek = { onPlayback(PlayerCommand.Seek(it)) },
+                    onSelectStation = { nowPlayingOpen = false; page = if (playbackState.source == PlaybackSource.MUSIC) TunePage.Music else TunePage.Radio },
                     modifier = Modifier.fillMaxSize().testTag("now_playing_screen")
                 )
             }
@@ -430,7 +433,7 @@ private fun pageContent(
                 onScopeClick = onScopeClick,
                 animationsEnabled = radioAnimationsEnabled
             )
-            TunePage.Music -> MusicScreen(isCar, musicState, onStartMusic, onCancelMusic, onOpenMusicSettings)
+            TunePage.Music -> MusicScreen(isCar, musicState, onStartMusic, onCancelMusic, onOpenMusicSettings, connected, onPlayback)
             TunePage.Settings -> SettingsScreen(
                 isCar = isCar,
                 settings = settings,
@@ -451,6 +454,7 @@ internal fun resolvePlayerTarget(
     remembered: Station?,
     rememberedId: java.util.UUID?
 ): Station? {
+    if (playback.source == PlaybackSource.MUSIC) return null
     playback.station?.let { return it }
     radio.stations.firstOrNull { it.uuid == radio.selectedStationUuid }?.let { return it }
     radio.stations.firstOrNull { it.uuid == rememberedId }?.let { return it }

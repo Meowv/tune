@@ -102,7 +102,7 @@ open class TuneApplication : Application(), SingletonImageLoader.Factory {
     internal val playerController by lazy { RadioMediaConnection(this) }
     internal val sleepTimer by lazy {
         SleepTimerController(onExpired = {
-            playerController.engine?.stop()
+            playerController.stopActive()
         })
     }
 

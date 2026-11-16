@@ -61,6 +61,8 @@ class TuneTestRunner : AndroidJUnitRunner() {
 }
 
 class TuneTestApplication : TuneApplication() {
+    internal var testMusicRepository: com.meowv.tune.domain.music.MusicRepository? = null
+    override val musicRepository get() = testMusicRepository
     // liveRadio=true 时使用真实网络与真实解析，用于 T26 公网联调。
     // 首次访问时读取参数：Application 构造阶段 Instrumentation 尚未注册参数。
     internal val liveRadio: Boolean by lazy {
@@ -94,7 +96,9 @@ class TuneTestApplication : TuneApplication() {
                 response.code(404).message("Not found").body(byteArrayOf().toResponseBody()).build()
             } else {
                 val assets = InstrumentationRegistry.getInstrumentation().context.assets
-                val body = assets.open("t15/$file").use { it.readBytes() }
+                val body = if (request.url.host == "original.test") {
+                    java.io.File(getExternalFilesDir(null), "music-test-media/$file").readBytes()
+                } else assets.open("t15/$file").use { it.readBytes() }
                 response.code(200).message("OK").body(body.toResponseBody()).build()
             }
         }.build()

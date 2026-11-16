@@ -23,6 +23,8 @@ internal class RadioSessionPlayer(
     interface SessionCommands {
         val canPrevious: Boolean
         val canNext: Boolean
+        val canSeek: Boolean get() = false
+        fun onSessionSeek(positionMs: Long) {}
         fun onSessionPlay()
         fun onSessionPause()
         fun onSessionNext()
@@ -51,15 +53,15 @@ internal class RadioSessionPlayer(
         .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
         .add(Player.COMMAND_SEEK_TO_NEXT)
         .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
-        .removeAll(
-            Player.COMMAND_SET_MEDIA_ITEM,
-            Player.COMMAND_CHANGE_MEDIA_ITEMS,
-            Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM,
-            Player.COMMAND_SEEK_BACK,
-            Player.COMMAND_SEEK_FORWARD,
-            Player.COMMAND_SET_SPEED_AND_PITCH
-        )
-        .build()
+        .removeAll(Player.COMMAND_SET_MEDIA_ITEM, Player.COMMAND_CHANGE_MEDIA_ITEMS, Player.COMMAND_SET_SPEED_AND_PITCH)
+        .apply {
+            if (!commands.canSeek) removeAll(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM, Player.COMMAND_SEEK_BACK, Player.COMMAND_SEEK_FORWARD)
+        }.build()
+
+    override fun seekTo(positionMs: Long) = commands.onSessionSeek(positionMs)
+    override fun seekTo(mediaItemIndex: Int, positionMs: Long) { if (mediaItemIndex == 0) commands.onSessionSeek(positionMs) }
+    override fun seekBack() = commands.onSessionSeek(currentPosition - seekBackIncrement)
+    override fun seekForward() = commands.onSessionSeek(currentPosition + seekForwardIncrement)
 
     override fun play() = commands.onSessionPlay()
 

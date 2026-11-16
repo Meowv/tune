@@ -1,5 +1,7 @@
 package com.meowv.tune.domain
 
+import com.meowv.tune.domain.music.MusicTrack
+
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,6 +42,9 @@ interface RadioQueue {
 
 sealed interface PlayerCommand {
     data class Play(val station: Station) : PlayerCommand
+    data class PlayMusic(val track: MusicTrack? = null) : PlayerCommand
+    data class Seek(val positionMs: Long) : PlayerCommand
+    data object CancelMusic : PlayerCommand
     data object TogglePause : PlayerCommand
     data object Next : PlayerCommand
     data object Previous : PlayerCommand

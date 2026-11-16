@@ -32,6 +32,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
 import coil3.compose.AsyncImage
 import com.meowv.tune.R
+import com.meowv.tune.domain.PlaybackSource
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.ui.theme.TuneColors
@@ -39,7 +40,7 @@ import com.meowv.tune.ui.theme.TuneColors
 internal enum class CircularPlayerVisual { Default, Loading, Playing, Paused, Error, Disconnected }
 
 internal fun circularPlayerVisual(state: PlayerUiState, connected: Boolean): CircularPlayerVisual = when {
-    state.station == null || state.phase == PlaybackPhase.IDLE -> CircularPlayerVisual.Default
+    state.station == null && state.music == null && state.source != PlaybackSource.MUSIC || state.phase == PlaybackPhase.IDLE -> CircularPlayerVisual.Default
     !connected -> CircularPlayerVisual.Disconnected
     state.phase in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.BUFFERING, PlaybackPhase.RETRYING) -> CircularPlayerVisual.Loading
     state.phase == PlaybackPhase.PLAYING -> CircularPlayerVisual.Playing
@@ -86,7 +87,7 @@ internal fun CircularPlayerEntry(
     val motion = rememberMotionEnabled()
     val animate = enabled && motion && lifecycle.isAtLeast(Lifecycle.State.RESUMED)
     val rotating = animate && visual == CircularPlayerVisual.Playing
-    val stationKey = if (visual == CircularPlayerVisual.Default) "" else state.station?.uuid.toString()
+    val stationKey = if (visual == CircularPlayerVisual.Default) "" else state.music?.let { "music:${it.id}" } ?: state.station?.uuid.toString()
     val animation = remember(rotation) { Snapshot.withoutReadObservation { Animatable(rotation.angle) } }
     LaunchedEffect(stationKey, rotating) {
         rotation.select(stationKey)
@@ -136,12 +137,12 @@ internal fun CircularPlayerEntry(
                 .graphicsLayer { rotationZ = if (rotation.stationKey == stationKey) rotation.angle else 0f },
             contentAlignment = Alignment.Center
         ) {
-            val url = station?.iconUrl
+            val url = state.music?.coverUrl ?: station?.iconUrl
             var artworkFailed by remember(station?.uuid, url) { mutableStateOf(false) }
             if (url.isNullOrBlank() || artworkFailed) {
                 BrandLogo(Modifier.fillMaxSize().padding(2.dp).testTag("circular_player_logo"))
             } else {
-                key(station.uuid, url) {
+                key(stationKey, url) {
                     val fallback = painterResource(R.drawable.ic_meowvtune_logo)
                     AsyncImage(
                         model = url, contentDescription = null,

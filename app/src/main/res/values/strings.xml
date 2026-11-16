@@ -11,6 +11,8 @@
   <string name="music_not_configured">音乐服务尚未配置</string>
   <string name="music_configure">前往设置</string>
   <string name="music_start">开始听</string>
+  <string name="music_previous">上一曲</string>
+  <string name="music_next">下一曲</string>
   <string name="music_idle">随时开始，听见好心情</string>
   <string name="music_loading">正在寻找下一首音乐…</string>
   <string name="music_cancel">取消</string>

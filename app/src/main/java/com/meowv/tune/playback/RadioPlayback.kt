@@ -61,6 +61,8 @@ internal class RadioPlayback(
     private val resolve: suspend (PlaybackIntent) -> ResolvedRadioStream,
     private val publish: (PlayerUiState) -> Unit
 ) : Player.Listener, RadioSessionPlayer.SessionCommands {
+    private var active = true
+    private var ownership = 0L
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val commandMutex = Mutex()
     private val audioFocus = AudioFocusController(context, ::onAudioFocusEvent)
@@ -95,7 +97,7 @@ internal class RadioPlayback(
         player.addListener(this)
         scope.launch {
             combine(queue.canPrevious, queue.canNext) { _, _ -> Unit }
-                .collect { publish(decorate(state)) }
+                .collect { if (active) publish(decorate(state)) }
         }
         scope.launch {
             network.collect(::reactToNetworkChange)
@@ -104,6 +106,14 @@ internal class RadioPlayback(
         scope.launch {
             settings.settings.map { it.playbackOrder }.distinctUntilChanged().collect(queue::setPlaybackOrder)
         }
+    }
+
+    fun activate() { ownership++; active = true }
+
+    fun deactivate() {
+        if (active) stop()
+        active = false
+        ownership++
     }
 
     fun play(station: Station) = submit {
@@ -142,6 +152,7 @@ internal class RadioPlayback(
     override fun onSessionStop() = stop()
 
     fun cancelPending() {
+        if (!active) return
         finishAttempt()
         supersedeRequest()
         interruptions.reset()
@@ -166,6 +177,8 @@ internal class RadioPlayback(
         } catch (_: TuneFailure) {
             null
         } ?: return@submit
+        currentCoroutineContext().ensureActive()
+        if (!active) return@submit
         val country = activeScope.country
         if (country != null && station.countryCode != country) return@submit
         resetRetryBudget()
@@ -173,6 +186,7 @@ internal class RadioPlayback(
     }
 
     fun stop() {
+        if (!active) return
         finishAttempt()
         supersedeRequest()
         audioFocus.abandon()
@@ -200,8 +214,10 @@ internal class RadioPlayback(
     }
 
     override fun onEvents(player: Player, events: Player.Events) {
+        if (!active) return
         syncStallWatch()
         val currentSelection = selection ?: return
+        if (player.currentMediaItem?.mediaId != currentSelection.station.uuid.toString()) return
         if (state.phase in SettlingPhases) return
         when {
             player.isPlaying -> {
@@ -231,11 +247,14 @@ internal class RadioPlayback(
     }
 
     override fun onPlayerError(error: PlaybackException) {
+        if (!active || player.playerError !== error) return
         if (selection == null || state.phase in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING)) return
         scheduleRecovery(classify(error))
     }
 
     private suspend fun run(command: Command) {
+        currentCoroutineContext().ensureActive()
+        if (!active) return
         if (!networkAllows(command.targetStation)) return
         if (command != Command.Toggle && attemptTimeout == null) startAttempt()
         when (command) {
@@ -384,6 +403,7 @@ internal class RadioPlayback(
     }
 
     private suspend fun reactToNetworkChange(current: NetworkState) {
+        if (!active) return
         if (selection == null) return
         if (NetworkPolicy.evaluate(current) == NetworkDecision.ALLOWED) {
             val shouldResume = interruptions.consumeNetworkResume()
@@ -395,11 +415,12 @@ internal class RadioPlayback(
     }
 
     private fun submit(block: suspend () -> Unit) {
+        if (!active) return
         val id = ++generation
         request?.cancel()
         request = scope.launch {
             commandMutex.withLock {
-                if (id != generation) return@withLock
+                if (!active || id != generation) return@withLock
                 finishAttempt()
                 update(state.copy(operationFailure = null))
                 try {
@@ -419,6 +440,8 @@ internal class RadioPlayback(
         phase: PlaybackPhase,
         existingIntent: PlaybackIntent? = null
     ) {
+        currentCoroutineContext().ensureActive()
+        if (!active) return
         val id = generation
         if (attemptTimeout == null) startAttempt()
         val resolutionStarted = android.os.SystemClock.elapsedRealtime()
@@ -468,6 +491,7 @@ internal class RadioPlayback(
     }
 
     private fun scheduleRecovery(failure: TuneFailure) {
+        if (!active) return
         val currentSelection = selection ?: return
         val currentIntent = intent ?: PlaybackIntent(currentSelection.station)
         if (recovering) return
@@ -589,7 +613,10 @@ internal class RadioPlayback(
     }
 
     internal fun onAudioFocusEvent(event: AudioFocusEvent) {
+        val owner = ownership
+        if (!active) return
         scope.launch {
+            if (!active || owner != ownership) return@launch
             when (event) {
                 AudioFocusEvent.GAIN -> {
                     player.volume = 1f
@@ -608,7 +635,10 @@ internal class RadioPlayback(
     }
 
     internal fun onExternalOutputRemoved() {
+        val owner = ownership
+        if (!active) return
         scope.launch {
+            if (!active || owner != ownership) return@launch
             if (player.isPlaying || player.playWhenReady || state.phase in PendingPhases || interruptions.hasNetworkResume) {
                 pausePlayback(PauseReason.OUTPUT)
             }
@@ -670,7 +700,7 @@ internal class RadioPlayback(
         // ExoPlayer 的 onEvents 可能在状态未变时重复回调；相同快照不再写 StateFlow。
         if (state == value) return
         state = value
-        publish(decorate(value))
+        if (active) publish(decorate(value))
     }
 
     private fun decorate(value: PlayerUiState) = value.copy(

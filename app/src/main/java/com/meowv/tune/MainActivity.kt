@@ -57,7 +57,12 @@ class MainActivity : ComponentActivity() {
             }
         }
     private val musicModel by viewModels<MusicViewModel> {
-        viewModelFactory { initializer { MusicViewModel(tuneApp.musicRepository) } }
+        viewModelFactory { initializer {
+            val app = tuneApp
+            MusicViewModel(app.musicRepository,
+                requestPlayback = { app.playerController.dispatch(PlayerCommand.PlayMusic()) },
+                playback = app.playerController.state)
+        } }
     }
     private val settingsModel by viewModels<SettingsViewModel> {
         viewModelFactory { initializer { SettingsViewModel(tuneApp.userSettings) } }
@@ -143,8 +148,8 @@ class MainActivity : ComponentActivity() {
                 TuneApp(
                     settings = settings ?: TuneSettings(),
                     musicState = musicState,
-                    onStartMusic = musicModel::startListening,
-                    onCancelMusic = musicModel::cancel,
+                    onStartMusic = { ensureNotificationPermission(); musicModel.startListening() },
+                    onCancelMusic = { musicModel.cancel(); dispatchPlayback(PlayerCommand.CancelMusic) },
                     storageError = storageError,
                     radio = radioModel.radioState,
                     playback = tuneApp.playerController.state,

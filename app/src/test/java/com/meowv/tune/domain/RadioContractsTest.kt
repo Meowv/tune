@@ -86,6 +86,8 @@ class RadioContractsTest {
             try {
                 val queue = RadioQueueManager(repository)
                 val model = RadioViewModel(repository, player, CountryResolver({ null }, { null }), lifetime, queue = queue)
+                // 先消费播放器的初始快照，避免把正常的选择同步误判为旧目录请求回写。
+                model.radioState.first { it.selectedStationUuid == station.uuid }
                 val local = RadioScope(ScopeMode.COUNTRY, station.countryCode)
                 model.refresh(local)
                 started.await()

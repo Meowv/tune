@@ -1,5 +1,9 @@
 package com.meowv.tune.domain
 
+import com.meowv.tune.domain.music.MusicFailure
+
+import com.meowv.tune.domain.music.MusicTrack
+
 import java.util.Locale
 import java.util.UUID
 
@@ -94,8 +98,18 @@ data class PlayerUiState(
     val canPrevious: Boolean = false,
     val canNext: Boolean = false,
     val statusCode: Int? = null,
-    val operationFailure: PlaybackOperationFailure? = null
-)
+    val operationFailure: PlaybackOperationFailure? = null,
+    val music: MusicTrack? = null,
+    val canSeek: Boolean = false,
+    val durationMs: Long? = null,
+    val positionMs: Long? = null,
+    val musicFailure: MusicFailure? = null
+) {
+    init {
+        require(source != PlaybackSource.MUSIC || station == null)
+        require(music == null || source == PlaybackSource.MUSIC)
+    }
+}
 
 data class PlaybackOperationFailure(val id: Long, val error: TuneError, val statusCode: Int? = null)
 

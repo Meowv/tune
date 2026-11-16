@@ -36,6 +36,10 @@ internal class RadioMediaConnection(
     private val playback = MutableStateFlow(PlayerUiState())
     override val state = playback.asStateFlow()
 
+    internal var coordinator: PlaybackCoordinator? = null
+
+    internal fun stopActive() { coordinator?.onSessionStop() ?: engine?.stop() }
+
     internal var engine: RadioPlayback? = null
         set(value) {
             field = value
@@ -99,14 +103,19 @@ internal class RadioMediaConnection(
 
     override suspend fun dispatch(command: PlayerCommand) = withContext(Dispatchers.Main.immediate) {
         controller ?: throw TuneFailure(TuneError.PLAYBACK)
-        when (command) {
-            is PlayerCommand.Play -> requireEngine().play(command.station)
-            PlayerCommand.TogglePause -> requireEngine().toggle()
-            PlayerCommand.Next -> requireEngine().next()
-            PlayerCommand.Previous -> requireEngine().previous()
-            PlayerCommand.CancelPending -> requireEngine().cancelPending()
-            is PlayerCommand.Resume -> requireEngine().resumeLast(command.uuid)
-            PlayerCommand.Stop -> requireEngine().stop()
+        val active = coordinator
+        if (active != null) active.dispatch(command) else {
+            // 连接测试可单独注入电台引擎；正式服务始终装配协调器。
+            when (command) {
+                is PlayerCommand.Play -> requireEngine().play(command.station)
+                PlayerCommand.TogglePause -> requireEngine().toggle()
+                PlayerCommand.Next -> requireEngine().next()
+                PlayerCommand.Previous -> requireEngine().previous()
+                PlayerCommand.CancelPending -> requireEngine().cancelPending()
+                is PlayerCommand.Resume -> requireEngine().resumeLast(command.uuid)
+                PlayerCommand.Stop -> requireEngine().stop()
+                else -> throw TuneFailure(TuneError.PLAYBACK)
+            }
         }
     }
 

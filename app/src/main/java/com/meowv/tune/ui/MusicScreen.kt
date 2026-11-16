@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.meowv.tune.R
+import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.domain.music.MusicFailure
 import com.meowv.tune.music.MusicUiState
 import com.meowv.tune.ui.theme.TuneColors
@@ -33,8 +34,15 @@ internal fun MusicScreen(
     state: MusicUiState,
     onStart: () -> Unit,
     onCancel: () -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    connected: Boolean = false,
+    onCommand: (PlayerCommand) -> Unit = {}
 ) {
+    if (state is MusicUiState.Active) {
+        MusicNowPlayingContent(isCar, state.playback, connected, onCommand,
+            Modifier.fillMaxSize().background(TuneColors.Background).testTag("page_music"))
+        return
+    }
     BoxWithConstraints(Modifier.fillMaxSize().background(TuneColors.Background).testTag("page_music")) {
         val availableHeight = maxHeight
         val artSize = (if (isCar) 200.dp else 223.dp).coerceAtMost(maxWidth - 48.dp)
@@ -54,8 +62,10 @@ internal fun MusicScreen(
                     MusicUiState.Loading -> R.string.music_loading
                     MusicUiState.Empty -> R.string.music_empty
                     is MusicUiState.Ready -> R.string.music_ready
+                    is MusicUiState.Active -> R.string.music_ready
                     is MusicUiState.Error -> when (state.failure) {
-                        MusicFailure.UNAUTHORIZED, MusicFailure.NOT_CONFIGURED -> R.string.music_unauthorized
+                        MusicFailure.NOT_CONFIGURED -> R.string.music_not_configured
+                        MusicFailure.UNAUTHORIZED -> R.string.music_unauthorized
                         MusicFailure.RATE_LIMITED -> R.string.music_rate_limited
                         else -> R.string.music_failed
                     }
