@@ -112,6 +112,24 @@ class MusicRepositoryTest {
         assertEquals(MusicFailure.SOURCE_UNAVAILABLE, failureSuspend { repository.resolve("a") }.failure)
     }
 
+    @Test fun debugHttpUsesOnlyExplicitLocalOrigins() = runBlocking {
+        MockWebServer().use { server ->
+            server.start()
+            val base = server.url("/api/music/")
+            assertThrows(IllegalArgumentException::class.java) { MusicApiClient(base, { token }) }
+            server.enqueue(MockResponse().setBody(fixture.getValue("search").toString()))
+            val local = MusicApiClient(base, { token }, allowLocalHttp = true)
+            assertEquals(1, local.search("qix").items.size)
+            assertEquals("/api/music/search", server.takeRequest().requestUrl!!.encodedPath)
+            assertThrows(IllegalArgumentException::class.java) {
+                MusicApiClient(base.newBuilder().host("public.example.org").build(), { token }, allowLocalHttp = true)
+            }
+        }
+        assertTrue(isDebugMusicHost("192.168.1.2"))
+        assertTrue(isDebugMusicHost("172.31.0.2"))
+        assertFalse(isDebugMusicHost("172.32.0.2"))
+    }
+
     private fun failure(block: () -> Any?): MusicException {
         try { block(); error("Expected MusicException") } catch (error: MusicException) { return error }
     }

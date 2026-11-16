@@ -1,6 +1,8 @@
 package com.meowv.tune.music
 
 import com.meowv.tune.domain.music.*
+import com.meowv.tune.BuildConfig
+import java.net.Proxy
 import com.meowv.tune.playback.MediaUrlPolicy
 import java.io.IOException
 import java.io.InterruptedIOException
@@ -21,14 +23,23 @@ import okio.Buffer
 internal class MusicApiClient(
     private val baseUrl: HttpUrl,
     private val accessToken: suspend () -> String?,
-    client: OkHttpClient = MediaUrlPolicy.client(httpsOnly = true),
-    private val now: () -> Instant = Instant::now
+    client: OkHttpClient? = null,
+    private val now: () -> Instant = Instant::now,
+    allowLocalHttp: Boolean = false
 ) : MusicRepository {
-    private val http = client.newBuilder().followRedirects(false).followSslRedirects(false)
+    private val localHttp = allowLocalHttp && BuildConfig.DEBUG && isDebugMusicHost(baseUrl.host)
+    private val transport = client ?: if (localHttp && !baseUrl.isHttps) OkHttpClient.Builder().proxy(Proxy.NO_PROXY)
+        .connectTimeout(3, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS)
+        .addNetworkInterceptor { chain ->
+            val url = chain.request().url
+            if (url.scheme != baseUrl.scheme || url.host != baseUrl.host || url.port != baseUrl.port) throw IOException("Unexpected music API origin")
+            chain.proceed(chain.request())
+        }.build() else MediaUrlPolicy.client(httpsOnly = true)
+    private val http = transport.newBuilder().followRedirects(false).followSslRedirects(false)
         .retryOnConnectionFailure(false).callTimeout(8, TimeUnit.SECONDS).cache(null).build()
 
     init {
-        require(baseUrl.isHttps && baseUrl.username.isEmpty() && baseUrl.password.isEmpty() && baseUrl.query == null && baseUrl.fragment == null)
+        require((baseUrl.isHttps || localHttp) && baseUrl.username.isEmpty() && baseUrl.password.isEmpty() && baseUrl.query == null && baseUrl.fragment == null)
         require(baseUrl.encodedPath.endsWith('/'))
     }
 
@@ -102,3 +113,6 @@ internal class MusicApiClient(
 
     private companion object { const val MAX_BYTES = 256L * 1024 }
 }
+
+internal fun isDebugMusicHost(host: String): Boolean = host in setOf("localhost", "127.0.0.1", "10.0.2.2", "10.0.3.2") ||
+    host.matches(Regex("10\\.[0-9.]+|192\\.168\\.[0-9.]+|172\\.(1[6-9]|2[0-9]|3[01])\\.[0-9.]+"))

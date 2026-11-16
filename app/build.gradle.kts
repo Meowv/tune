@@ -18,21 +18,26 @@ val musicProperties = Properties().apply {
     val source = rootProject.file("music-service.properties")
     if (source.exists()) source.inputStream().use { load(it) }
 }
-val musicBaseUrl = providers.environmentVariable("MUSIC_API_BASE_URL").orNull
-    ?: musicProperties.getProperty("MUSIC_API_BASE_URL", "https://studio.meowv.com/api/")
-val musicDeviceToken = providers.environmentVariable("MUSIC_DEVICE_TOKEN").orNull
-    ?: musicProperties.getProperty("MUSIC_DEVICE_TOKEN", "")
-require(musicDeviceToken.isBlank() || musicBaseUrl.isNotBlank()) { "请配置音乐服务地址。" }
-val normalizedMusicUrl = if (musicBaseUrl.isBlank()) "" else {
-    val uri = runCatching { URI(musicBaseUrl) }.getOrElse { throw GradleException("音乐服务地址格式无效。") }
-    require(uri.scheme == "https" && uri.host != null && uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null) { "音乐地址必须是无凭据的 HTTPS 地址。" }
-    require(musicDeviceToken.isEmpty() || musicDeviceToken.matches(Regex("mvm_[A-Za-z0-9_-]{43}"))) { "请使用音乐模块签发的专用凭据。" }
-    musicBaseUrl.trimEnd('/') + when {
+fun musicValue(name: String, fallback: String = "") = providers.environmentVariable(name).orNull ?: musicProperties.getProperty(name, fallback)
+fun musicUrl(value: String, local: Boolean): String {
+    val uri = runCatching { URI(value) }.getOrElse { throw GradleException("音乐服务地址格式无效。") }
+    val host = uri.host.orEmpty()
+    val privateHost = host in setOf("localhost", "127.0.0.1", "10.0.2.2", "10.0.3.2") ||
+        host.matches(Regex("10\\.[0-9.]+|192\\.168\\.[0-9.]+|172\\.(1[6-9]|2[0-9]|3[01])\\.[0-9.]+"))
+    require((uri.scheme == "https" || local && uri.scheme == "http" && privateHost) && host.isNotEmpty() && uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null) { "Release必须使用HTTPS；Debug明文仅允许本地/内网地址。" }
+    return value.trimEnd('/') + when {
         uri.path.isNullOrEmpty() || uri.path == "/" -> "/api/music/"
         uri.path.trimEnd('/').endsWith("/api") -> "/music/"
         else -> "/"
     }
 }
+fun musicToken(name: String): String = musicValue(name).also {
+    require(it.isEmpty() || it.matches(Regex("mvm_[A-Za-z0-9_-]{43}"))) { "请使用音乐模块签发的专用凭据。" }
+}
+val debugMusicUrl = musicUrl(musicValue("MUSIC_DEBUG_API_BASE_URL", "http://10.0.2.2:5000/api/"), true)
+val releaseMusicUrl = musicUrl(musicValue("MUSIC_RELEASE_API_BASE_URL", "https://studio.meowv.com/api/"), false)
+val debugMusicToken = musicToken("MUSIC_DEBUG_DEVICE_TOKEN")
+val releaseMusicToken = musicToken("MUSIC_RELEASE_DEVICE_TOKEN")
 fun musicBuildString(value: String): String = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 android {
@@ -48,8 +53,6 @@ android {
         versionName = "1.2.2"
         testInstrumentationRunner = "com.meowv.tune.TuneTestRunner"
 
-        buildConfigField("String", "MUSIC_API_BASE_URL", musicBuildString(normalizedMusicUrl))
-        buildConfigField("String", "MUSIC_DEVICE_TOKEN", musicBuildString(musicDeviceToken))
 
         // 版本清单地址与发布渠道属于客户端配置，换渠道/换域名只需改这两行。
         buildConfigField("String", "UPDATE_MANIFEST_URL", "\"https://studio.meowv.com/data/meowvtune/stable.json\"")
@@ -84,7 +87,13 @@ android {
     }
 
     buildTypes {
+        debug {
+            buildConfigField("String", "MUSIC_API_BASE_URL", musicBuildString(debugMusicUrl))
+            buildConfigField("String", "MUSIC_DEVICE_TOKEN", musicBuildString(debugMusicToken))
+        }
         release {
+            buildConfigField("String", "MUSIC_API_BASE_URL", musicBuildString(releaseMusicUrl))
+            buildConfigField("String", "MUSIC_DEVICE_TOKEN", musicBuildString(releaseMusicToken))
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

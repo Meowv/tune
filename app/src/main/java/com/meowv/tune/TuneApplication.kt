@@ -62,7 +62,7 @@ open class TuneApplication : Application(), SingletonImageLoader.Factory {
         if (BuildConfig.MUSIC_API_BASE_URL.isBlank() || BuildConfig.MUSIC_DEVICE_TOKEN.isBlank()) null
         else com.meowv.tune.music.MusicApiClient(
             BuildConfig.MUSIC_API_BASE_URL.toHttpUrl(),
-            { BuildConfig.MUSIC_DEVICE_TOKEN }
+            { BuildConfig.MUSIC_DEVICE_TOKEN }, allowLocalHttp = BuildConfig.DEBUG
         )
     }
 
