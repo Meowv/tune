@@ -114,7 +114,7 @@ internal class MusicPlaybackEngine(
                     var playable = source.resolve(selection.track.id)
                     if (playable.expiresAt?.isAfter(Instant.now()) == false) playable = source.resolve(selection.track.id)
                     if (playable.trackId != selection.track.id || playable.expiresAt?.isAfter(Instant.now()) == false ||
-                        MediaUrlPolicy.parse(playable.url)?.isHttps != true) throw MusicException(MusicFailure.INVALID_RESPONSE)
+                        !com.meowv.tune.music.MusicAudioUrlPolicy.allows(playable.url)) throw MusicException(MusicFailure.INVALID_RESPONSE)
                     selection to playable
                 }
                 ensureActive()

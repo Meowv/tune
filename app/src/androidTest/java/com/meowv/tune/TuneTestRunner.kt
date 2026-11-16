@@ -62,7 +62,7 @@ class TuneTestRunner : AndroidJUnitRunner() {
 
 class TuneTestApplication : TuneApplication() {
     internal var testMusicRepository: com.meowv.tune.domain.music.MusicRepository? = null
-    override val musicRepository get() = testMusicRepository
+    override val musicRepository get() = if (InstrumentationRegistry.getArguments().getString("musicLocalBuild") == "true") super.musicRepository else testMusicRepository
     // liveRadio=true 时使用真实网络与真实解析，用于 T26 公网联调。
     // 首次访问时读取参数：Application 构造阶段 Instrumentation 尚未注册参数。
     internal val liveRadio: Boolean by lazy {

@@ -104,6 +104,7 @@ open class TuneApplication : Application(), SingletonImageLoader.Factory {
     val radioQueue: RadioQueue by lazy { RadioQueueManager(radioRepository) }
 
     internal open val mediaHttp by lazy { MediaUrlPolicy.client(playback = true) }
+    internal val playbackCalls: okhttp3.Call.Factory by lazy { com.meowv.tune.music.MusicAudioUrlPolicy.calls(mediaHttp) }
     private val streamResolver by lazy { RadioStreamResolver(radioBrowser, MediaProbe(mediaHttp)) }
     internal open suspend fun resolveStream(intent: PlaybackIntent) = streamResolver.resolve(intent)
     internal val playerController by lazy { RadioMediaConnection(this) }

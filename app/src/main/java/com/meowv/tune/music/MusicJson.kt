@@ -24,7 +24,7 @@ internal object MusicJson {
         val root = Json.parseToJsonElement(body).jsonObject
         val audio = root.getValue("audio").jsonObject
         val url = audio.requiredText("url")
-        require(url.toHttpUrlOrNull()?.isHttps == true && MediaUrlPolicy.parse(url) != null)
+        require(MusicAudioUrlPolicy.allows(url))
         val confidence = (root["confidence"] as? JsonPrimitive)?.takeUnless { it.isString }?.doubleOrNull ?: error("confidence")
         require(confidence.isFinite() && confidence in 0.0..1.0)
         PlayableAudio(root.requiredText("trackId"), root.requiredText("providerId"), root.requiredText("sourceTrackId"),
