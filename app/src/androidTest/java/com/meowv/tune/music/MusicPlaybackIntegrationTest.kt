@@ -3,6 +3,12 @@ package com.meowv.tune.music
 import android.app.Notification
 import android.app.NotificationManager
 import android.content.ComponentName
+import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
+import android.app.ActivityManager
+import android.os.PowerManager
+import java.io.FileInputStream
 import androidx.lifecycle.Lifecycle
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
@@ -276,6 +282,134 @@ class MusicPlaybackIntegrationTest {
             assertEquals(token, main { controller.connectedToken })
             assertEquals(1, resolves[tracks[0].id]?.get())
         }
+    }
+
+    @Test fun rotatingMusicActivityKeepsTheSamePlayingSession() = runBlocking {
+        withMusic { scenario ->
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            val controller = connect()
+            val token = main { controller.connectedToken }
+            var original = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            scenario.onActivity { original = it.requestedOrientation }
+            try {
+                for ((requested, expected) in listOf(
+                    ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE to Configuration.ORIENTATION_LANDSCAPE,
+                    ActivityInfo.SCREEN_ORIENTATION_PORTRAIT to Configuration.ORIENTATION_PORTRAIT
+                )) {
+                    var previousActivity: MainActivity? = null
+                    scenario.onActivity { previousActivity = it; it.requestedOrientation = requested }
+                    withTimeout(4000) {
+                        var recreated = false
+                        while (!recreated) {
+                            scenario.onActivity {
+                                recreated = it !== previousActivity && it.resources.configuration.orientation == expected
+                            }
+                            if (!recreated) delay(25)
+                        }
+                        connection.connected.first { it }
+                    }
+                    awaitMusic(1)
+                    assertEquals(token, main { controller.connectedToken })
+                    assertEquals(1, resolves[tracks[0].id]?.get())
+                }
+            } finally {
+                scenario.onActivity { it.requestedOrientation = original }
+                withTimeout(4000) { connection.connected.first { it } }
+            }
+        }
+    }
+
+    @Test fun screenOffKeepsMusicAndSystemControlsOnTheSameSession() = runBlocking {
+        withMusic { scenario ->
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            val controller = connect()
+            val token = main { controller.connectedToken }
+            val power = app.getSystemService(PowerManager::class.java)
+            try {
+                shell("input keyevent KEYCODE_SLEEP")
+                withTimeout(4000) { while (power.isInteractive) delay(25) }
+                val position = main { controller.currentPosition }
+                delay(1000)
+                assertTrue(main { controller.isPlaying })
+                assertTrue(main { controller.currentPosition } > position + 500)
+                main { controller.pause() }
+                awaitPhase(PlaybackPhase.PAUSED)
+                main { controller.play() }
+                awaitMusic(1)
+                assertEquals(token, main { controller.connectedToken })
+                assertEquals(1, resolves[tracks[0].id]?.get())
+            } finally {
+                shell("input keyevent KEYCODE_WAKEUP")
+                shell("wm dismiss-keyguard")
+                scenario.moveToState(Lifecycle.State.RESUMED)
+                withTimeout(4000) { connection.connected.first { it } }
+            }
+        }
+    }
+
+    private fun shell(command: String) {
+        instrumentation.uiAutomation.executeShellCommand(command).use { descriptor ->
+            FileInputStream(descriptor.fileDescriptor).use { it.readBytes() }
+        }
+    }
+
+    @Test fun destroyedMusicServiceRebuildsIdleAndOnlyPlaysOnExplicitRequest() = runBlocking {
+        withMusic { scenario ->
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            connection.dispatch(PlayerCommand.TogglePause)
+            awaitPhase(PlaybackPhase.PAUSED)
+            rebuildService(scenario)
+            assertNull(connection.state.value.music)
+            assertFalse(connection.state.value.canPrevious)
+            delay(300)
+            assertEquals(1, resolves.values.sumOf { it.get() })
+            assertEquals(PlaybackPhase.IDLE, connection.state.value.phase)
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            assertEquals(2, resolves[tracks[0].id]?.get())
+        }
+    }
+
+    @Test fun destroyedServiceRejectsOldUncancellableResolveAfterReconnection() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        resolveOverride = { started.complete(Unit); withContext(NonCancellable) { gate.await() } }
+        try {
+            withMusic { scenario ->
+                connection.dispatch(PlayerCommand.PlayMusic())
+                withTimeout(4000) { started.await() }
+                rebuildService(scenario)
+                resolveOverride = null
+                connection.dispatch(PlayerCommand.PlayMusic(tracks[1]))
+                awaitMusic(2)
+                gate.complete(Unit)
+                delay(300)
+                assertEquals(tracks[1].id, connection.state.value.music?.id)
+                assertFalse(connection.state.value.canPrevious)
+            }
+        } finally { gate.complete(Unit) }
+    }
+
+    private suspend fun rebuildService(scenario: ActivityScenario<MainActivity>) {
+        val previous = main { connection.coordinator }
+        main { media?.release() }; media = null
+        scenario.moveToState(Lifecycle.State.CREATED)
+        withTimeout(4000) { connection.connected.first { !it } }
+        main { app.stopService(Intent(app, RadioPlaybackService::class.java)) }
+        withTimeout(5000) { while (main { connection.coordinator } != null) delay(25) }
+        assertEquals(PlaybackPhase.IDLE, connection.state.value.phase)
+        scenario.moveToState(Lifecycle.State.RESUMED)
+        withTimeout(5000) { connection.connected.first { it } }
+        assertNotSame(previous, main { connection.coordinator })
+        val manager = app.getSystemService(ActivityManager::class.java)
+        @Suppress("DEPRECATION")
+        assertEquals(1, manager.getRunningServices(Int.MAX_VALUE).count {
+            it.service.className == RadioPlaybackService::class.java.name
+        })
+        assertEquals(PlaybackPhase.IDLE, connection.state.value.phase)
     }
 
     @Test fun expiredUrlRefreshesCurrentProviderOnlyOnceBeforePlaying() = runBlocking {
