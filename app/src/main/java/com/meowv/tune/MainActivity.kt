@@ -19,6 +19,10 @@ import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.meowv.tune.music.MusicSearchViewModel
+import com.meowv.tune.ui.MusicSearchScreen
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.meowv.tune.music.MusicViewModel
 import com.meowv.tune.settings.SettingsViewModel
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -62,6 +66,12 @@ class MainActivity : ComponentActivity() {
             MusicViewModel(app.musicRepository,
                 requestPlayback = { app.playerController.dispatch(PlayerCommand.PlayMusic()) },
                 playback = app.playerController.state)
+        } }
+    }
+    private val musicSearchModel by viewModels<MusicSearchViewModel> {
+        viewModelFactory { initializer {
+            MusicSearchViewModel(tuneApp.musicRepository,
+                play = { track -> tuneApp.playerController.dispatch(PlayerCommand.PlayMusic(track)) })
         } }
     }
     private val settingsModel by viewModels<SettingsViewModel> {
@@ -136,6 +146,7 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             val musicState by musicModel.state.collectAsStateWithLifecycle()
+            val musicSearch by musicSearchModel.state.collectAsStateWithLifecycle()
             val settings by settingsModel.settings.collectAsStateWithLifecycle()
             val storageError by settingsModel.storageError.collectAsStateWithLifecycle()
             val countries by radioModel.countries.collectAsStateWithLifecycle()
@@ -150,6 +161,7 @@ class MainActivity : ComponentActivity() {
                     musicState = musicState,
                     onStartMusic = { ensureNotificationPermission(); musicModel.startListening() },
                     onCancelMusic = { musicModel.cancel(); dispatchPlayback(PlayerCommand.CancelMusic) },
+                    onSearchMusic = musicSearchModel::open,
                     storageError = storageError,
                     radio = radioModel.radioState,
                     playback = tuneApp.playerController.state,
@@ -190,6 +202,12 @@ class MainActivity : ComponentActivity() {
                     },
                     onFirstLayout = { firstFrameReady = true }
                 )
+                if (musicSearch.visible) Dialog(onDismissRequest = musicSearchModel::close,
+                    properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+                    MusicSearchScreen(musicSearch, musicSearchModel::queryChanged, musicSearchModel::search,
+                        musicSearchModel::more,
+                        { track -> ensureNotificationPermission(); musicSearchModel.select(track) }, musicSearchModel::close)
+                }
             }
         }
     }

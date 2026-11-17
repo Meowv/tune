@@ -84,7 +84,8 @@ fun TuneApp(
     onFirstLayout: () -> Unit,
     musicState: MusicUiState = MusicUiState.NotConfigured,
     onStartMusic: () -> Unit = {},
-    onCancelMusic: () -> Unit = {}
+    onCancelMusic: () -> Unit = {},
+    onSearchMusic: () -> Unit = {}
 ) {
     val connected by playbackConnected.collectAsStateWithLifecycle()
     val playbackState by playback.collectAsStateWithLifecycle()
@@ -202,7 +203,7 @@ fun TuneApp(
                             updateSubtitle, onPlayback, onSelectTarget, onDisplayModeChange,
                             onSettingsChange, onRefreshRadio, onRefreshFromSettings, onLoadMore,
                             onClearDirectoryCache, { showUpdate = true }, { showScopePicker = true },
-                            musicState = musicState, onStartMusic = onStartMusic, onCancelMusic = onCancelMusic,
+                            musicState = musicState, onStartMusic = onStartMusic, onCancelMusic = onCancelMusic, onSearchMusic = onSearchMusic,
                             onOpenMusicSettings = { page = TunePage.Settings },
                             radioAnimationsEnabled = !fullscreenOccupied && !showUpdate && !showScopePicker
                         )
@@ -214,7 +215,7 @@ fun TuneApp(
                         updateSubtitle, onPlayback, onSelectTarget, onDisplayModeChange,
                         onSettingsChange, onRefreshRadio, onRefreshFromSettings, onLoadMore,
                         onClearDirectoryCache, { showUpdate = true }, { showScopePicker = true },
-                        musicState = musicState, onStartMusic = onStartMusic, onCancelMusic = onCancelMusic,
+                        musicState = musicState, onStartMusic = onStartMusic, onCancelMusic = onCancelMusic, onSearchMusic = onSearchMusic,
                         onOpenMusicSettings = { page = TunePage.Settings },
                         radioAnimationsEnabled = !fullscreenOccupied && !showUpdate && !showScopePicker
                     )
@@ -372,7 +373,8 @@ private fun TunePager(
     onOpenMusicSettings: () -> Unit,
     musicState: MusicUiState,
     onStartMusic: () -> Unit,
-    onCancelMusic: () -> Unit
+    onCancelMusic: () -> Unit,
+    onSearchMusic: () -> Unit
 ) {
     HorizontalPager(state = state, modifier = modifier, key = { TunePage.entries[it].name }) { index ->
         val target = TunePage.entries[index]
@@ -384,7 +386,7 @@ private fun TunePager(
                 onRefreshFromSettings, onLoadMore, onClearDirectoryCache,
                 onOpenUpdate, onScopeClick,
                 radioAnimationsEnabled && index == state.settledPage && !state.isScrollInProgress,
-                onOpenMusicSettings, musicState, onStartMusic, onCancelMusic
+                onOpenMusicSettings, musicState, onStartMusic, onCancelMusic, onSearchMusic
             )
         }
     }
@@ -415,7 +417,8 @@ private fun pageContent(
     onOpenMusicSettings: () -> Unit,
     musicState: MusicUiState,
     onStartMusic: () -> Unit,
-    onCancelMusic: () -> Unit
+    onCancelMusic: () -> Unit,
+    onSearchMusic: () -> Unit
 ) {
     pageStates.SaveableStateProvider(page) {
         when (page) {
@@ -433,7 +436,7 @@ private fun pageContent(
                 onScopeClick = onScopeClick,
                 animationsEnabled = radioAnimationsEnabled
             )
-            TunePage.Music -> MusicScreen(isCar, musicState, onStartMusic, onCancelMusic, onOpenMusicSettings, connected, onPlayback)
+            TunePage.Music -> MusicScreen(isCar, musicState, onStartMusic, onCancelMusic, onOpenMusicSettings, connected, onPlayback, onSearchMusic)
             TunePage.Settings -> SettingsScreen(
                 isCar = isCar,
                 settings = settings,

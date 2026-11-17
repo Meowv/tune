@@ -22,6 +22,14 @@
   <string name="music_rate_limited">请求较多，请稍后再试</string>
   <string name="music_retry">重试</string>
   <string name="music_ready">待播放</string>
+  <string name="music_search">搜索音乐</string>
+  <string name="music_search_hint">歌名或歌手</string>
+  <string name="music_search_close">返回</string>
+  <string name="music_search_more">加载更多</string>
+  <string name="music_search_empty">没有找到相关歌曲</string>
+  <string name="music_search_invalid">请输入 1–100 个字符的歌名或歌手</string>
+  <string name="music_search_failed">搜索失败，请重试</string>
+  <string name="music_search_partial">部分来源暂时不可用，已显示可用结果</string>
   <string name="setting_autoplay">自动播放</string>
   <string name="setting_refresh">刷新数据</string>
   <string name="setting_source">数据来源</string>

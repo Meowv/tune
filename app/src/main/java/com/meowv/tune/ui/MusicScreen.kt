@@ -36,11 +36,14 @@ internal fun MusicScreen(
     onCancel: () -> Unit,
     onOpenSettings: () -> Unit,
     connected: Boolean = false,
-    onCommand: (PlayerCommand) -> Unit = {}
+    onCommand: (PlayerCommand) -> Unit = {},
+    onSearch: (() -> Unit)? = null
 ) {
     if (state is MusicUiState.Active) {
-        MusicNowPlayingContent(isCar, state.playback, connected, onCommand,
-            Modifier.fillMaxSize().background(TuneColors.Background).testTag("page_music"))
+        Column(Modifier.fillMaxSize().background(TuneColors.Background).testTag("page_music")) {
+            if (onSearch != null) MusicSearchEntry(onSearch, Modifier.align(Alignment.End))
+            MusicNowPlayingContent(isCar, state.playback, connected, onCommand, Modifier.weight(1f))
+        }
         return
     }
     BoxWithConstraints(Modifier.fillMaxSize().background(TuneColors.Background).testTag("page_music")) {
@@ -48,8 +51,12 @@ internal fun MusicScreen(
         val artSize = (if (isCar) 200.dp else 223.dp).coerceAtMost(maxWidth - 48.dp)
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())
             .padding(horizontal = if (isCar) 40.dp else 24.dp, vertical = 20.dp)) {
-            Text(stringResource(R.string.menu_music), color = TuneColors.Text, fontSize = if (isCar) 28.sp else 27.sp,
-                fontWeight = FontWeight.Bold, style = TuneTextStyle, modifier = Modifier.semantics { heading() })
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.menu_music), color = TuneColors.Text, fontSize = if (isCar) 28.sp else 27.sp,
+                    fontWeight = FontWeight.Bold, style = TuneTextStyle, modifier = Modifier.semantics { heading() })
+                if (onSearch != null && state != MusicUiState.NotConfigured) MusicSearchEntry(onSearch)
+            }
             Column(Modifier.widthIn(max = 640.dp).fillMaxWidth().align(Alignment.CenterHorizontally)
                 .heightIn(min = (availableHeight - 80.dp).coerceAtLeast(artSize + 160.dp)),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
@@ -94,5 +101,12 @@ internal fun MusicScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MusicSearchEntry(onSearch: () -> Unit, modifier: Modifier = Modifier) {
+    TextButton(onClick = onSearch, modifier = modifier.heightIn(min = 56.dp).testTag("music_search_open")) {
+        Text(stringResource(R.string.music_search))
     }
 }
