@@ -70,11 +70,19 @@ internal fun MusicSearchScreen(
                 LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("music_search_results")) {
                     items(state.items, key = { it.id }) { track ->
                         Column(Modifier.fillMaxWidth().heightIn(min = 72.dp)
-                            .clickable(enabled = !state.selecting) { onSelect(track) }
+                            .clickable(enabled = !state.selecting && track.availability != "unavailable") { onSelect(track) }
                             .padding(vertical = 12.dp).testTag("music_search_result_${track.id}")) {
                             Text(track.title, color = TuneColors.Text, style = MaterialTheme.typography.titleMedium)
                             Text(track.artists.joinToString(" / "), color = TuneColors.Muted)
                             track.album?.let { Text(it, color = TuneColors.Muted) }
+                            track.matches.firstOrNull()?.let { source ->
+                                Text(stringResource(when (source.providerId) {
+                                    "netease" -> R.string.music_source_netease
+                                    "original-demo" -> R.string.music_source_demo
+                                    else -> R.string.music_source_other
+                                }), color = TuneColors.Muted)
+                            }
+                            if (track.availability == "unavailable") Text(stringResource(R.string.music_track_unavailable), color = TuneColors.Muted)
                         }
                     }
                     if (state.nextCursor != null) item {

@@ -88,7 +88,7 @@ class TuneTestApplication : TuneApplication() {
     }
 
     override val mediaHttp by lazy {
-        if (liveRadio) return@lazy super.mediaHttp
+        if (liveRadio || InstrumentationRegistry.getArguments().getString("musicLiveNetease") == "true") return@lazy super.mediaHttp
         val https = com.meowv.tune.music.MusicHttpsTestTransport
         val builder = if (https.enabled()) https.client().newBuilder() else OkHttpClient.Builder()
         builder.addInterceptor { chain ->

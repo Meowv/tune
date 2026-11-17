@@ -30,6 +30,10 @@
   <string name="music_search_invalid">请输入 1–100 个字符的歌名或歌手</string>
   <string name="music_search_failed">搜索失败，请重试</string>
   <string name="music_search_partial">部分来源暂时不可用，已显示可用结果</string>
+  <string name="music_track_unavailable">暂不可播放</string>
+  <string name="music_source_netease">网易云音乐</string>
+  <string name="music_source_demo">测试音源</string>
+  <string name="music_source_other">其他音源</string>
   <string name="setting_autoplay">自动播放</string>
   <string name="setting_refresh">刷新数据</string>
   <string name="setting_source">数据来源</string>
