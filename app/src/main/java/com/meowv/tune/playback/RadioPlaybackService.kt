@@ -9,6 +9,9 @@ import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.datasource.HttpDataSource
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.CommandButton
@@ -42,8 +45,18 @@ class RadioPlaybackService : MediaSessionService() {
         val transport = app.playbackCalls
         val dataSources = OkHttpDataSource.Factory(transport).setUserAgent("MeowvTune")
         val audio = AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build()
+        val loadErrors = object : DefaultLoadErrorHandlingPolicy() {
+            override fun getRetryDelayMsFor(info: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
+                val http = generateSequence<Throwable>(info.exception) { it.cause }
+                    .filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()
+                // 音乐错误由引擎统一处理刷新/权限/冷却，禁止底层先行重试这些响应。
+                if (app.playerController.state.value.source == PlaybackSource.MUSIC &&
+                    http?.responseCode in listOf(401, 403, 404, 429)) return C.TIME_UNSET
+                return super.getRetryDelayMsFor(info)
+            }
+        }
         val player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSources))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSources).setLoadErrorHandlingPolicy(loadErrors))
             .setAudioAttributes(audio, false)
             .build()
         var coordinator: PlaybackCoordinator? = null

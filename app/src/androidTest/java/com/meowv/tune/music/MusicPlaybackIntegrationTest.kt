@@ -18,6 +18,7 @@ import com.meowv.tune.playback.AudioFocusEvent
 import com.meowv.tune.playback.SleepTimerController
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -33,6 +34,7 @@ class MusicPlaybackIntegrationTest {
     private var catalog = tracks
     private val resolves = ConcurrentHashMap<String, AtomicInteger>()
     private var resolveOverride: (suspend (String) -> Unit)? = null
+    private var audioOverride: (PlayableAudio, Int, String?) -> PlayableAudio = { audio, _, _ -> audio }
     private var media: MediaController? = null
 
     @Test fun musicSeeksContinuesAtEofAndPreviousUsesConfirmedHistory() = runBlocking {
@@ -276,18 +278,124 @@ class MusicPlaybackIntegrationTest {
         }
     }
 
+    @Test fun expiredUrlRefreshesCurrentProviderOnlyOnceBeforePlaying() = runBlocking {
+        audioOverride = { audio, attempt, provider ->
+            if (attempt == 1) audio.copy(expiresAt = Instant.EPOCH)
+            else { assertEquals("test", provider); audio }
+        }
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            assertEquals(2, resolves[tracks[0].id]?.get())
+            assertFalse(connection.state.value.canPrevious)
+        }
+    }
+
+    @Test fun repeatedlyExpiredUrlStopsWithoutUnboundedResolve() = runBlocking {
+        audioOverride = { audio, _, _ -> audio.copy(expiresAt = Instant.EPOCH) }
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitPhase(PlaybackPhase.ERROR)
+            assertEquals(MusicFailure.INVALID_RESPONSE, connection.state.value.musicFailure)
+            delay(250)
+            assertEquals(2, resolves.values.sumOf { it.get() })
+        }
+    }
+
+    @Test fun missingMediaRefreshesSameTrackBeforeAdvancing() = runBlocking {
+        audioOverride = { audio, attempt, provider ->
+            if (attempt == 1) audio.copy(url = "https://test.example/missing")
+            else { assertEquals("test", provider); audio }
+        }
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            assertEquals(2, resolves[tracks[0].id]?.get())
+            assertNull(resolves[tracks[1].id])
+            assertFalse(connection.state.value.canPrevious)
+        }
+    }
+
+    @Test fun repeatedlyMissingMediaHasOneRefreshPerCandidateAndStops() = runBlocking {
+        audioOverride = { audio, _, _ -> audio.copy(url = "https://test.example/missing") }
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitPhase(PlaybackPhase.ERROR)
+            delay(250)
+            assertEquals(6, resolves.values.sumOf { it.get() })
+            assertEquals(6, app.musicMediaRequests["missing"]?.get())
+            assertTrue(resolves.values.all { it.get() == 2 })
+            assertFalse(connection.state.value.canPrevious)
+        }
+    }
+
+    @Test fun forbiddenMediaStopsWithoutRefreshingOrSkipping() = runBlocking {
+        audioOverride = { audio, _, _ -> audio.copy(url = "https://test.example/music-forbidden") }
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitPhase(PlaybackPhase.ERROR)
+            assertEquals(MusicFailure.FORBIDDEN, connection.state.value.musicFailure)
+            assertEquals(1, app.musicMediaRequests["music-forbidden"]?.get())
+            delay(200)
+            assertEquals(1, resolves.values.sumOf { it.get() })
+        }
+    }
+
+    @Test fun mediaRateLimitBlocksManualRetriesUntilCooldownEnds() = runBlocking {
+        audioOverride = { audio, _, _ -> audio.copy(url = "https://test.example/music-limited") }
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitPhase(PlaybackPhase.ERROR)
+            assertEquals(MusicFailure.RATE_LIMITED, connection.state.value.musicFailure)
+            repeat(3) {
+                connection.dispatch(PlayerCommand.Next)
+                connection.dispatch(PlayerCommand.TogglePause)
+            }
+            delay(200)
+            assertEquals(1, app.musicMediaRequests["music-limited"]?.get())
+            assertEquals(1, resolves.values.sumOf { it.get() })
+            delay(1100)
+            audioOverride = { audio, _, _ -> audio }
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            assertEquals(2, resolves.values.sumOf { it.get() })
+        }
+    }
+
+    @Test fun pausedExpiredAudioResolvesAgainOnlyAfterExplicitResume() = runBlocking {
+        var expiresAt = Instant.MAX
+        audioOverride = { audio, attempt, _ ->
+            if (attempt == 1) expiresAt = Instant.now().plusSeconds(2)
+            audio.copy(expiresAt = expiresAt)
+        }
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            connection.dispatch(PlayerCommand.TogglePause)
+            awaitPhase(PlaybackPhase.PAUSED)
+            // 等原资源确实过期，避免仅更改后续解析结果却未覆盖播放器缓存。
+            delay((expiresAt.toEpochMilli() - Instant.now().toEpochMilli()).coerceAtLeast(0) + 100)
+            assertEquals(1, resolves[tracks[0].id]?.get())
+            expiresAt = Instant.now().plusSeconds(60)
+            connection.dispatch(PlayerCommand.TogglePause)
+            awaitMusic(1)
+            assertEquals(2, resolves[tracks[0].id]?.get())
+        }
+    }
+
     private suspend fun withMusic(block: suspend (ActivityScenario<MainActivity>) -> Unit) {
+        app.musicMediaRequests.clear()
         val fake = FakeMusicRepository(catalog)
         app.testMusicRepository = object : MusicRepository {
             override suspend fun search(query: String, limit: Int, cursor: String?) = fake.search(query, limit, cursor)
             override suspend fun recommendations(limit: Int, cursor: String?) = fake.recommendations(limit, cursor)
             override suspend fun resolve(trackId: String, preferredProviderId: String?): PlayableAudio {
-                resolves.computeIfAbsent(trackId) { AtomicInteger() }.incrementAndGet()
+                val attempt = resolves.computeIfAbsent(trackId) { AtomicInteger() }.incrementAndGet()
                 resolveOverride?.invoke(trackId)
                 val originals = InstrumentationRegistry.getArguments().getString("musicOriginals") == "true"
                 val file = if (trackId == tracks[1].id) "original-002.mp3" else "original-001.mp3"
-                return PlayableAudio(trackId, "test", trackId, 1.0,
-                    if (originals) "https://original.test/$file" else "https://test.example/radio.mp3", "audio/mpeg", 12000, seekable = true)
+                return audioOverride(PlayableAudio(trackId, "test", trackId, 1.0,
+                    if (originals) "https://original.test/$file" else "https://test.example/radio.mp3", "audio/mpeg", 12000, seekable = true), attempt, preferredProviderId)
             }
         }
         app.mockNetwork.value = NetworkState(NetworkType.WIFI)

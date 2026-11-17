@@ -41,6 +41,7 @@ internal class MusicPlaybackEngine(
     private var itemId: String? = null
     private var endedItem: String? = null
     private var confirmed = false
+    private var resourceRefreshed = false
     private val requestGate = MusicRequestGate()
     private var failures = 0
     private var state = PlayerUiState(source = PlaybackSource.MUSIC)
@@ -87,8 +88,9 @@ internal class MusicPlaybackEngine(
         begin(preserveCurrent = true) { queue.previous() }
     }
 
-    private fun begin(preserveCurrent: Boolean = false, select: suspend () -> MusicSelection?) {
+    private fun begin(preserveCurrent: Boolean = false, refreshProvider: String? = null, select: suspend () -> MusicSelection?) {
         val oldState = state
+        resourceRefreshed = refreshProvider != null
         if (NetworkPolicy.evaluate(network.value) != NetworkDecision.ALLOWED) {
             fail(MusicFailure.CONNECTION)
             return
@@ -111,8 +113,12 @@ internal class MusicPlaybackEngine(
                     selected = true
                     if (!preserveCurrent) publishState(state.copy(music = selection.track))
                     val source = repository() ?: throw MusicException(MusicFailure.NOT_CONFIGURED)
-                    var playable = source.resolve(selection.track.id)
-                    if (playable.expiresAt?.isAfter(Instant.now()) == false) playable = source.resolve(selection.track.id)
+                    var playable = source.resolve(selection.track.id, refreshProvider)
+                    ensureActive()
+                    if (playable.expiresAt?.isAfter(Instant.now()) == false && !resourceRefreshed) {
+                        resourceRefreshed = true
+                        playable = source.resolve(selection.track.id, playable.providerId)
+                    }
                     if (playable.trackId != selection.track.id || playable.expiresAt?.isAfter(Instant.now()) == false ||
                         !com.meowv.tune.music.MusicAudioUrlPolicy.allows(playable.url)) throw MusicException(MusicFailure.INVALID_RESPONSE)
                     selection to playable
@@ -168,6 +174,13 @@ internal class MusicPlaybackEngine(
         when {
             error != null -> {
                 val http = generateSequence<Throwable>(error) { it.cause }.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()
+                val selection = current
+                val provider = audio?.providerId
+                if (http?.responseCode == 404 && desiredPlay && !resourceRefreshed && selection != null && provider != null) {
+                    // 失效资源只刷新当前来源一次，继续失败后才进入既有跳歌预算。
+                    begin(refreshProvider = provider) { queue.renew(selection) }
+                    return
+                }
                 val reason = when (http?.responseCode) {
                     401 -> MusicFailure.UNAUTHORIZED
                     403 -> MusicFailure.FORBIDDEN

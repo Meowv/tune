@@ -61,6 +61,7 @@ class TuneTestRunner : AndroidJUnitRunner() {
 }
 
 class TuneTestApplication : TuneApplication() {
+    internal val musicMediaRequests = ConcurrentHashMap<String, AtomicInteger>()
     internal var testMusicRepository: com.meowv.tune.domain.music.MusicRepository? = null
     override val musicRepository get() = if (InstrumentationRegistry.getArguments().getString("musicLocalBuild") == "true") super.musicRepository else testMusicRepository
     // liveRadio=true 时使用真实网络与真实解析，用于 T26 公网联调。
@@ -94,8 +95,14 @@ class TuneTestApplication : TuneApplication() {
             val request = chain.request()
             if (https.enabled() && request.url.host == https.MEDIA_HOST) return@addInterceptor chain.proceed(request)
             val file = request.url.pathSegments.last()
+            if (file in listOf("missing", "music-forbidden", "music-limited")) {
+                musicMediaRequests.computeIfAbsent(file) { AtomicInteger() }.incrementAndGet()
+            }
             val response = Response.Builder().request(request).protocol(Protocol.HTTP_1_1)
-            if (file == "missing") {
+            if (file == "music-forbidden" || file == "music-limited") {
+                response.code(if (file == "music-forbidden") 403 else 429).message("Unavailable")
+                    .header("Retry-After", "1").body(byteArrayOf().toResponseBody()).build()
+            } else if (file == "missing") {
                 response.code(404).message("Not found").body(byteArrayOf().toResponseBody()).build()
             } else {
                 val assets = InstrumentationRegistry.getInstrumentation().context.assets
