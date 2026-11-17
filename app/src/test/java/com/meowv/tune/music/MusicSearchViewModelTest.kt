@@ -111,4 +111,35 @@ class MusicSearchViewModelTest {
             assertTrue(model.state.value.items.isEmpty())
         } finally { gate.complete(Unit); scope.cancel() }
     }
+
+    @Test fun deferredPlayableSourceUpgradesMetadataRowWithoutDuplicatingOrKeepingItDisabled() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val metadata = track.copy(id = "metadata", availability = "metadata_only", matches = listOf(MusicTrackMatch("kuwo-search", "12")))
+        val playable = track.copy(id = "playable", matches = listOf(MusicTrackMatch("netease", "34"), MusicTrackMatch("kuwo-search", "12", .99, "studio")))
+        try {
+            val model = MusicSearchViewModel(Repository { _, cursor ->
+                if (cursor == null) MusicPage(listOf(metadata), "later", partial = true)
+                else MusicPage(listOf(playable))
+            }, {}, scope)
+            model.open(); model.queryChanged("qix"); model.search()
+            assertFalse(model.state.value.items.single().canStartPlayback)
+            model.more()
+            assertEquals(listOf(playable), model.state.value.items)
+            assertTrue(model.state.value.items.single().canStartPlayback)
+            assertTrue(model.state.value.partial)
+        } finally { scope.cancel() }
+    }
+
+    @Test fun latestSameIdCanDisablePlaybackAndUnrelatedSameTitleIsNotMerged() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val second = track.copy(id = "different", artists = listOf("Other"))
+            val unavailable = track.copy(availability = "unavailable")
+            val model = MusicSearchViewModel(Repository { _, cursor ->
+                if (cursor == null) MusicPage(listOf(track), "next") else MusicPage(listOf(unavailable, second))
+            }, {}, scope)
+            model.open(); model.queryChanged("qix"); model.search(); model.more()
+            assertEquals(listOf(unavailable, second), model.state.value.items)
+        } finally { scope.cancel() }
+    }
 }

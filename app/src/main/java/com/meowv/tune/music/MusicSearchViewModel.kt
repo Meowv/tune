@@ -71,7 +71,7 @@ internal class MusicSearchViewModel(
                 val page = source.search(query, 20, cursor)
                 ensureActive()
                 if (id != generation) return@launch
-                val items = ((if (more) old.items else emptyList()) + page.items).distinctBy { it.id }.take(200)
+                val items = mergeResults(if (more) old.items else emptyList(), page.items)
                 mutable.value = mutable.value.copy(items = items, loading = false,
                     nextCursor = page.nextCursor?.takeUnless { it == cursor || items.size >= 200 },
                     partial = page.partial || more && old.partial)
@@ -81,6 +81,19 @@ internal class MusicSearchViewModel(
                 if (id == generation) mutable.value = mutable.value.copy(loading = false, failure = failure.failure)
             }
         }
+    }
+
+    private fun mergeResults(previous: List<MusicTrack>, incoming: List<MusicTrack>): List<MusicTrack> {
+        val merged = previous.toMutableList()
+        for (track in incoming) {
+            val at = merged.indexOfFirst { old -> old.id == track.id || old.matches.any { left ->
+                track.matches.any { right -> left.providerId == right.providerId && left.sourceTrackId == right.sourceTrackId }
+            } }
+            if (at < 0) {
+                if (merged.size < 200) merged += track
+            } else if (merged[at].id == track.id || track.canStartPlayback || !merged[at].canStartPlayback) merged[at] = track
+        }
+        return merged
     }
 
     fun select(track: MusicTrack) {

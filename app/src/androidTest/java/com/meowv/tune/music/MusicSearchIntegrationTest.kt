@@ -121,6 +121,41 @@ class MusicSearchIntegrationTest {
         }
     }
 
+    @Test fun laterPlayableSourceUpgradesTheExistingMetadataResult() = runBlocking {
+        val metadata = MusicTrack("metadata", "Metadata qix", listOf("qix"), availability = "metadata_only",
+            matches = listOf(MusicTrackMatch("kuwo-search", "12")))
+        val playable = tracks[0].copy(matches = listOf(MusicTrackMatch("netease", "34"), MusicTrackMatch("kuwo-search", "12", .99, "studio")))
+        val fake = FakeMusicRepository(tracks)
+        app.testMusicRepository = object : MusicRepository by fake {
+            override suspend fun search(query: String, limit: Int, cursor: String?) =
+                if (cursor == null) MusicPage(listOf(metadata), "later", partial = true) else MusicPage(listOf(playable))
+            override suspend fun resolve(trackId: String, preferredProviderId: String?) = PlayableAudio(
+                trackId, "test", trackId, 1.0, "https://test.example/radio.mp3", "audio/mpeg", 12000, seekable = true)
+        }
+        app.userSettings.update { it.copy(autoPlay = false) }
+        ActivityScenario.launch(MainActivity::class.java).use {
+            withTimeout(5000) { connection.connected.first { connected -> connected } }
+            connection.dispatch(PlayerCommand.Stop)
+            try {
+                compose.onNodeWithTag("nav_music").performClick()
+                compose.onNodeWithTag("music_search_open").performClick()
+                compose.onNodeWithTag("music_search_query").performTextInput("qix")
+                compose.onNodeWithTag("music_search_submit").performClick()
+                compose.waitUntil(4000) { compose.onAllNodesWithTag("music_search_result_metadata").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("music_search_result_metadata").assertIsNotEnabled()
+                compose.onNodeWithTag("music_search_more").performScrollTo().performClick()
+                compose.waitUntil(4000) { compose.onAllNodesWithTag("music_search_result_original-001").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("music_search_result_metadata").assertDoesNotExist()
+                compose.onNodeWithTag("music_search_result_original-001").assertIsEnabled().performClick()
+                awaitTrack("original-001")
+                Unit
+            } finally {
+                connection.dispatch(PlayerCommand.Stop)
+                app.testMusicRepository = null
+            }
+        }
+    }
+
     private fun installFakeUnlessUsingLocalBuild() {
         if (InstrumentationRegistry.getArguments().getString("musicLocalBuild") == "true") return
         val fake = FakeMusicRepository(tracks + MusicTrack("metadata", "Metadata qix", listOf("qix"),
