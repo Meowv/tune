@@ -672,7 +672,7 @@ class MusicPlaybackIntegrationTest {
         recommendationsOverride = { _, cursor ->
             requests.incrementAndGet()
             if (cursor == null) MusicPage(tracks, "second")
-            else { started.complete(Unit); gate.await(); MusicPage(listOf(MusicTrack("extra", "Extra", listOf("test")))) }
+            else { started.complete(Unit); gate.await(); MusicPage(listOf(MusicTrack("extra", "Extra", listOf("qix")))) }
         }
         try {
             withMusic {
@@ -733,6 +733,53 @@ class MusicPlaybackIntegrationTest {
             connection.dispatch(PlayerCommand.Stop)
             withTimeout(4000) { cancelled.await() }
             assertEquals(PlaybackPhase.IDLE, connection.state.value.phase)
+        }
+    }
+
+    @Test fun consecutiveManualSkipsChooseAnotherArtistAndDiscardTheOldPreparation() = runBlocking {
+        catalog = tracks.map { it.copy(artists = listOf("Same artist")) } +
+            MusicTrack("alternative", "Alternative", listOf("Other artist"), durationMs = 12000)
+        val started = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        resolveOverride = { id -> if (id == tracks[2].id) { started.complete(Unit); withContext(NonCancellable) { gate.await() } } }
+        try {
+            withMusic {
+                connection.dispatch(PlayerCommand.PlayMusic())
+                awaitMusic(1)
+                connection.dispatch(PlayerCommand.Next)
+                awaitMusic(2)
+                connection.dispatch(PlayerCommand.Seek(6000))
+                withTimeout(4000) { started.await() }
+                connection.dispatch(PlayerCommand.Next)
+                withTimeout(6000) { connection.state.first { it.phase == PlaybackPhase.PLAYING && it.music?.id == "alternative" } }
+                gate.complete(Unit)
+                delay(150)
+                assertEquals("alternative", connection.state.value.music?.id)
+                assertEquals(1, resolves[tracks[2].id]?.get())
+                assertEquals(1, resolves["alternative"]?.get())
+                connection.dispatch(PlayerCommand.Previous)
+                awaitMusic(2)
+                connection.dispatch(PlayerCommand.Next)
+                withTimeout(6000) { connection.state.first { it.phase == PlaybackPhase.PLAYING && it.music?.id == "alternative" } }
+            }
+        } finally { gate.complete(Unit) }
+    }
+
+    @Test fun exhaustedDuplicatePagesDoNotKeepRequestingAfterRepeatedNext() = runBlocking {
+        val calls = AtomicInteger()
+        recommendationsOverride = { _, cursor ->
+            calls.incrementAndGet()
+            MusicPage(listOf(tracks[0]), if (cursor == "a") "b" else "a")
+        }
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            withTimeout(4000) { while (connection.state.value.canNext) delay(25) }
+            repeat(5) { connection.dispatch(PlayerCommand.Next) }
+            awaitPhase(PlaybackPhase.ERROR)
+            assertEquals(MusicFailure.NO_PLAYABLE_MATCH, connection.state.value.musicFailure)
+            assertEquals(3, calls.get())
+            assertEquals(1, resolves.values.sumOf { it.get() })
         }
     }
 

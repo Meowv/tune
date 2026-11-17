@@ -84,8 +84,12 @@ internal class MusicPlaybackEngine(
         begin { if (track == null) queue.next() else queue.select(track) }
     }
 
-    fun next() {
+    fun next(userInitiated: Boolean = true) {
         if (!active || !mayRequest()) return
+        if (userInitiated && state.phase !in setOf(PlaybackPhase.IDLE, PlaybackPhase.ERROR)) state.music?.let {
+            queue.skip(it, affectRanking = !loading && confirmed && current?.track?.id == it.id &&
+                state.phase in setOf(PlaybackPhase.PLAYING, PlaybackPhase.PAUSED))
+        }
         interruptions.reset()
         val prepared = nextPreparation.take(queue.nextTrack?.id)
         begin(keepRefill = true, prepared = prepared) { queue.next() }
@@ -178,7 +182,7 @@ internal class MusicPlaybackEngine(
         } else if (!preserve && !sourceBackoff && selected && failure.failure in setOf(MusicFailure.TRACK_NOT_FOUND,
                 MusicFailure.NO_PLAYABLE_MATCH, MusicFailure.SOURCE_UNAVAILABLE, MusicFailure.SOURCE_TIMEOUT,
                 MusicFailure.PLAYBACK_UNAVAILABLE) && ++failures < 5 && queue.canNext) {
-            next()
+            next(userInitiated = false)
         } else {
             fail(failure.failure)
         }
@@ -222,7 +226,7 @@ internal class MusicPlaybackEngine(
                     requestGate.block(retry)
                 }
                 // 解码/连接失败可跳过候选；权限和限流必须停止，不跨源绕过。
-                if (desiredPlay && reason == MusicFailure.PLAYBACK_UNAVAILABLE && ++failures < 5 && queue.canNext) next()
+                if (desiredPlay && reason == MusicFailure.PLAYBACK_UNAVAILABLE && ++failures < 5 && queue.canNext) next(userInitiated = false)
                 else fail(reason)
             }
             player.isPlaying -> {
@@ -238,7 +242,11 @@ internal class MusicPlaybackEngine(
                 maintainAhead()
             }
             player.playbackState == Player.STATE_ENDED -> {
-                if (desiredPlay && endedItem != itemId) { endedItem = itemId; next() }
+                if (desiredPlay && endedItem != itemId) {
+                    endedItem = itemId
+                    next(userInitiated = false)
+                    queue.clearSkipSignal()
+                }
             }
             !player.playWhenReady -> publishState(state.copy(phase = PlaybackPhase.PAUSED))
             else -> publishState(state.copy(phase = PlaybackPhase.BUFFERING))

@@ -119,4 +119,72 @@ class MusicQueueManagerTest {
         assertEquals(2, requests)
         assertEquals(tracks[1], queue.nextTrack)
     }
+
+    @Test fun recentSuccessSurvivesHistoryBranchingAndCandidateWindowTurnover() = runBlocking {
+        val batches = listOf(
+            MusicPage(tracks.take(3), "second"),
+            MusicPage(listOf(tracks[3], tracks[0].copy(id = "five"), tracks[0].copy(id = "six")), "third"),
+            MusicPage(listOf(tracks[2], tracks[0].copy(id = "seven")))
+        )
+        var requests = 0
+        val repo = object : MusicRepository {
+            override suspend fun recommendations(limit: Int, cursor: String?) = batches[requests++]
+            override suspend fun search(query: String, limit: Int, cursor: String?) = error("unused")
+            override suspend fun resolve(trackId: String, preferredProviderId: String?) = error("unused")
+        }
+        val queue = MusicQueueManager({ repo }, batchSize = 3, historyLimit = 3)
+        repeat(3) { assertTrue(queue.recordSuccessfulPlayback(queue.next()!!)) }
+        assertTrue(queue.recordSuccessfulPlayback(queue.previous()!!))
+        queue.select(tracks[0].copy(id = "branch")).also { assertTrue(queue.recordSuccessfulPlayback(it)) }
+        queue.replenish()
+        val remaining = mutableListOf<String>()
+        repeat(4) { queue.next()?.let { remaining += it.track.id } }
+        assertFalse("Recently played third track must not reappear after its history branch was removed", "3" in remaining)
+        assertEquals(listOf("4", "five", "six", "seven"), remaining)
+    }
+
+    @Test fun twoShortSkipsPreferAnAlternativeDeterministicallyWithoutExtraRequests() = runBlocking {
+        var now = 0L
+        val candidates = (1..4).map { MusicTrack("a$it", "Same title", listOf("Ａrtist")) } +
+            MusicTrack("other", "Same title", listOf("Other"))
+        val queue = MusicQueueManager({ FakeMusicRepository(candidates) }, nowMillis = { now })
+        val first = queue.next()!!; queue.recordSuccessfulPlayback(first); queue.skip(first.track)
+        val second = queue.next()!!; queue.recordSuccessfulPlayback(second); now++; queue.skip(second.track)
+        assertEquals("other", queue.nextTrack!!.id)
+        assertEquals("other", queue.next()!!.track.id)
+        now += 30001
+        assertEquals("a3", queue.nextTrack!!.id)
+        assertEquals("a3", queue.next()!!.track.id)
+    }
+
+    @Test fun unplayedOrDuplicateSkipDoesNotCreateArtistPreferenceAndSameArtistCanStillAdvance() = runBlocking {
+        val candidates = tracks + MusicTrack("other", "Other", listOf("other"))
+        val queue = MusicQueueManager({ FakeMusicRepository(candidates) })
+        val first = queue.next()!!; queue.skip(first.track); queue.skip(first.track)
+        assertEquals("2", queue.nextTrack!!.id)
+        val second = queue.next()!!; queue.skip(second.track, affectRanking = false)
+        assertEquals("3", queue.nextTrack!!.id)
+        val singleArtist = MusicQueueManager({ FakeMusicRepository(tracks) })
+        repeat(2) { val next = singleArtist.next()!!; singleArtist.recordSuccessfulPlayback(next); singleArtist.skip(next.track) }
+        assertEquals("3", singleArtist.nextTrack!!.id)
+        assertEquals("3", singleArtist.next()!!.track.id)
+    }
+
+    @Test fun cyclicAndAllDuplicatePagesStopInsteadOfRequestingForever() = runBlocking {
+        var requests = 0
+        val repo = object : MusicRepository {
+            override suspend fun recommendations(limit: Int, cursor: String?): MusicPage {
+                requests++
+                return MusicPage(listOf(tracks[0]), if (cursor == "a") "b" else "a")
+            }
+            override suspend fun search(query: String, limit: Int, cursor: String?) = error("unused")
+            override suspend fun resolve(trackId: String, preferredProviderId: String?) = error("unused")
+        }
+        val queue = MusicQueueManager({ repo })
+        val first = queue.next()!!; queue.recordSuccessfulPlayback(first)
+        assertNull(queue.next())
+        repeat(4) { queue.replenish(); assertNull(queue.next()) }
+        assertFalse(queue.canNext)
+        assertEquals(3, requests)
+    }
 }
