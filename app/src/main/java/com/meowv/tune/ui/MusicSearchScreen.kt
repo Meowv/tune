@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import com.meowv.tune.R
 import com.meowv.tune.domain.music.MusicFailure
 import com.meowv.tune.domain.music.MusicTrack
+import com.meowv.tune.domain.music.canStartPlayback
 import com.meowv.tune.music.MusicSearchState
 import com.meowv.tune.ui.theme.TuneColors
 
@@ -70,18 +71,21 @@ internal fun MusicSearchScreen(
                 LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("music_search_results")) {
                     items(state.items, key = { it.id }) { track ->
                         Column(Modifier.fillMaxWidth().heightIn(min = 72.dp)
-                            .clickable(enabled = !state.selecting && track.availability != "unavailable") { onSelect(track) }
+                            .clickable(enabled = !state.selecting && track.canStartPlayback) { onSelect(track) }
                             .padding(vertical = 12.dp).testTag("music_search_result_${track.id}")) {
                             Text(track.title, color = TuneColors.Text, style = MaterialTheme.typography.titleMedium)
                             Text(track.artists.joinToString(" / "), color = TuneColors.Muted)
                             track.album?.let { Text(it, color = TuneColors.Muted) }
-                            track.matches.firstOrNull()?.let { source ->
-                                Text(stringResource(when (source.providerId) {
+                            if (track.matches.isNotEmpty()) {
+                                val names = track.matches.take(3).map { source -> stringResource(when (source.providerId) {
                                     "netease" -> R.string.music_source_netease
+                                    "kuwo-search" -> R.string.music_source_kuwo
                                     else -> R.string.music_source_other
-                                }), color = TuneColors.Muted)
+                                }) }.distinct()
+                                Text(names.joinToString(" · "), color = TuneColors.Muted)
                             }
-                            if (track.availability == "unavailable") Text(stringResource(R.string.music_track_unavailable), color = TuneColors.Muted)
+                            if (!track.canStartPlayback) Text(stringResource(if (track.availability == "metadata_only")
+                                R.string.music_metadata_only else R.string.music_track_unavailable), color = TuneColors.Muted)
                         }
                     }
                     if (state.nextCursor != null) item {

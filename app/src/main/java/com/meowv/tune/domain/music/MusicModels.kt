@@ -50,3 +50,5 @@ enum class MusicFailure {
 
 // 仅传递安全分类，不持有原始响应、凭据或媒体地址。
 class MusicException(val failure: MusicFailure, val retryAfterSeconds: Long? = null) : Exception(failure.name)
+
+internal val MusicTrack.canStartPlayback: Boolean get() = availability in setOf("candidate", "available")

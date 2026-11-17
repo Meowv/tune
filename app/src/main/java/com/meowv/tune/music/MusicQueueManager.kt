@@ -88,7 +88,7 @@ internal class MusicQueueManager(
             if (owner != revision) return@withLock
             if (page.items.size > batchSize) throw MusicException(MusicFailure.INVALID_RESPONSE)
             val known = considered + played + skipped + pending.map { it.id } + history.map { it.id }
-            page.items.distinctBy { it.id }.filterNot { it.id in known }.forEach {
+            page.items.distinctBy { it.id }.filter { it.canStartPlayback }.filterNot { it.id in known }.forEach {
                 pending.addLast(it)
                 remember(it.id)
                 added++

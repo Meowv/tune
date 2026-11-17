@@ -85,7 +85,7 @@ internal class MusicSearchViewModel(
 
     fun select(track: MusicTrack) {
         if (!mutable.value.visible || mutable.value.selecting ||
-            mutable.value.items.none { it.id == track.id && it.availability != "unavailable" }) return
+            mutable.value.items.none { it.id == track.id && it.canStartPlayback }) return
         selection = viewModelScope.launch {
             mutable.value = mutable.value.copy(selecting = true, failure = null)
             try {

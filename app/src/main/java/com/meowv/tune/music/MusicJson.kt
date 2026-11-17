@@ -37,7 +37,8 @@ internal object MusicJson {
         root.optionalText("album"), root.optionalLong("durationMs"), root.optionalText("coverUrl"), root.optionalText("isrc"),
         root.requiredText("availability"), root.array("sources").map {
             val source = it.jsonObject
-            MusicTrackMatch(source.requiredText("providerId"), source.requiredText("sourceTrackId"))
+            MusicTrackMatch(source.requiredText("providerId"), source.requiredText("sourceTrackId"),
+                source.optionalConfidence(), source.optionalText("edition"))
         }
     )
 
@@ -57,6 +58,14 @@ internal object MusicJson {
         }
         val retry = retryHeader ?: runCatching { root?.optionalLong("retryAfterSeconds") }.getOrNull()
         return MusicException(failure, retry?.coerceAtLeast(1))
+    }
+
+    private fun JsonObject.optionalConfidence(): Double? {
+        val element = get("confidence") ?: return null
+        if (element == JsonNull) return null
+        val value = (element as? JsonPrimitive)?.takeUnless { it.isString }?.doubleOrNull ?: error("confidence")
+        require(value.isFinite() && value in 0.0..1.0)
+        return value
     }
 
     private fun JsonObject.array(key: String) = getValue(key) as? JsonArray ?: error(key)

@@ -21,7 +21,8 @@ class MusicSearchViewModelTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         try {
             val model = MusicSearchViewModel(Repository { query, _ ->
-                requests++; assertEquals("qix", query); MusicPage(listOf(track, track.copy(id = "restricted", availability = "unavailable")))
+                requests++; assertEquals("qix", query); MusicPage(listOf(track,
+                    track.copy(id = "restricted", availability = "unavailable"), track.copy(id = "metadata", availability = "metadata_only")))
             }, { selected += it }, scope)
             model.open(); model.queryChanged(" qix ")
             assertEquals(0, requests)
@@ -29,6 +30,7 @@ class MusicSearchViewModelTest {
             assertEquals(1, requests)
             model.select(track.copy(id = "unknown"))
             model.select(track.copy(id = "restricted", availability = "unavailable"))
+            model.select(track.copy(id = "metadata", availability = "metadata_only"))
             assertTrue(selected.isEmpty())
             model.select(track)
             assertEquals(listOf(track), selected)

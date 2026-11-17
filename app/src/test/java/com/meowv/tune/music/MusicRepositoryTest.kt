@@ -48,6 +48,20 @@ class MusicRepositoryTest {
         }
     }
 
+    @Test fun optionalSourceConfidenceAndEditionAreValidatedWithoutInventingPlaybackCapability() {
+        val page = fixture.getValue("search").jsonObject
+        val track = page.getValue("items").jsonArray.single().jsonObject
+        val source = track.getValue("sources").jsonArray.single().jsonObject
+        fun body(confidence: JsonElement) = JsonObject(page + ("items" to JsonArray(listOf(JsonObject(track +
+            ("availability" to JsonPrimitive("metadata_only")) + ("sources" to JsonArray(listOf(JsonObject(source +
+                ("confidence" to confidence) + ("edition" to JsonPrimitive("studio")))))))))))
+        val mapped = MusicJson.page(body(JsonPrimitive(.99)).toString()).items.single()
+        assertEquals(.99, mapped.matches.single().confidence!!, 0.0)
+        assertEquals("studio", mapped.matches.single().edition)
+        assertFalse(mapped.canStartPlayback)
+        assertEquals(MusicFailure.INVALID_RESPONSE, failure { MusicJson.page(body(JsonPrimitive(2)).toString()) }.failure)
+    }
+
     @Test fun httpsRequestsEncodeQueriesAndResolveThroughTheSameContract() = runBlocking {
         server { server, repository ->
             server.enqueue(MockResponse().setBody(fixture.getValue("search").toString()))

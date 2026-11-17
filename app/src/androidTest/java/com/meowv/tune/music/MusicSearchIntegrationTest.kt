@@ -100,9 +100,31 @@ class MusicSearchIntegrationTest {
         }
     }
 
+    @Test fun metadataOnlySearchResultShowsItsCapabilityAndCannotStartPlayback() = runBlocking {
+        installFakeUnlessUsingLocalBuild()
+        app.userSettings.update { it.copy(autoPlay = false) }
+        ActivityScenario.launch(MainActivity::class.java).use {
+            withTimeout(5000) { connection.connected.first { connected -> connected } }
+            connection.dispatch(PlayerCommand.Stop)
+            try {
+                compose.onNodeWithTag("nav_music").performClick()
+                compose.onNodeWithTag("music_search_open").performClick()
+                compose.onNodeWithTag("music_search_query").performTextInput("qix")
+                compose.onNodeWithTag("music_search_submit").performClick()
+                compose.waitUntil(4000) { compose.onAllNodesWithTag("music_search_result_metadata").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("music_search_results").performScrollToNode(hasTestTag("music_search_result_metadata"))
+                compose.onNodeWithTag("music_search_result_metadata").assertIsNotEnabled()
+                compose.onNodeWithText("仅提供搜索信息").assertIsDisplayed()
+                compose.onNodeWithText("酷我音乐").assertIsDisplayed()
+                assertEquals(PlaybackPhase.IDLE, connection.state.value.phase)
+            } finally { app.testMusicRepository = null }
+        }
+    }
+
     private fun installFakeUnlessUsingLocalBuild() {
         if (InstrumentationRegistry.getArguments().getString("musicLocalBuild") == "true") return
-        val fake = FakeMusicRepository(tracks)
+        val fake = FakeMusicRepository(tracks + MusicTrack("metadata", "Metadata qix", listOf("qix"),
+            availability = "metadata_only", matches = listOf(MusicTrackMatch("kuwo-search", "12", .99, "studio"))))
         app.testMusicRepository = object : MusicRepository by fake {
             override suspend fun search(query: String, limit: Int, cursor: String?): MusicPage {
                 requests.incrementAndGet()
