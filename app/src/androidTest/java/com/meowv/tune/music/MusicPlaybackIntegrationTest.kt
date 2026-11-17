@@ -14,6 +14,7 @@ import com.meowv.tune.TuneTestApplication
 import com.meowv.tune.domain.*
 import com.meowv.tune.domain.music.*
 import com.meowv.tune.playback.RadioPlaybackService
+import com.meowv.tune.playback.AudioFocusEvent
 import com.meowv.tune.playback.SleepTimerController
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
@@ -216,6 +217,62 @@ class MusicPlaybackIntegrationTest {
             delay(200)
             assertEquals(1, resolves.values.sumOf { it.get() })
             delay(1100) // 等待本用例的一秒冷却自然结束，避免污染其他服务集成用例。
+        }
+    }
+
+    @Test fun focusAndNetworkRecoverOnlyAfterBothConditionsAreReady() = runBlocking {
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            val engine = requireNotNull(connection.coordinator).music
+            for (networkFirst in listOf(true, false)) {
+                main { engine.onAudioFocusEvent(AudioFocusEvent.TRANSIENT_LOSS) }
+                awaitPhase(PlaybackPhase.PAUSED)
+                app.mockNetwork.value = NetworkState()
+                withTimeout(3000) { connection.state.first { it.error == TuneError.NETWORK_OFFLINE } }
+                if (networkFirst) app.mockNetwork.value = NetworkState(NetworkType.WIFI)
+                else main { engine.onAudioFocusEvent(AudioFocusEvent.GAIN) }
+                delay(200)
+                assertEquals(PlaybackPhase.PAUSED, connection.state.value.phase)
+                if (networkFirst) main { engine.onAudioFocusEvent(AudioFocusEvent.GAIN) }
+                else app.mockNetwork.value = NetworkState(NetworkType.WIFI)
+                awaitMusic(1)
+            }
+        }
+    }
+
+    @Test fun userAndOutputInterruptionsCancelCombinedRecovery() = runBlocking {
+        withMusic {
+            val engine = requireNotNull(connection.coordinator).music
+            for (output in listOf(false, true)) {
+                connection.dispatch(PlayerCommand.PlayMusic())
+                awaitMusic(1)
+                main { engine.onAudioFocusEvent(AudioFocusEvent.TRANSIENT_LOSS) }
+                awaitPhase(PlaybackPhase.PAUSED)
+                app.mockNetwork.value = NetworkState()
+                withTimeout(3000) { connection.state.first { it.error == TuneError.NETWORK_OFFLINE } }
+                if (output) main { engine.onExternalOutputRemoved() } else main { engine.pause() }
+                app.mockNetwork.value = NetworkState(NetworkType.WIFI)
+                main { engine.onAudioFocusEvent(AudioFocusEvent.GAIN) }
+                delay(250)
+                assertEquals(PlaybackPhase.PAUSED, connection.state.value.phase)
+            }
+        }
+    }
+
+    @Test fun musicContinuesInBackgroundWithoutCreatingAnotherSession() = runBlocking {
+        withMusic { scenario ->
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            val controller = connect()
+            val token = main { controller.connectedToken }
+            scenario.moveToState(Lifecycle.State.CREATED)
+            delay(300)
+            assertEquals(PlaybackPhase.PLAYING, connection.state.value.phase)
+            scenario.moveToState(Lifecycle.State.RESUMED)
+            withTimeout(4000) { connection.connected.first { it } }
+            assertEquals(token, main { controller.connectedToken })
+            assertEquals(1, resolves[tracks[0].id]?.get())
         }
     }
 

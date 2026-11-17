@@ -6,7 +6,7 @@ import com.meowv.tune.domain.music.MusicTrack
 // 所有入口在服务主线程同步交接归属，耗时解析留给各引擎可取消的子任务。
 internal class PlaybackCoordinator(
     private val radio: RadioPlayback,
-    private val music: MusicPlaybackEngine,
+    internal val music: MusicPlaybackEngine,
     private val publish: (PlayerUiState) -> Unit
 ) : RadioSessionPlayer.SessionCommands {
     var activeSource = PlaybackSource.RADIO

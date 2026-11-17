@@ -26,9 +26,9 @@ internal class MusicPlaybackEngine(
 ) : Player.Listener {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val queue = MusicQueueManager({ repository() ?: throw MusicException(MusicFailure.NOT_CONFIGURED) })
-    private val focus = AudioFocusController(context, ::onFocus)
-    private val route = AudioRouteMonitor(context) { if (active) pause(PauseReason.OUTPUT) }
-    private val interruptions = PlaybackInterruptionState(android.os.SystemClock::elapsedRealtime)
+    private val focus = AudioFocusController(context, ::onAudioFocusEvent)
+    private val route = AudioRouteMonitor(context, ::onExternalOutputRemoved)
+    private val interruptions = MusicInterruptionState(android.os.SystemClock::elapsedRealtime)
     private var active = false
     private var generation = 0L
     private var pending: Job? = null
@@ -52,8 +52,8 @@ internal class MusicPlaybackEngine(
             network.collect { value ->
                 if (!active) return@collect
                 if (NetworkPolicy.evaluate(value) != NetworkDecision.ALLOWED) {
-                    if (desiredPlay || interruptions.hasNetworkResume) pause(PauseReason.NETWORK)
-                } else if (interruptions.consumeNetworkResume()) resume()
+                    if (desiredPlay || interruptions.hasResumeIntent) pause(PauseReason.NETWORK)
+                } else if (interruptions.networkAvailable()) resume()
             }
         }
         scope.launch {
@@ -297,10 +297,16 @@ internal class MusicPlaybackEngine(
         }
     }
 
-    private fun onFocus(event: AudioFocusEvent) {
+    internal fun onExternalOutputRemoved() { if (active) pause(PauseReason.OUTPUT) }
+
+    internal fun onAudioFocusEvent(event: AudioFocusEvent) {
         if (!active) return
         when (event) {
-            AudioFocusEvent.GAIN -> { player.volume = 1f; if (interruptions.consumeFocusResume()) resume() }
+            AudioFocusEvent.GAIN -> {
+                player.volume = 1f
+                if (NetworkPolicy.evaluate(network.value) != NetworkDecision.ALLOWED && interruptions.hasResumeIntent) pause(PauseReason.NETWORK)
+                if (interruptions.focusGained()) resume()
+            }
             AudioFocusEvent.DUCK -> player.volume = .2f
             AudioFocusEvent.TRANSIENT_LOSS -> pause(PauseReason.TRANSIENT_FOCUS)
             AudioFocusEvent.PERMANENT_LOSS -> pause(PauseReason.PERMANENT_FOCUS)
