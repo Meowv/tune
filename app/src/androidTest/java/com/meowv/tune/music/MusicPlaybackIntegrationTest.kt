@@ -40,6 +40,7 @@ class MusicPlaybackIntegrationTest {
     private var catalog = tracks
     private val resolves = ConcurrentHashMap<String, AtomicInteger>()
     private var resolveOverride: (suspend (String) -> Unit)? = null
+    private var recommendationsOverride: (suspend (Int, String?) -> MusicPage)? = null
     private var audioOverride: (PlayableAudio, Int, String?) -> PlayableAudio = { audio, _, _ -> audio }
     private var media: MediaController? = null
 
@@ -563,12 +564,185 @@ class MusicPlaybackIntegrationTest {
         }
     }
 
+    @Test fun nearEndPreparationIsReusedByNextWithoutRecordingHistoryEarly() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        resolveOverride = { id ->
+            if (id == tracks[1].id) { started.complete(Unit); delay(600) }
+        }
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            connection.dispatch(PlayerCommand.Seek(6000))
+            withTimeout(4000) { started.await() }
+            delay(700)
+            assertEquals(tracks[0].id, connection.state.value.music?.id)
+            assertFalse(connection.state.value.canPrevious)
+            val before = android.os.SystemClock.elapsedRealtime()
+            connection.dispatch(PlayerCommand.Next)
+            awaitMusic(2)
+            val elapsed = android.os.SystemClock.elapsedRealtime() - before
+            assertEquals(1, resolves[tracks[1].id]?.get())
+            assertTrue(connection.state.value.canPrevious)
+            val file = java.io.File(app.filesDir, "music-preparation-latency.json")
+            file.writeText("{\"syntheticResolveDelayMs\":600,\"preparedNextMs\":$elapsed}")
+        }
+    }
+
+    @Test fun nextPromotesAnInFlightPreparationWithoutADuplicateResolve() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        resolveOverride = { id -> if (id == tracks[1].id) { started.complete(Unit); gate.await() } }
+        try {
+            withMusic {
+                connection.dispatch(PlayerCommand.PlayMusic())
+                awaitMusic(1)
+                connection.dispatch(PlayerCommand.Seek(6000))
+                withTimeout(4000) { started.await() }
+                connection.dispatch(PlayerCommand.Next)
+                delay(100)
+                assertEquals(1, resolves[tracks[1].id]?.get())
+                gate.complete(Unit)
+                awaitMusic(2)
+                assertEquals(1, resolves[tracks[1].id]?.get())
+            }
+        } finally { gate.complete(Unit) }
+    }
+
+    @Test fun pausingCancelsPreparationAndLateResultCannotStartAnotherTrack() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        resolveOverride = { id -> if (id == tracks[1].id) { started.complete(Unit); withContext(NonCancellable) { gate.await() } } }
+        try {
+            withMusic {
+                connection.dispatch(PlayerCommand.PlayMusic())
+                awaitMusic(1)
+                connection.dispatch(PlayerCommand.Seek(6000))
+                withTimeout(4000) { started.await() }
+                connection.dispatch(PlayerCommand.TogglePause)
+                awaitPhase(PlaybackPhase.PAUSED)
+                gate.complete(Unit)
+                delay(150)
+                assertEquals(tracks[0].id, connection.state.value.music?.id)
+                assertEquals(PlaybackPhase.PAUSED, connection.state.value.phase)
+                assertFalse(connection.state.value.canPrevious)
+                resolveOverride = null
+                connection.dispatch(PlayerCommand.Next)
+                awaitMusic(2)
+                assertEquals(2, resolves[tracks[1].id]?.get())
+            }
+        } finally { gate.complete(Unit) }
+    }
+
+    @Test fun expiringPreparationRefreshesOnceAndSpeculativeRateLimitDoesNotPauseCurrent() = runBlocking {
+        audioOverride = { value, _, _ ->
+            if (value.trackId == tracks[1].id && resolves[value.trackId]?.get() == 1)
+                value.copy(expiresAt = Instant.now().plusSeconds(2)) else value
+        }
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            connection.dispatch(PlayerCommand.Seek(6000))
+            withTimeout(4000) { while (resolves[tracks[1].id]?.get() != 1) delay(25) }
+            connection.dispatch(PlayerCommand.Next)
+            awaitMusic(2)
+            assertEquals(2, resolves[tracks[1].id]?.get())
+        }
+        resolves.clear()
+        resolveOverride = { id -> if (id == tracks[1].id) throw MusicException(MusicFailure.RATE_LIMITED, 1) }
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            connection.dispatch(PlayerCommand.Seek(6000))
+            withTimeout(4000) { while (resolves[tracks[1].id]?.get() != 1) delay(25) }
+            delay(100)
+            assertEquals(PlaybackPhase.PLAYING, connection.state.value.phase)
+            assertEquals(tracks[0].id, connection.state.value.music?.id)
+            connection.dispatch(PlayerCommand.Next)
+            awaitPhase(PlaybackPhase.ERROR)
+            assertEquals(MusicFailure.RATE_LIMITED, connection.state.value.musicFailure)
+            assertEquals(1, resolves[tracks[1].id]?.get())
+            delay(1100)
+        }
+    }
+
+    @Test fun nextKeepsOneBackgroundRefillInsteadOfCancellingAndReloadingThePage() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        val requests = AtomicInteger()
+        recommendationsOverride = { _, cursor ->
+            requests.incrementAndGet()
+            if (cursor == null) MusicPage(tracks, "second")
+            else { started.complete(Unit); gate.await(); MusicPage(listOf(MusicTrack("extra", "Extra", listOf("test")))) }
+        }
+        try {
+            withMusic {
+                connection.dispatch(PlayerCommand.PlayMusic())
+                awaitMusic(1)
+                withTimeout(4000) { started.await() }
+                connection.dispatch(PlayerCommand.Next)
+                awaitMusic(2)
+                assertEquals(2, requests.get())
+                gate.complete(Unit)
+                delay(100)
+                connection.dispatch(PlayerCommand.Next)
+                awaitMusic(3)
+                assertEquals(2, requests.get())
+            }
+        } finally { gate.complete(Unit) }
+    }
+
+    @Test fun switchingToRadioCancelsSpeculationAndLateRateLimitCannotPoisonMusic() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        resolveOverride = { id ->
+            if (id == tracks[1].id) {
+                started.complete(Unit)
+                withContext(NonCancellable) { gate.await() }
+                throw MusicException(MusicFailure.RATE_LIMITED, 60)
+            }
+        }
+        try {
+            withMusic {
+                connection.dispatch(PlayerCommand.PlayMusic())
+                awaitMusic(1)
+                connection.dispatch(PlayerCommand.Seek(6000))
+                withTimeout(4000) { started.await() }
+                connection.dispatch(PlayerCommand.Play(Station(UUID(0, 1), "Test station 1", app.country)))
+                withTimeout(6000) { connection.state.first { it.source == PlaybackSource.RADIO && it.phase == PlaybackPhase.PLAYING } }
+                gate.complete(Unit)
+                delay(150)
+                assertEquals(PlaybackSource.RADIO, connection.state.value.source)
+                resolveOverride = null
+                connection.dispatch(PlayerCommand.PlayMusic(tracks[2]))
+                awaitMusic(3)
+            }
+        } finally { gate.complete(Unit) }
+    }
+
+    @Test fun stopCancelsTheActiveResolveAfterImmediateCandidateFailures() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        val cancelled = CompletableDeferred<Unit>()
+        resolveOverride = { id ->
+            if (id != tracks[2].id) throw MusicException(MusicFailure.SOURCE_UNAVAILABLE)
+            started.complete(Unit)
+            try { awaitCancellation() } finally { cancelled.complete(Unit) }
+        }
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            withTimeout(4000) { started.await() }
+            connection.dispatch(PlayerCommand.Stop)
+            withTimeout(4000) { cancelled.await() }
+            assertEquals(PlaybackPhase.IDLE, connection.state.value.phase)
+        }
+    }
+
     private suspend fun withMusic(block: suspend (ActivityScenario<MainActivity>) -> Unit) {
         app.musicMediaRequests.clear()
         val fake = FakeMusicRepository(catalog)
         app.testMusicRepository = object : MusicRepository {
             override suspend fun search(query: String, limit: Int, cursor: String?) = fake.search(query, limit, cursor)
-            override suspend fun recommendations(limit: Int, cursor: String?) = fake.recommendations(limit, cursor)
+            override suspend fun recommendations(limit: Int, cursor: String?) =
+                recommendationsOverride?.invoke(limit, cursor) ?: fake.recommendations(limit, cursor)
             override suspend fun resolve(trackId: String, preferredProviderId: String?): PlayableAudio {
                 val attempt = resolves.computeIfAbsent(trackId) { AtomicInteger() }.incrementAndGet()
                 resolveOverride?.invoke(trackId)

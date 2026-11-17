@@ -72,4 +72,51 @@ class MusicQueueManagerTest {
         assertFalse(queue.recordSuccessfulPlayback(previous))
         assertEquals("2", queue.previous()!!.track.id)
     }
+
+    @Test fun firstPlayableCandidateDoesNotWaitForTheSecondPageAndPeekDoesNotConsume() = runBlocking {
+        var requests = 0
+        val repo = object : MusicRepository {
+            override suspend fun recommendations(limit: Int, cursor: String?): MusicPage {
+                requests++
+                return if (cursor == null) MusicPage(listOf(tracks[0]), "second") else MusicPage(tracks.drop(1))
+            }
+            override suspend fun search(query: String, limit: Int, cursor: String?) = error("unused")
+            override suspend fun resolve(trackId: String, preferredProviderId: String?) = error("unused")
+        }
+        val queue = MusicQueueManager({ repo })
+        val first = queue.next()!!
+        assertEquals(1, requests)
+        assertTrue(queue.recordSuccessfulPlayback(first))
+        assertTrue(queue.needsReplenish)
+        queue.replenish()
+        assertEquals(2, requests)
+        assertEquals(tracks[1], queue.nextTrack)
+        assertEquals(tracks[1], queue.nextTrack)
+        assertEquals(tracks[1], queue.next()!!.track)
+        assertFalse(queue.canPrevious)
+    }
+
+    @Test fun resetRejectsUncancelledOldPagesAndConcurrentReplenishmentSharesTheCursor() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        var requests = 0
+        val repo = object : MusicRepository {
+            override suspend fun recommendations(limit: Int, cursor: String?): MusicPage {
+                requests++
+                if (requests == 1) { started.complete(Unit); gate.await(); return MusicPage(listOf(tracks[0])) }
+                return MusicPage(listOf(tracks[1]))
+            }
+            override suspend fun search(query: String, limit: Int, cursor: String?) = error("unused")
+            override suspend fun resolve(trackId: String, preferredProviderId: String?) = error("unused")
+        }
+        val queue = MusicQueueManager({ repo })
+        val old = launch { queue.replenish() }
+        started.await()
+        queue.reset()
+        gate.complete(Unit); old.join()
+        assertNull(queue.nextTrack)
+        coroutineScope { repeat(3) { launch { queue.replenish() } } }
+        assertEquals(2, requests)
+        assertEquals(tracks[1], queue.nextTrack)
+    }
 }

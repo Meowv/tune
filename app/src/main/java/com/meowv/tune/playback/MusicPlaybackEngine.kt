@@ -10,6 +10,7 @@ import com.meowv.tune.domain.*
 import com.meowv.tune.domain.music.*
 import com.meowv.tune.music.MusicQueueManager
 import com.meowv.tune.music.MusicSelection
+import com.meowv.tune.music.MusicNextPreparation
 import com.meowv.tune.music.MusicRequestGate
 import com.meowv.tune.music.musicRetryAfterSeconds
 import java.time.Instant
@@ -33,6 +34,9 @@ internal class MusicPlaybackEngine(
     private var generation = 0L
     private var pending: Job? = null
     private var refill: Job? = null
+    private var refillSuppressed = false
+    private var promoted: Deferred<Result<PlayableAudio>>? = null
+    private val nextPreparation = MusicNextPreparation(repository, scope, ::backgroundFailure)
     private var bufferTimeout: Job? = null
     private var loading = false
     private var desiredPlay = false
@@ -61,7 +65,10 @@ internal class MusicPlaybackEngine(
         scope.launch {
             while (isActive) {
                 delay(500)
-                if (active && !loading && itemMatches()) publishState(state)
+                if (active && !loading && itemMatches()) {
+                    publishState(state)
+                    maintainAhead()
+                }
             }
         }
     }
@@ -80,7 +87,8 @@ internal class MusicPlaybackEngine(
     fun next() {
         if (!active || !mayRequest()) return
         interruptions.reset()
-        begin { queue.next() }
+        val prepared = nextPreparation.take(queue.nextTrack?.id)
+        begin(keepRefill = true, prepared = prepared) { queue.next() }
     }
 
     fun previous() {
@@ -89,14 +97,22 @@ internal class MusicPlaybackEngine(
         begin(preserveCurrent = true) { queue.previous() }
     }
 
-    private fun begin(preserveCurrent: Boolean = false, refreshProvider: String? = null, select: suspend () -> MusicSelection?) {
+    private fun begin(
+        preserveCurrent: Boolean = false,
+        refreshProvider: String? = null,
+        keepRefill: Boolean = false,
+        prepared: Deferred<Result<PlayableAudio>>? = null,
+        select: suspend () -> MusicSelection?
+    ) {
         val oldState = state
         resourceRefreshed = refreshProvider != null
         if (NetworkPolicy.evaluate(network.value) != NetworkDecision.ALLOWED) {
+            prepared?.cancel()
             fail(MusicFailure.CONNECTION)
             return
         }
-        val id = invalidate()
+        val id = invalidate(keepRefill)
+        promoted = prepared
         desiredPlay = true
         loading = true
         if (!preserveCurrent) {
@@ -105,7 +121,7 @@ internal class MusicPlaybackEngine(
             focus.abandon()
         }
         publishState(state.copy(phase = PlaybackPhase.RESOLVING, musicFailure = null, error = null, operationFailure = null, canSeek = false))
-        pending = scope.launch {
+        val job = scope.launch(start = CoroutineStart.LAZY) {
             var selected = false
             try {
                 val result = withTimeout(8000) {
@@ -114,7 +130,11 @@ internal class MusicPlaybackEngine(
                     selected = true
                     if (!preserveCurrent) publishState(state.copy(music = selection.track))
                     val source = repository() ?: throw MusicException(MusicFailure.NOT_CONFIGURED)
-                    var playable = source.resolve(selection.track.id, refreshProvider)
+                    val ahead = prepared?.await()?.getOrThrow()
+                    ensureActive()
+                    val cached = ahead?.takeIf { it.trackId == selection.track.id && nextPreparation.fresh(it) }
+                    if (ahead != null && cached == null) resourceRefreshed = true
+                    var playable = cached ?: source.resolve(selection.track.id, refreshProvider ?: ahead?.providerId)
                     ensureActive()
                     if (playable.expiresAt?.isAfter(Instant.now()) == false && !resourceRefreshed) {
                         resourceRefreshed = true
@@ -135,8 +155,14 @@ internal class MusicPlaybackEngine(
             } catch (failure: MusicException) {
                 ensureActive()
                 if (active && id == generation) loadFailed(failure, preserveCurrent, oldState, selected)
+            } finally {
+                prepared?.cancel()
+                if (promoted === prepared) promoted = null
             }
         }
+        // 先登记再启动，避免连续同步失败时外层任务覆盖最新的取消句柄。
+        pending = job
+        job.start()
     }
 
     private fun loadFailed(failure: MusicException, preserve: Boolean, old: PlayerUiState, selected: Boolean) {
@@ -205,17 +231,11 @@ internal class MusicPlaybackEngine(
                     confirmed = current?.let(queue::recordSuccessfulPlayback) == true
                     if (confirmed) {
                         failures = 0
-                        refill = scope.launch {
-                            try {
-                                queue.replenish()
-                                ensureActive()
-                                if (active) publishState(state)
-                            } catch (cancelled: CancellationException) { throw cancelled }
-                            catch (_: MusicException) { /* 下一次真正切歌时再呈现候选获取错误。 */ }
-                        }
+                        refillSuppressed = false
                     }
                 }
                 publishState(state.copy(phase = PlaybackPhase.PLAYING, error = null, musicFailure = null))
+                maintainAhead()
             }
             player.playbackState == Player.STATE_ENDED -> {
                 if (desiredPlay && endedItem != itemId) { endedItem = itemId; next() }
@@ -251,6 +271,7 @@ internal class MusicPlaybackEngine(
         } else if (focus.acquire()) {
             if (!confirmed) current = current?.let(queue::renew)
             desiredPlay = true
+            refillSuppressed = false
             publishState(state.copy(phase = PlaybackPhase.BUFFERING, error = null))
             player.play(); watchBuffer(generation)
         }
@@ -258,8 +279,11 @@ internal class MusicPlaybackEngine(
 
     fun seek(positionMs: Long) {
         if (active && state.canSeek && !loading) {
-            player.seekTo(positionMs.coerceIn(0, state.durationMs ?: Long.MAX_VALUE))
+            val position = positionMs.coerceIn(0, state.durationMs ?: Long.MAX_VALUE)
+            if ((state.durationMs ?: Long.MAX_VALUE) - position > 8000) nextPreparation.cancel()
+            player.seekTo(position)
             publishState(state)
+            maintainAhead()
         }
     }
 
@@ -290,10 +314,52 @@ internal class MusicPlaybackEngine(
         publishState(state.copy(phase = PlaybackPhase.ERROR, musicFailure = failure, canSeek = false))
     }
 
-    private fun invalidate(): Long {
+    private fun invalidate(keepRefill: Boolean = false): Long {
         generation++
-        pending?.cancel(); refill?.cancel(); bufferTimeout?.cancel(); queue.invalidate()
+        pending?.cancel(); bufferTimeout?.cancel(); queue.invalidate()
+        nextPreparation.cancel(); promoted?.cancel(); promoted = null
+        if (!keepRefill) refill?.cancel()
         return generation
+    }
+
+    private fun maintainAhead() {
+        if (!active || loading || !desiredPlay || !confirmed || !itemMatches() || !player.isPlaying ||
+            NetworkPolicy.evaluate(network.value) != NetworkDecision.ALLOWED) return
+        try { requestGate.check() } catch (_: MusicException) { return }
+        if (!refillSuppressed && queue.needsReplenish && refill?.isActive != true) {
+            val owner = queue.sessionVersion
+            refillSuppressed = true
+            refill = scope.launch {
+                try {
+                    withTimeout(8000) { queue.replenish() }
+                    ensureActive()
+                    if (active && owner == queue.sessionVersion) {
+                        refillSuppressed = true
+                        publishState(state)
+                    }
+                } catch (_: TimeoutCancellationException) {
+                    ensureActive()
+                    if (active && owner == queue.sessionVersion) refillSuppressed = true
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (failure: MusicException) {
+                    ensureActive()
+                    if (active && owner == queue.sessionVersion) {
+                        refillSuppressed = true
+                        backgroundFailure(failure)
+                    }
+                }
+            }
+        }
+        try { requestGate.check() } catch (_: MusicException) { return }
+        val duration = player.duration.takeIf { it > 0 } ?: audio?.durationMs ?: return
+        if (duration - player.currentPosition in 1..8000) queue.nextTrack?.let(nextPreparation::prepare)
+    }
+
+    private fun backgroundFailure(failure: MusicException) {
+        if (failure.failure == MusicFailure.RATE_LIMITED) requestGate.block(failure.retryAfterSeconds)
+        else if (failure.retryAfterSeconds != null && failure.failure in
+            setOf(MusicFailure.SOURCE_UNAVAILABLE, MusicFailure.SOURCE_TIMEOUT))
+            requestGate.block(failure.retryAfterSeconds, failure.failure)
     }
 
     private fun itemMatches() = itemId != null && player.currentMediaItem?.mediaId == itemId

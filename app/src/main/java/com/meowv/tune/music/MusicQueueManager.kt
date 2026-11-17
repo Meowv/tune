@@ -23,10 +23,14 @@ internal class MusicQueueManager(
     private var issued = 0L
     private var committed = -1L
     private var index = -1
+    private var revision = 0L
 
     init { require(batchSize in 1..50 && lowWater >= 1 && historyLimit >= 2) }
     val canPrevious: Boolean get() = index > 0
     val canNext: Boolean get() = index < history.lastIndex || pending.isNotEmpty() || !exhausted
+    val nextTrack: MusicTrack? get() = if (index < history.lastIndex) history[index + 1] else pending.firstOrNull()
+    val needsReplenish: Boolean get() = pending.size + (history.lastIndex - index).coerceAtLeast(0) < lowWater && !exhausted
+    val sessionVersion: Long get() = revision
 
     fun invalidate() { issued++ }
     fun renew(selection: MusicSelection) = selection.copy(token = ++issued)
@@ -39,20 +43,22 @@ internal class MusicQueueManager(
 
     suspend fun next(): MusicSelection? {
         if (index < history.lastIndex) return MusicSelection(++issued, history[index + 1], index + 1)
-        if (pending.isEmpty()) replenish()
+        if (pending.isEmpty()) replenish(minimumOnly = true)
         currentCoroutineContext().ensureActive()
         return pending.removeFirstOrNull()?.let { MusicSelection(++issued, it) }
     }
 
     fun previous(): MusicSelection? = if (canPrevious) MusicSelection(++issued, history[index - 1], index - 1) else null
 
-    suspend fun replenish() = load.withLock {
+    suspend fun replenish(minimumOnly: Boolean = false) = load.withLock {
+        val owner = revision
         // 单次最多读取两页；重复游标或全重复目录不能造成无界补队列。
         repeat(2) {
-            if (pending.size >= lowWater || exhausted) return@withLock
+            if (!needsReplenish || minimumOnly && pending.isNotEmpty()) return@withLock
             val requestedCursor = cursor
             val page = repository().recommendations(batchSize, requestedCursor)
             currentCoroutineContext().ensureActive()
+            if (owner != revision) return@withLock
             if (page.items.size > batchSize) throw MusicException(MusicFailure.INVALID_RESPONSE)
             val known = considered + pending.map { it.id } + history.map { it.id }
             page.items.distinctBy { it.id }.filterNot { it.id in known }.forEach {
@@ -79,6 +85,7 @@ internal class MusicQueueManager(
     }
 
     fun reset() {
+        revision++
         invalidate()
         pending.clear(); history.clear(); considered.clear()
         cursor = null; exhausted = false; index = -1
