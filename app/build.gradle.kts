@@ -101,6 +101,11 @@ android {
         }
     }
 
+    sourceSets {
+        getByName("test").java.srcDir("src/testShared/java")
+        getByName("androidTest").java.srcDir("src/testShared/java")
+    }
+
     lint {
         abortOnError = true
         htmlReport = true

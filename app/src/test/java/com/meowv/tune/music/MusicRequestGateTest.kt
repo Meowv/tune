@@ -30,6 +30,17 @@ class MusicRequestGateTest {
         assertEquals(30L, musicRetryAfterSeconds("Mon, 16 Nov 2026 00:00:30 GMT", now))
         assertNull(musicRetryAfterSeconds("invalid", now))
     }
+    @Test fun unavailableCooldownRetainsItsClassificationAndDoesNotShortenAnExistingWindow() {
+        var now = 0L
+        val gate = MusicRequestGate { now }
+        gate.block(15, MusicFailure.SOURCE_UNAVAILABLE)
+        gate.block(1)
+        assertEquals(MusicFailure.SOURCE_UNAVAILABLE, blocked(gate).failure)
+        now = 15000
+        gate.check()
+        gate.block(15, MusicFailure.SOURCE_TIMEOUT)
+        assertEquals(MusicFailure.SOURCE_TIMEOUT, blocked(gate).failure)
+    }
     private fun blocked(gate: MusicRequestGate): MusicException {
         try { gate.check(); error("Expected cooldown") } catch (failure: MusicException) { return failure }
     }

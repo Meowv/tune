@@ -94,6 +94,18 @@ class MusicRepositoryTest {
         }
     }
 
+    @Test fun sourceOutageWithRetryAfterBlocksAllRequestsWithoutCallingItRateLimited() = runBlocking {
+        for ((status, reason) in listOf(503 to MusicFailure.SOURCE_UNAVAILABLE, 504 to MusicFailure.SOURCE_TIMEOUT)) {
+            server { server, repository ->
+                server.enqueue(MockResponse().setResponseCode(status).setHeader("Retry-After", "15").setBody("{broken"))
+                assertEquals(reason, failureSuspend { repository.recommendations() }.failure)
+                assertEquals(reason, failureSuspend { repository.search("qix") }.failure)
+                assertEquals(reason, failureSuspend { repository.resolve("original-001") }.failure)
+                assertEquals(1, server.requestCount)
+            }
+        }
+    }
+
     @Test fun cancellationCancelsTheInFlightRequest() = runBlocking {
         server { server, repository ->
             server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))

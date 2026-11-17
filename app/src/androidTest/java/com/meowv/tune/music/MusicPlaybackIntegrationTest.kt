@@ -517,6 +517,52 @@ class MusicPlaybackIntegrationTest {
         }
     }
 
+    @Test fun sourceBackoffStopsSkippingAndKeepsItsFailureReasonUntilManualRecovery() = runBlocking {
+        withMusic {
+            for (reason in listOf(MusicFailure.SOURCE_UNAVAILABLE, MusicFailure.SOURCE_TIMEOUT)) {
+                resolves.clear()
+                resolveOverride = { throw MusicException(reason, 1) }
+                connection.dispatch(PlayerCommand.PlayMusic())
+                awaitPhase(PlaybackPhase.ERROR)
+                assertEquals(reason, connection.state.value.musicFailure)
+                repeat(3) {
+                    connection.dispatch(PlayerCommand.Next)
+                    connection.dispatch(PlayerCommand.TogglePause)
+                }
+                delay(100)
+                assertEquals(1, resolves.values.sumOf { it.get() })
+                assertEquals(reason, connection.state.value.musicFailure)
+                delay(1100)
+                assertEquals(PlaybackPhase.ERROR, connection.state.value.phase)
+                resolveOverride = null
+                connection.dispatch(PlayerCommand.PlayMusic())
+                awaitMusic(1)
+            }
+        }
+    }
+
+    @Test fun blockedPreviousKeepsCurrentAudioAndDoesNotIssueAnotherResolve() = runBlocking {
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            connection.dispatch(PlayerCommand.Next)
+            awaitMusic(2)
+            resolveOverride = { throw MusicException(MusicFailure.SOURCE_UNAVAILABLE, 1) }
+            connection.dispatch(PlayerCommand.Previous)
+            withTimeout(4000) { connection.state.first { it.operationFailure != null } }
+            val first = connection.state.value.operationFailure!!.id
+            connection.dispatch(PlayerCommand.Previous)
+            withTimeout(4000) { connection.state.first { it.operationFailure?.id != first } }
+            assertEquals(PlaybackPhase.PLAYING, connection.state.value.phase)
+            assertEquals(tracks[1].id, connection.state.value.music?.id)
+            assertEquals(2, resolves[tracks[0].id]?.get())
+            delay(1100)
+            resolveOverride = null
+            connection.dispatch(PlayerCommand.Previous)
+            awaitMusic(1)
+        }
+    }
+
     private suspend fun withMusic(block: suspend (ActivityScenario<MainActivity>) -> Unit) {
         app.musicMediaRequests.clear()
         val fake = FakeMusicRepository(catalog)

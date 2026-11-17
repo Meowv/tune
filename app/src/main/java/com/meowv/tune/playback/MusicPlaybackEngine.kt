@@ -44,6 +44,7 @@ internal class MusicPlaybackEngine(
     private var resourceRefreshed = false
     private val requestGate = MusicRequestGate()
     private var failures = 0
+    private var operationSequence = 0L
     private var state = PlayerUiState(source = PlaybackSource.MUSIC)
     val snapshot: PlayerUiState get() = state
 
@@ -83,7 +84,7 @@ internal class MusicPlaybackEngine(
     }
 
     fun previous() {
-        if (!active || !queue.canPrevious || !mayRequest()) return
+        if (!active || !queue.canPrevious || !mayRequest(preserveCurrent = true)) return
         interruptions.reset()
         begin(preserveCurrent = true) { queue.previous() }
     }
@@ -141,11 +142,14 @@ internal class MusicPlaybackEngine(
     private fun loadFailed(failure: MusicException, preserve: Boolean, old: PlayerUiState, selected: Boolean) {
         loading = false
         if (failure.failure == MusicFailure.RATE_LIMITED) requestGate.block(failure.retryAfterSeconds)
+        val sourceBackoff = failure.retryAfterSeconds != null &&
+            failure.failure in setOf(MusicFailure.SOURCE_UNAVAILABLE, MusicFailure.SOURCE_TIMEOUT)
+        if (sourceBackoff) requestGate.block(failure.retryAfterSeconds, failure.failure)
         if (preserve && itemMatches() && player.playbackState != Player.STATE_ENDED) {
             queue.invalidate()
             desiredPlay = player.playWhenReady
-            publishState(old.copy(operationFailure = PlaybackOperationFailure(generation, TuneError.PLAYBACK)))
-        } else if (!preserve && selected && failure.failure in setOf(MusicFailure.TRACK_NOT_FOUND,
+            publishState(old.copy(operationFailure = PlaybackOperationFailure(++operationSequence, TuneError.PLAYBACK)))
+        } else if (!preserve && !sourceBackoff && selected && failure.failure in setOf(MusicFailure.TRACK_NOT_FOUND,
                 MusicFailure.NO_PLAYABLE_MATCH, MusicFailure.SOURCE_UNAVAILABLE, MusicFailure.SOURCE_TIMEOUT,
                 MusicFailure.PLAYBACK_UNAVAILABLE) && ++failures < 5 && queue.canNext) {
             next()
@@ -273,8 +277,10 @@ internal class MusicPlaybackEngine(
         scope.cancel(); route.close(); focus.abandon(); player.removeListener(this)
     }
 
-    private fun mayRequest(): Boolean = try { requestGate.check(); true } catch (_: MusicException) {
-        fail(MusicFailure.RATE_LIMITED)
+    private fun mayRequest(preserveCurrent: Boolean = false): Boolean = try { requestGate.check(); true } catch (failure: MusicException) {
+        if (preserveCurrent && itemMatches() && player.playbackState != Player.STATE_ENDED)
+            publishState(state.copy(operationFailure = PlaybackOperationFailure(++operationSequence, TuneError.PLAYBACK)))
+        else fail(failure.failure)
         false
     }
 

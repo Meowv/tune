@@ -2,7 +2,7 @@ package com.meowv.tune.music
 
 import com.meowv.tune.domain.music.*
 
-// 无默认媒体地址；调用方显式注入测试资源，不能在正式包里假装存在可播服务。
+// 仅测试源码集可见；调用方显式注入测试音频，不进入正式App。
 internal class FakeMusicRepository(
     private val tracks: List<MusicTrack>,
     private val audio: Map<String, PlayableAudio> = emptyMap()

@@ -78,7 +78,6 @@ internal fun MusicSearchScreen(
                             track.matches.firstOrNull()?.let { source ->
                                 Text(stringResource(when (source.providerId) {
                                     "netease" -> R.string.music_source_netease
-                                    "original-demo" -> R.string.music_source_demo
                                     else -> R.string.music_source_other
                                 }), color = TuneColors.Muted)
                             }

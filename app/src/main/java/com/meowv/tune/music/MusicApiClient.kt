@@ -83,7 +83,10 @@ internal class MusicApiClient(
                 override fun onResponse(call: Call, response: Response) {
                     try {
                         val result = response.use { value ->
-                            if (value.code == 429) retryAfter(value.header("Retry-After"))?.let(requestGate::block)
+                            if (value.code == 429) retryAfter(value.header("Retry-After"))?.let { requestGate.block(it) }
+                            if (value.code in setOf(503, 504)) retryAfter(value.header("Retry-After"))?.let {
+                                requestGate.block(it, if (value.code == 503) MusicFailure.SOURCE_UNAVAILABLE else MusicFailure.SOURCE_TIMEOUT)
+                            }
                             val source = value.body?.source() ?: throw MusicException(MusicFailure.INVALID_RESPONSE)
                             val buffer = Buffer()
                             while (buffer.size <= MAX_BYTES) {
@@ -94,6 +97,8 @@ internal class MusicApiClient(
                             if (!value.isSuccessful) {
                                 val failure = MusicJson.error(body, value.code, retryAfter(value.header("Retry-After")))
                                 if (value.code == 429) requestGate.block(failure.retryAfterSeconds)
+                                if (value.code in setOf(503, 504) && failure.retryAfterSeconds != null)
+                                    requestGate.block(failure.retryAfterSeconds, failure.failure)
                                 throw failure
                             }
                             body

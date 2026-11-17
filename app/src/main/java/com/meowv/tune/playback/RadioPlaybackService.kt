@@ -42,7 +42,7 @@ class RadioPlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         val app = application as TuneApplication
-        val transport = app.playbackCalls
+        val transport = app.mediaHttp
         val dataSources = OkHttpDataSource.Factory(transport).setUserAgent("MeowvTune")
         val audio = AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build()
         val loadErrors = object : DefaultLoadErrorHandlingPolicy() {
