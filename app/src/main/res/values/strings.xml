@@ -206,10 +206,6 @@
     <string name="update_value_unknown">暂无信息</string>
     <string name="update_notes_expand">查看完整更新日志 ↓</string>
     <string name="update_notes_collapse">收起更新日志 ↑</string>
-  <string name="music_recommended">推荐</string>
-  <string name="music_chart">飙升榜</string>
-  <string name="music_chart_rank">%1$s 第 %2$d</string>
-  <string name="music_stale">部分榜单为上次更新的数据</string>
   <string name="music_open_player">打开播放页</string>
   <string name="music_now_playing">正在播放</string>
   <string name="music_resume_at">继续播放 · %1$s</string>

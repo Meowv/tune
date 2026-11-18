@@ -22,28 +22,18 @@ sealed interface MusicUiState {
     data class Error(val failure: MusicFailure) : MusicUiState
 }
 
-internal enum class MusicSection { Recommendations, Chart }
-
 internal data class MusicFeed(
-    val rows: List<MusicChartRow> = emptyList(),
+    val tracks: List<MusicTrack> = emptyList(),
     val cursor: String? = null,
     val loaded: Boolean = false,
     val loading: Boolean = false,
     val partial: Boolean = false,
-    val stale: Boolean = false,
     val failure: MusicFailure? = null
 )
 
-internal data class MusicBrowseState(
-    val section: MusicSection = MusicSection.Recommendations,
-    val feeds: Map<MusicSection, MusicFeed> = emptyMap()
-) {
-    val feed: MusicFeed get() = feeds[section] ?: MusicFeed()
-}
-
 internal class MusicViewModel(
     private val repository: MusicRepository?,
-    private val requestPlayback: (suspend () -> Unit)? = null,
+    private val requestPlayback: (suspend (MusicQueueSeed?) -> Unit)? = null,
     scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
     playback: StateFlow<PlayerUiState>? = null
 ) : ViewModel(scope) {
@@ -64,47 +54,30 @@ internal class MusicViewModel(
         }
     }
 
-    private val mutableBrowse = MutableStateFlow(MusicBrowseState())
+    private val mutableBrowse = MutableStateFlow(MusicFeed())
     val browse = mutableBrowse.asStateFlow()
 
-    fun enter() = selectSection(mutableBrowse.value.section)
-
-    fun selectSection(section: MusicSection) {
-        mutableBrowse.value = mutableBrowse.value.copy(section = section)
-        val feed = mutableBrowse.value.feed
+    fun enter() {
+        val feed = mutableBrowse.value
         if (!feed.loaded && feed.failure == null) loadFeed()
     }
 
     fun loadFeed(more: Boolean = false) {
         val source = repository ?: return
-        val (section) = mutableBrowse.value
-        val previous = mutableBrowse.value.feed
+        val previous = mutableBrowse.value
         if (previous.loading || more && previous.cursor == null) return
         val cursor = if (more) previous.cursor else null
-        updateFeed(section, previous.copy(loading = true, failure = null))
+        mutableBrowse.value = previous.copy(loading = true, failure = null)
         viewModelScope.launch {
             try {
-                val feed = when (section) {
-                    MusicSection.Chart -> source.charts().let {
-                        MusicFeed(rows = it.rows.distinctBy { row -> row.track.id }, loaded = true,
-                            partial = it.partial, stale = it.stale)
-                    }
-                    MusicSection.Recommendations -> source.recommendations(cursor = cursor).let {
-                        val rows = (if (more) previous.rows else emptyList()) + it.items.map { track -> MusicChartRow(track) }
-                        MusicFeed(rows = rows.distinctBy { row -> row.track.id }, loaded = true,
-                            cursor = it.nextCursor?.takeUnless { next -> next == cursor }, partial = it.partial)
-                    }
-                }
-                updateFeed(section, feed)
+                val page = source.recommendations(cursor = cursor)
+                val tracks = (if (more) previous.tracks else emptyList()) + page.items.filter { it.canStartPlayback }
+                mutableBrowse.value = MusicFeed(tracks = tracks.distinctBy { it.id }, loaded = true,
+                    cursor = page.nextCursor?.takeUnless { it == cursor }, partial = page.partial)
             } catch (failure: MusicException) {
-                updateFeed(section, previous.copy(loading = false, failure = failure.failure))
+                mutableBrowse.value = previous.copy(loading = false, failure = failure.failure)
             }
         }
-    }
-
-    private fun updateFeed(section: MusicSection, feed: MusicFeed) {
-        val state = mutableBrowse.value
-        mutableBrowse.value = state.copy(feeds = state.feeds + (section to feed))
     }
 
     fun startListening() {
@@ -115,10 +88,11 @@ internal class MusicViewModel(
         pending = viewModelScope.launch {
             try {
                 if (requestPlayback != null) {
-                    requestPlayback.invoke()
+                    val feed = mutableBrowse.value
+                    requestPlayback(feed.tracks.takeIf { it.isNotEmpty() }?.let { MusicQueueSeed(it, feed.cursor) })
                     return@launch
                 }
-                val track = source.recommendations().items.firstOrNull()
+                val track = source.recommendations().items.firstOrNull { it.canStartPlayback }
                 ensureActive()
                 if (current != generation) return@launch
                 mutableState.value = if (track == null) MusicUiState.Empty else MusicUiState.Ready(track)

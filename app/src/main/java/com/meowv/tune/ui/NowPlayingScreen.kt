@@ -61,7 +61,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -265,9 +264,6 @@ private fun NowPlayingBackdrop(wide: Boolean, modifier: Modifier = Modifier) {
     val primary = TuneColors.Primary
     val primaryLight = TuneColors.PrimaryLight
     val accent = TuneColors.Accent
-    val light = background.luminance() > .5f
-    val glowCenter = if (light) Color(0xFFEEE8FB) else Color(0xFF2A214F)
-    val glowEdge = if (light) Color(0xFFF6F2FB) else Color(0xFF151A34)
     Canvas(modifier.fillMaxSize()) {
         val center = Offset(
             x = size.width * if (wide) .31f else .5f,
@@ -276,8 +272,8 @@ private fun NowPlayingBackdrop(wide: Boolean, modifier: Modifier = Modifier) {
         drawRect(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    glowCenter,
-                    glowEdge,
+                    Color(0xFF2A214F),
+                    Color(0xFF151A34),
                     background
                 ),
                 center = center,
@@ -404,8 +400,7 @@ private fun NowPlayingBackdrop(wide: Boolean, modifier: Modifier = Modifier) {
         drawPath(
             lowerWave,
             Brush.verticalGradient(
-                if (light) listOf(primary.copy(alpha = .10f), background)
-                else listOf(Color(0xFF34205E).copy(alpha = .46f), Color(0xFF111832))
+                listOf(Color(0xFF34205E).copy(alpha = .46f), Color(0xFF111832))
             )
         )
 
@@ -425,7 +420,7 @@ private fun NowPlayingBackdrop(wide: Boolean, modifier: Modifier = Modifier) {
             lineTo(0f, size.height)
             close()
         }
-        drawPath(bottomWave, if (light) background.copy(alpha = .92f) else Color(0xFF14162F).copy(alpha = .9f))
+        drawPath(bottomWave, Color(0xFF14162F).copy(alpha = .9f))
     }
 }
 

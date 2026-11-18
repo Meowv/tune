@@ -128,12 +128,12 @@ internal class MusicPlaybackEngine(
         lastCheckpointAt = android.os.SystemClock.elapsedRealtime()
     }
 
-    fun play(track: MusicTrack? = null, resetSession: Boolean = true) {
-        if (!active || !mayRequest()) return
+    fun play(track: MusicTrack? = null, resetSession: Boolean = true, seed: MusicQueueSeed? = null) {
+        if (!active || track != null && !track.canStartPlayback || !mayRequest()) return
         failures = 0
         resumePoint = null
         interruptions.reset()
-        if (resetSession || !queue.canNext) queue.reset()
+        if (resetSession || !queue.canNext) queue.reset(seed, track?.id)
         begin { if (track == null) queue.next() else queue.select(track) }
     }
 

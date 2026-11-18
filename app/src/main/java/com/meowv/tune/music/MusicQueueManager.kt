@@ -116,12 +116,20 @@ internal class MusicQueueManager(
         return true
     }
 
-    fun reset() {
+    fun reset(seed: MusicQueueSeed? = null, startAt: String? = null) {
         revision++
         invalidate()
         pending.clear(); history.clear(); considered.clear(); played.clear(); skipped.clear(); seenCursors.clear()
         clearSkipSignal()
         cursor = null; exhausted = false; index = -1
+        if (seed != null) {
+            val tracks = seed.tracks.filter { it.canStartPlayback }.distinctBy { it.id }
+            val selected = tracks.indexOfFirst { it.id == startAt }
+            pending.addAll(tracks.drop(selected + 1))
+            tracks.forEach { remember(it.id) }
+            cursor = seed.nextCursor
+            exhausted = cursor == null
+        }
     }
 
     private fun remember(id: String) {

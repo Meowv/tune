@@ -100,7 +100,7 @@ class MusicSearchIntegrationTest {
         }
     }
 
-    @Test fun metadataOnlySearchResultShowsItsCapabilityAndCannotStartPlayback() = runBlocking {
+    @Test fun metadataOnlySearchResultIsHidden() = runBlocking {
         installFakeUnlessUsingLocalBuild()
         app.userSettings.update { it.copy(autoPlay = false) }
         ActivityScenario.launch(MainActivity::class.java).use {
@@ -109,13 +109,10 @@ class MusicSearchIntegrationTest {
             try {
                 compose.onNodeWithTag("nav_music").performClick()
                 compose.onNodeWithTag("music_search_open").performClick()
-                compose.onNodeWithTag("music_search_query").performTextInput("qix")
+                compose.onNodeWithTag("music_search_query").performTextInput("Metadata")
                 compose.onNodeWithTag("music_search_submit").performClick()
-                compose.waitUntil(4000) { compose.onAllNodesWithTag("music_search_result_metadata").fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithTag("music_search_results").performScrollToNode(hasTestTag("music_search_result_metadata"))
-                compose.onNodeWithTag("music_search_result_metadata").assertIsNotEnabled()
-                compose.onNodeWithText("仅提供搜索信息").assertIsDisplayed()
-                compose.onNodeWithText("QQ 音乐").assertIsDisplayed()
+                compose.waitUntil(4000) { compose.onAllNodesWithTag("music_search_empty").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("music_search_result_metadata").assertDoesNotExist()
                 assertEquals(PlaybackPhase.IDLE, connection.state.value.phase)
             } finally { app.testMusicRepository = null }
         }
@@ -142,8 +139,8 @@ class MusicSearchIntegrationTest {
                 compose.onNodeWithTag("music_search_open").performClick()
                 compose.onNodeWithTag("music_search_query").performTextInput("qix")
                 compose.onNodeWithTag("music_search_submit").performClick()
-                compose.waitUntil(4000) { compose.onAllNodesWithTag("music_search_result_metadata").fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithTag("music_search_result_metadata").assertIsNotEnabled()
+                compose.waitUntil(4000) { compose.onAllNodesWithTag("music_search_more").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("music_search_result_metadata").assertDoesNotExist()
                 compose.onNodeWithText("网易云音乐 响应较慢，加载更多可继续搜索").assertIsDisplayed()
                 compose.onNodeWithTag("music_search_more").performScrollTo().performClick()
                 compose.waitUntil(4000) { compose.onAllNodesWithTag("music_search_result_original-001").fetchSemanticsNodes().isNotEmpty() }

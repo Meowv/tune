@@ -49,11 +49,6 @@ internal class MusicApiClient(
         return MusicJson.page(request("search", limit, cursor, query))
     }
     override suspend fun recommendations(limit: Int, cursor: String?) = MusicJson.page(request("recommendations", limit, cursor), recommendation = true)
-    override suspend fun charts(): MusicChartPage {
-        val url = baseUrl.newBuilder().addPathSegments("charts/daily").build()
-        return MusicJson.chart(execute(Request.Builder().url(url).get()))
-    }
-
     override suspend fun lyrics(trackId: String, providerId: String): List<MusicLyricLine> {
         val url = baseUrl.newBuilder().addPathSegment("lyrics").addQueryParameter("trackId", trackId)
             .addQueryParameter("providerId", providerId).build()

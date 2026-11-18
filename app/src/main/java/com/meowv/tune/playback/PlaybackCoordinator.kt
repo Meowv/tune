@@ -2,6 +2,8 @@ package com.meowv.tune.playback
 
 import com.meowv.tune.domain.*
 import com.meowv.tune.domain.music.MusicTrack
+import com.meowv.tune.domain.music.MusicQueueSeed
+import com.meowv.tune.domain.music.canStartPlayback
 
 // 所有入口在服务主线程同步交接归属，耗时解析留给各引擎可取消的子任务。
 internal class PlaybackCoordinator(
@@ -36,10 +38,11 @@ internal class PlaybackCoordinator(
         radio.play(station)
     }
 
-    fun playMusic(track: MusicTrack?) {
+    fun playMusic(track: MusicTrack?, seed: MusicQueueSeed?) {
+        if (track != null && !track.canStartPlayback) return
         entryHandled = true
         selectMusic()
-        music.play(track)
+        music.play(track, seed = seed)
     }
 
     private fun selectMusic() {
@@ -51,7 +54,7 @@ internal class PlaybackCoordinator(
     fun dispatch(command: PlayerCommand) {
         when (command) {
             is PlayerCommand.Play -> playRadio(command.station)
-            is PlayerCommand.PlayMusic -> playMusic(command.track)
+            is PlayerCommand.PlayMusic -> playMusic(command.track, command.seed)
             is PlayerCommand.Seek -> if (activeSource == PlaybackSource.MUSIC) music.seek(command.positionMs)
             PlayerCommand.TogglePause -> if (activeSource == PlaybackSource.MUSIC) music.toggle() else radio.toggle()
             PlayerCommand.Next -> onSessionNext()

@@ -77,7 +77,7 @@ internal fun MusicSearchScreen(
                         else -> R.string.music_search_failed
                     }), color = MaterialTheme.colorScheme.error)
                 }
-                if (state.searched && !state.loading && state.failure == null && state.items.isEmpty()) {
+                if (state.searched && !state.loading && state.failure == null && state.items.none { it.canStartPlayback }) {
                     Text(stringResource(R.string.music_search_empty), color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.testTag("music_search_empty"))
                 }
@@ -96,7 +96,7 @@ internal fun MusicSearchScreen(
                             Text(stringResource(message, stringResource(musicSourceName(provider))), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                    items(state.items, key = { it.id }) { track ->
+                    items(state.items.filter { it.canStartPlayback }, key = { it.id }) { track ->
                         val sources = track.matches.map { stringResource(musicSourceName(it.providerId)) }.distinct()
                         MusicTrackRow(track, current = false, playing = false, enabled = !state.selecting,
                             detail = sources.takeIf { it.size > 1 || !track.canStartPlayback }?.joinToString(" · "),

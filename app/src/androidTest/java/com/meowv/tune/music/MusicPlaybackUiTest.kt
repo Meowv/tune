@@ -20,20 +20,17 @@ import org.junit.Test
 class MusicPlaybackUiTest {
     @get:Rule val compose = createEmptyComposeRule()
 
-    @Test fun musicPageAndImmersiveControlsFollowTheActiveSource() = runBlocking {
+    @Test fun musicPageAndImmersiveControlsFollowTheActiveSource() = runBlocking<Unit> {
         val app = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as TuneTestApplication
         val originals = InstrumentationRegistry.getArguments().getString("musicOriginals") == "true"
-        val tracks = (1..2).map { MusicTrack("ui-$it", if (it == 1) "睡醒就好了" else "今天也不错", listOf("qix"), durationMs = 12000) }
+        val tracks = (1..3).map { MusicTrack("ui-$it", if (it == 1) "睡醒就好了" else if (it == 2) "今天也不错" else "第三首", listOf("qix"), durationMs = 12000) }
         val audio = tracks.mapIndexed { index, track ->
             track.id to PlayableAudio(track.id, "test", track.id, 1.0,
                 if (originals) "https://original.test/original-00${index + 1}.mp3" else "https://test.example/radio.mp3",
                 "audio/mpeg", 12000, seekable = true)
         }.toMap()
-        app.testMusicRepository = object : MusicRepository by FakeMusicRepository(tracks, audio) {
-            override suspend fun charts() = MusicChartPage(tracks.map { track ->
-                MusicChartRow(track, listOf(MusicChartRank("qqmusic", 7)))
-            })
-        }
+        val unavailable = MusicTrack("unavailable", "不存在的曲目", listOf("qix"), availability = "unavailable")
+        app.testMusicRepository = FakeMusicRepository(listOf(unavailable) + tracks, audio)
         app.mockNetwork.value = NetworkState(NetworkType.WIFI)
         app.userSettings.update { it.copy(autoPlay = false) }
         ActivityScenario.launch(MainActivity::class.java).use {
@@ -44,8 +41,15 @@ class MusicPlaybackUiTest {
                 compose.onNodeWithTag("music_start").performClick()
                 withTimeout(6000) { connection.state.first { state -> state.phase == PlaybackPhase.PLAYING && state.music?.id == "ui-1" } }
                 compose.onNodeWithTag("music_feed").assertIsDisplayed()
-                compose.onNodeWithText("飙升榜").performClick()
-                compose.waitUntil(5000) { compose.onAllNodes(hasText("QQ 音乐 第 7")).fetchSemanticsNodes().isNotEmpty() }
+                compose.waitUntil(5000) {
+                    compose.onAllNodesWithTag("music_feed_track_ui-2").fetchSemanticsNodes().isNotEmpty()
+                }
+                compose.onNode(hasText("音乐") and hasAnyAncestor(hasTestTag("page_music"))).assertDoesNotExist()
+                compose.onNodeWithText("推荐").assertDoesNotExist()
+                compose.onNodeWithText("飙升榜").assertDoesNotExist()
+                compose.onNodeWithText("不存在的曲目").assertDoesNotExist()
+                compose.onNodeWithTag("music_feed_track_ui-2").performClick()
+                withTimeout(6000) { connection.state.first { it.phase == PlaybackPhase.PLAYING && it.music?.id == "ui-2" } }
                 capture("page")
                 compose.onNodeWithTag("music_current").performClick()
                 compose.onNodeWithTag("now_playing_screen").assertExists()
@@ -55,12 +59,12 @@ class MusicPlaybackUiTest {
                 assertTrue(connection.state.value.canSeek)
                 compose.onNodeWithTag("music_sleep_timer").performScrollTo().assertIsEnabled()
                 compose.onNodeWithTag("music_next").performScrollTo().performClick()
-                withTimeout(6000) { connection.state.first { state -> state.phase == PlaybackPhase.PLAYING && state.music?.id == "ui-2" } }
+                withTimeout(6000) { connection.state.first { state -> state.phase == PlaybackPhase.PLAYING && state.music?.id == "ui-3" } }
                 compose.onNodeWithTag("music_toggle").performScrollTo().performClick()
                 withTimeout(3000) { connection.state.first { state -> state.phase == PlaybackPhase.PAUSED } }
                 capture("immersive")
                 compose.onNodeWithTag("now_playing_collapse").performClick()
-                compose.waitUntil(5000) { compose.onAllNodes(hasText("QQ 音乐 第 7")).fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("music_feed").assertIsDisplayed()
             } finally {
                 connection.dispatch(PlayerCommand.Stop)
                 app.testMusicRepository = null

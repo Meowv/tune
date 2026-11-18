@@ -9,7 +9,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -20,8 +19,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -31,50 +28,43 @@ import com.meowv.tune.R
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.domain.music.MusicTrack
+import com.meowv.tune.domain.music.MusicQueueSeed
 import com.meowv.tune.domain.music.MusicFailure
 import com.meowv.tune.domain.music.canStartPlayback
-import com.meowv.tune.music.MusicBrowseState
-import com.meowv.tune.music.MusicSection
+import com.meowv.tune.music.MusicFeed
 import com.meowv.tune.music.MusicUiState
 import com.meowv.tune.ui.theme.TuneShapes
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun MusicScreen(
     isCar: Boolean,
     state: MusicUiState,
-    browse: MusicBrowseState,
+    browse: MusicFeed,
     onStart: () -> Unit,
     onCancel: () -> Unit,
     onOpenPlayer: () -> Unit,
     connected: Boolean,
     onCommand: (PlayerCommand) -> Unit,
     onSearch: () -> Unit,
-    onSection: (MusicSection) -> Unit,
     onLoad: (Boolean) -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
     val playback = (state as? MusicUiState.Active)?.playback
     val playing = playback?.phase == PlaybackPhase.PLAYING
-    val recommendations = rememberLazyListState()
-    val chart = rememberLazyListState()
-    val feed = browse.feed
+    val list = rememberLazyListState()
+    val feed = browse
     Surface(color = colors.background, modifier = Modifier.fillMaxSize().testTag("page_music")) {
         Column(Modifier.fillMaxSize().padding(horizontal = if (isCar) 24.dp else 16.dp)) {
-            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.menu_music), Modifier.weight(1f).semantics { heading() },
-                    style = MaterialTheme.typography.headlineSmall)
-                if (state != MusicUiState.NotConfigured) {
-                    IconButton(onClick = onSearch, modifier = Modifier.testTag("music_search_open")) {
-                        Icon(painterResource(R.drawable.ic_ui_search), stringResource(R.string.music_search))
-                    }
+            if (state != MusicUiState.NotConfigured) {
+                IconButton(onClick = onSearch, modifier = Modifier.align(Alignment.End).testTag("music_search_open")) {
+                    Icon(painterResource(R.drawable.ic_ui_search), stringResource(R.string.music_search))
                 }
             }
             if (state == MusicUiState.NotConfigured) {
                 Text(stringResource(R.string.music_not_configured), Modifier.padding(vertical = 24.dp))
                 return@Column
             }
-            val track = playback?.music
+            val track = playback?.music?.takeIf { it.canStartPlayback && playback.phase != PlaybackPhase.ERROR }
             if (playback != null && track != null) {
                 val busy = playback.phase in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.BUFFERING, PlaybackPhase.RETRYING)
                 Surface(shape = TuneShapes.Player, color = colors.surfaceVariant,
@@ -114,6 +104,8 @@ internal fun MusicScreen(
                 }
             } else {
                 when (state) {
+                    is MusicUiState.Active -> if (playback?.phase == PlaybackPhase.ERROR)
+                        Text(stringResource(musicPlaybackFailureMessage(playback.musicFailure)), color = colors.error) else Unit
                     is MusicUiState.Error -> Text(stringResource(musicPlaybackFailureMessage(state.failure)), color = colors.error)
                     MusicUiState.Empty -> Text(stringResource(R.string.music_empty))
                     is MusicUiState.Ready -> {
@@ -128,48 +120,38 @@ internal fun MusicScreen(
                     Text(stringResource(R.string.music_start))
                 }
             }
-            TabRow(selectedTabIndex = browse.section.ordinal) {
-                MusicSection.entries.forEach { section ->
-                    Tab(selected = browse.section == section, onClick = { onSection(section) },
-                        text = { Text(stringResource(if (section == MusicSection.Chart) R.string.music_chart else R.string.music_recommended)) })
+            LazyColumn(state = list, modifier = Modifier.weight(1f).fillMaxWidth().testTag("music_feed"),
+                contentPadding = PaddingValues(vertical = 8.dp)) {
+                if (feed.loading) {
+                    item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+                    if (feed.tracks.isEmpty()) items(3) {
+                        Row(Modifier.fillMaxWidth().height(72.dp).padding(horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Spacer(Modifier.size(48.dp).background(colors.surfaceVariant, TuneShapes.Control))
+                            Spacer(Modifier.fillMaxWidth(.55f).height(12.dp).background(colors.surfaceVariant, TuneShapes.Control))
+                        }
+                    }
                 }
-            }
-            key(browse.section) {
-                LazyColumn(state = if (browse.section == MusicSection.Chart) chart else recommendations,
-                    modifier = Modifier.weight(1f).fillMaxWidth().testTag("music_feed"),
-                    contentPadding = PaddingValues(vertical = 8.dp)) {
-                    if (feed.loading) {
-                        item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-                        if (feed.rows.isEmpty()) items(3) {
-                            Row(Modifier.fillMaxWidth().height(72.dp).padding(horizontal = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Spacer(Modifier.size(48.dp).background(colors.surfaceVariant, TuneShapes.Control))
-                                Spacer(Modifier.fillMaxWidth(.55f).height(12.dp).background(colors.surfaceVariant, TuneShapes.Control))
-                            }
-                        }
+                if (feed.partial) item {
+                    Text(stringResource(R.string.music_search_partial),
+                        color = colors.onSurfaceVariant, modifier = Modifier.padding(8.dp))
+                }
+                items(feed.tracks, key = { it.id }) { song ->
+                    val current = song.id == track?.id
+                    MusicTrackRow(song, current, current && playing, connected, detail = null,
+                        modifier = Modifier.testTag("music_feed_track_${song.id}")) {
+                        if (current) onOpenPlayer()
+                        else onCommand(PlayerCommand.PlayMusic(song, MusicQueueSeed(feed.tracks, feed.cursor)))
                     }
-                    if (feed.stale || feed.partial) item {
-                        Text(stringResource(if (feed.stale) R.string.music_stale else R.string.music_search_partial),
-                            color = colors.onSurfaceVariant, modifier = Modifier.padding(8.dp))
+                }
+                if (feed.failure != null || feed.cursor != null) item {
+                    feed.failure?.let { Text(stringResource(musicPlaybackFailureMessage(it)), color = colors.error) }
+                    TextButton(enabled = !feed.loading, onClick = { onLoad(feed.cursor != null) }) {
+                        Text(stringResource(if (feed.failure != null) R.string.music_retry else R.string.music_search_more))
                     }
-                    items(feed.rows, key = { it.track.id }) { row ->
-                        val current = row.track.id == playback?.music?.id
-                        val rankLabel = if (row.ranks.isEmpty()) null else row.ranks.map { rank ->
-                            stringResource(R.string.music_chart_rank, stringResource(musicSourceName(rank.source)), rank.rank)
-                        }.joinToString(" · ")
-                        MusicTrackRow(row.track, current, current && playing, connected, rankLabel) {
-                            if (current) onOpenPlayer() else onCommand(PlayerCommand.PlayMusic(row.track))
-                        }
-                    }
-                    if (feed.failure != null || feed.cursor != null) item {
-                        feed.failure?.let { Text(stringResource(musicPlaybackFailureMessage(it)), color = colors.error) }
-                        TextButton(enabled = !feed.loading, onClick = { onLoad(feed.cursor != null) }) {
-                            Text(stringResource(if (feed.failure != null) R.string.music_retry else R.string.music_search_more))
-                        }
-                    } else if (feed.loaded && feed.rows.isEmpty()) item {
-                        Text(stringResource(R.string.music_empty), Modifier.padding(top = 16.dp))
-                        TextButton(onClick = onSearch) { Text(stringResource(R.string.music_search)) }
-                    }
+                } else if (feed.loaded && feed.tracks.isEmpty()) item {
+                    Text(stringResource(R.string.music_empty), Modifier.padding(top = 16.dp))
+                    TextButton(onClick = onSearch) { Text(stringResource(R.string.music_search)) }
                 }
             }
         }

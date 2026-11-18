@@ -55,7 +55,4 @@ class MusicException(val failure: MusicFailure, val retryAfterSeconds: Long? = n
 
 internal val MusicTrack.canStartPlayback: Boolean get() = availability in setOf("candidate", "available")
 
-
-data class MusicChartRank(val source: String, val rank: Int)
-data class MusicChartRow(val track: MusicTrack, val ranks: List<MusicChartRank> = emptyList())
-data class MusicChartPage(val rows: List<MusicChartRow>, val partial: Boolean = false, val stale: Boolean = false)
+data class MusicQueueSeed(val tracks: List<MusicTrack>, val nextCursor: String?)
