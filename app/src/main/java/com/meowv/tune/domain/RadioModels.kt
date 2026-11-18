@@ -103,8 +103,7 @@ data class PlayerUiState(
     val canSeek: Boolean = false,
     val durationMs: Long? = null,
     val positionMs: Long? = null,
-    val musicFailure: MusicFailure? = null,
-    val musicProviderId: String? = null
+    val musicFailure: MusicFailure? = null
 ) {
     init {
         require(source != PlaybackSource.MUSIC || station == null)

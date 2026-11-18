@@ -14,7 +14,6 @@ import com.meowv.tune.MainActivity
 import com.meowv.tune.TuneTestApplication
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlayerCommand
-import com.meowv.tune.domain.music.MusicRepository
 import com.meowv.tune.playback.RadioPlaybackService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -28,47 +27,6 @@ import org.junit.Test
 
 class MusicNeteaseIntegrationTest {
     @get:Rule val compose = createEmptyComposeRule()
-
-    @Test fun matchedRecordingRecoversFromNeteaseToLiveIncompetechAudio() = runBlocking {
-        val args = InstrumentationRegistry.getArguments()
-        assumeTrue(args.getString("musicLiveFallback") == "true")
-        val base = requireNotNull(args.getString("musicNeteaseBase"))
-        val app = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as TuneTestApplication
-        val repository = MusicApiClient(base.toHttpUrl(), { "YOUR_LOCAL_NETEASE_TEST_TOKEN_0000000000" }, allowLocalHttp = true)
-        val page = repository.search("Sneaky Snitch")
-        val results = page.items + (page.nextCursor?.let { repository.search("Sneaky Snitch", cursor = it).items } ?: emptyList())
-        val track = results.first {
-            it.isrc == "USUAN1100772" && it.matches.map { match -> match.providerId }.containsAll(listOf("netease", "incompetech"))
-        }
-        app.musicMediaRequests.clear()
-        app.testMusicRepository = object : MusicRepository by repository {
-            override suspend fun resolve(trackId: String, preferredProviderId: String?) =
-                repository.resolve(trackId, preferredProviderId ?: "netease")
-        }
-        app.userSettings.update { it.copy(autoPlay = false) }
-        val connection = app.playerController
-        ActivityScenario.launch(MainActivity::class.java).use {
-            try {
-                withTimeout(8000) { connection.connected.first { connected -> connected } }
-                compose.onNodeWithTag("nav_music").performClick()
-                connection.dispatch(PlayerCommand.PlayMusic(track))
-                val playing = withTimeout(25000) {
-                    connection.state.first { it.phase == PlaybackPhase.PLAYING && it.music?.id == track.id }
-                }
-                assertEquals(2, app.musicMediaRequests["live-netease-gone"]?.get())
-                assertTrue((app.musicMediaRequests["live-incompetech"]?.get() ?: 0) > 0)
-                assertTrue((playing.durationMs ?: 0) in 135000..138000)
-                assertEquals("incompetech", playing.musicProviderId)
-                compose.onNodeWithText("Kevin MacLeod (incompetech.com)", substring = true).assertExists()
-                connection.dispatch(PlayerCommand.Seek(30000))
-                withTimeout(8000) { connection.state.first { (it.positionMs ?: 0) >= 29000 && it.phase == PlaybackPhase.PLAYING } }
-                Unit
-            } finally {
-                connection.dispatch(PlayerCommand.Stop)
-                app.testMusicRepository = null
-            }
-        }
-    }
 
     @Test fun realRecommendationsStartWithoutOpeningSearch() = runBlocking {
         val args = InstrumentationRegistry.getArguments()

@@ -44,9 +44,6 @@ internal fun MusicNowPlayingContent(
             Text(track?.title ?: stringResource(R.string.menu_music), color = TuneColors.Text, fontSize = 24.sp,
                 fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.testTag("music_title"))
             Text(track?.artists?.joinToString(" / ").orEmpty(), color = TuneColors.Muted)
-            if (state.musicProviderId == "incompetech") {
-                Text(stringResource(R.string.music_incompetech_credit), color = TuneColors.Muted, textAlign = TextAlign.Center)
-            }
             if (state.phase in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.BUFFERING, PlaybackPhase.RETRYING)) {
                 Text(stringResource(R.string.music_loading), color = TuneColors.Muted)
             }
