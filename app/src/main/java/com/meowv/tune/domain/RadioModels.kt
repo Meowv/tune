@@ -3,6 +3,7 @@ package com.meowv.tune.domain
 import com.meowv.tune.domain.music.MusicFailure
 
 import com.meowv.tune.domain.music.MusicTrack
+import com.meowv.tune.domain.music.MusicLyricLine
 
 import java.util.Locale
 import java.util.UUID
@@ -103,7 +104,8 @@ data class PlayerUiState(
     val canSeek: Boolean = false,
     val durationMs: Long? = null,
     val positionMs: Long? = null,
-    val musicFailure: MusicFailure? = null
+    val musicFailure: MusicFailure? = null,
+    val musicLyrics: List<MusicLyricLine> = emptyList()
 ) {
     init {
         require(source != PlaybackSource.MUSIC || station == null)

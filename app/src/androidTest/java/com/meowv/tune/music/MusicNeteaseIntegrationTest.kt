@@ -14,6 +14,10 @@ import com.meowv.tune.MainActivity
 import com.meowv.tune.TuneTestApplication
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlayerCommand
+import com.meowv.tune.domain.NetworkState
+import com.meowv.tune.domain.NetworkType
+import com.meowv.tune.domain.music.MusicRepository
+import com.meowv.tune.domain.music.PlayableAudio
 import com.meowv.tune.playback.RadioPlaybackService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -27,6 +31,58 @@ import org.junit.Test
 
 class MusicNeteaseIntegrationTest {
     @get:Rule val compose = createEmptyComposeRule()
+
+    @Test fun realDualSourcePlaybackShowsArtworkAndSyncedLyrics() = runBlocking {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val args = InstrumentationRegistry.getArguments()
+        val base = args.getString("musicDualBase")
+        assumeTrue(base != null)
+        val app = instrumentation.targetContext.applicationContext as TuneTestApplication
+        val client = MusicApiClient(requireNotNull(base).toHttpUrl(),
+            { "YOUR_LOCAL_NETEASE_TEST_TOKEN_0000000000" }, allowLocalHttp = true)
+        val sources = setOf("netease", "qqmusic")
+        val page = client.search("哪里都是你 队长")
+        val track = page.items.first { it.matches.map { match -> match.providerId }.toSet() == sources }
+        assertNotNull(track.coverUrl)
+        app.userSettings.update { it.copy(autoPlay = false) }
+        app.mockNetwork.value = NetworkState(NetworkType.WIFI)
+        var preferred = "qqmusic"
+        var resolved: PlayableAudio? = null
+        app.testMusicRepository = object : MusicRepository by client {
+            override suspend fun resolve(trackId: String, preferredProviderId: String?): PlayableAudio =
+                client.resolve(trackId, preferredProviderId ?: preferred).also { resolved = it }
+        }
+        ActivityScenario.launch(MainActivity::class.java).use {
+            val player = app.playerController
+            try {
+                withTimeout(8000) { player.connected.first { ready -> ready } }
+                compose.onNodeWithTag("nav_music").performClick()
+                for (provider in sources) {
+                    preferred = provider
+                    val alternate = client.resolveAlternate(track.id, if (provider == "qqmusic") "netease" else "qqmusic")
+                    assertEquals(provider, alternate.providerId)
+                    player.dispatch(PlayerCommand.PlayMusic(track))
+                    val playing = withTimeout(20000) { player.state.first { state ->
+                        state.phase == PlaybackPhase.PLAYING && state.music?.id == track.id && resolved?.providerId == provider
+                    } }
+                    assertTrue((playing.durationMs ?: 0) in 220_000..225_000)
+                    player.dispatch(PlayerCommand.Seek(60_000))
+                    val seeked = withTimeout(15000) { player.state.first { state ->
+                        state.phase == PlaybackPhase.PLAYING && (state.positionMs ?: 0) >= 59_000 && state.musicLyrics.isNotEmpty()
+                    } }
+                    val index = MusicLyrics.activeLine(seeked.musicLyrics, seeked.positionMs!!)
+                    assertTrue(index >= 0)
+                    compose.onNodeWithTag("music_artwork").assertExists()
+                    compose.onNodeWithTag("music_lyrics").performScrollTo().assertIsDisplayed()
+                    player.dispatch(PlayerCommand.Stop)
+                    withTimeout(5000) { player.state.first { state -> state.music == null } }
+                }
+            } finally {
+                player.dispatch(PlayerCommand.Stop)
+                app.testMusicRepository = null
+            }
+        }
+    }
 
     @Test fun realRecommendationsStartWithoutOpeningSearch() = runBlocking {
         val args = InstrumentationRegistry.getArguments()

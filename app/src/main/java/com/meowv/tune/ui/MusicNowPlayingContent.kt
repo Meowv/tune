@@ -13,6 +13,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import com.meowv.tune.music.MusicLyrics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.meowv.tune.R
@@ -34,11 +36,12 @@ internal fun MusicNowPlayingContent(
         Column(Modifier.widthIn(max = 640.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             val track = state.music
-            val artwork = Modifier.size(if (isCar) 180.dp else 200.dp)
+            val artwork = Modifier.size(if (isCar) 144.dp else 180.dp).testTag("music_artwork")
+            val placeholder = painterResource(if (isCar) R.drawable.music_record_car else R.drawable.music_record)
             if (track?.coverUrl.isNullOrBlank()) {
-                Image(painterResource(if (isCar) R.drawable.music_record_car else R.drawable.music_record), null, artwork)
+                Image(placeholder, null, artwork)
             } else {
-                AsyncImage(track?.coverUrl, null, artwork, placeholder = painterResource(R.drawable.music_record), error = painterResource(R.drawable.music_record))
+                AsyncImage(track?.coverUrl, null, artwork, placeholder = placeholder, error = placeholder)
             }
             Spacer(Modifier.height(16.dp))
             Text(track?.title ?: stringResource(R.string.menu_music), color = TuneColors.Text, fontSize = 24.sp,
@@ -59,6 +62,16 @@ internal fun MusicNowPlayingContent(
                     valueRange = 0f..duration.toFloat(), enabled = connected,
                     modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth().testTag("music_seek"))
                 Text("${musicTime(drag?.toLong() ?: state.positionMs ?: 0)} / ${musicTime(duration)}", color = TuneColors.Muted)
+            }
+            if (state.musicLyrics.isNotEmpty()) {
+                val index = MusicLyrics.activeLine(state.musicLyrics, state.positionMs ?: 0)
+                Column(Modifier.fillMaxWidth().padding(top = 8.dp).testTag("music_lyrics"),
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(state.musicLyrics.getOrNull(index)?.text.orEmpty(), color = TuneColors.Text,
+                        fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(state.musicLyrics.getOrNull(index + 1)?.text.orEmpty(), color = TuneColors.Muted,
+                        textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
             Spacer(Modifier.height(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {

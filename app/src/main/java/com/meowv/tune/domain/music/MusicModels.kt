@@ -33,6 +33,8 @@ data class PlayableAudio(
     val seekable: Boolean
 )
 
+data class MusicLyricLine(val timeMs: Long, val text: String)
+
 data class MusicPage(
     val items: List<MusicTrack>,
     val nextCursor: String? = null,

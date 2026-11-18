@@ -115,7 +115,7 @@ class MusicSearchIntegrationTest {
                 compose.onNodeWithTag("music_search_results").performScrollToNode(hasTestTag("music_search_result_metadata"))
                 compose.onNodeWithTag("music_search_result_metadata").assertIsNotEnabled()
                 compose.onNodeWithText("仅提供搜索信息").assertIsDisplayed()
-                compose.onNodeWithText("酷我音乐").assertIsDisplayed()
+                compose.onNodeWithText("QQ 音乐").assertIsDisplayed()
                 assertEquals(PlaybackPhase.IDLE, connection.state.value.phase)
             } finally { app.testMusicRepository = null }
         }
@@ -123,8 +123,8 @@ class MusicSearchIntegrationTest {
 
     @Test fun laterPlayableSourceUpgradesTheExistingMetadataResult() = runBlocking {
         val metadata = MusicTrack("metadata", "Metadata qix", listOf("qix"), availability = "metadata_only",
-            matches = listOf(MusicTrackMatch("kuwo-search", "12")))
-        val playable = tracks[0].copy(matches = listOf(MusicTrackMatch("netease", "34"), MusicTrackMatch("kuwo-search", "12", .99, "studio")))
+            matches = listOf(MusicTrackMatch("qqmusic", "12")))
+        val playable = tracks[0].copy(matches = listOf(MusicTrackMatch("netease", "34"), MusicTrackMatch("qqmusic", "12", .99, "studio")))
         val fake = FakeMusicRepository(tracks)
         app.testMusicRepository = object : MusicRepository by fake {
             override suspend fun search(query: String, limit: Int, cursor: String?) =
@@ -162,7 +162,7 @@ class MusicSearchIntegrationTest {
     private fun installFakeUnlessUsingLocalBuild() {
         if (InstrumentationRegistry.getArguments().getString("musicLocalBuild") == "true") return
         val fake = FakeMusicRepository(tracks + MusicTrack("metadata", "Metadata qix", listOf("qix"),
-            availability = "metadata_only", matches = listOf(MusicTrackMatch("kuwo-search", "12", .99, "studio"))))
+            availability = "metadata_only", matches = listOf(MusicTrackMatch("qqmusic", "12", .99, "studio"))))
         app.testMusicRepository = object : MusicRepository by fake {
             override suspend fun search(query: String, limit: Int, cursor: String?): MusicPage {
                 requests.incrementAndGet()

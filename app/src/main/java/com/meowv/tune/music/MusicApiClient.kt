@@ -49,6 +49,12 @@ internal class MusicApiClient(
         return MusicJson.page(request("search", limit, cursor, query))
     }
     override suspend fun recommendations(limit: Int, cursor: String?) = MusicJson.page(request("recommendations", limit, cursor), recommendation = true)
+    override suspend fun lyrics(trackId: String, providerId: String): List<MusicLyricLine> {
+        val url = baseUrl.newBuilder().addPathSegment("lyrics").addQueryParameter("trackId", trackId)
+            .addQueryParameter("providerId", providerId).build()
+        return MusicJson.lyrics(execute(Request.Builder().url(url).get(), blockOnFailure = false), trackId)
+    }
+
     override suspend fun resolve(trackId: String, preferredProviderId: String?): PlayableAudio =
         resolve(trackId, preferredProviderId, excludedProviderId = null)
 
@@ -79,7 +85,7 @@ internal class MusicApiClient(
         return execute(Request.Builder().url(url).get())
     }
 
-    private suspend fun execute(builder: Request.Builder): String {
+    private suspend fun execute(builder: Request.Builder, blockOnFailure: Boolean = true): String {
         requestGate.check()
         val token = accessToken()?.takeIf { it.length in 32..1024 && it.none(Char::isISOControl) }
             ?: throw MusicException(MusicFailure.NOT_CONFIGURED)
@@ -95,8 +101,8 @@ internal class MusicApiClient(
                 override fun onResponse(call: Call, response: Response) {
                     try {
                         val result = response.use { value ->
-                            if (value.code == 429) retryAfter(value.header("Retry-After"))?.let { requestGate.block(it) }
-                            if (value.code in setOf(503, 504)) retryAfter(value.header("Retry-After"))?.let {
+                            if (blockOnFailure && value.code == 429) retryAfter(value.header("Retry-After"))?.let { requestGate.block(it) }
+                            if (blockOnFailure && value.code in setOf(503, 504)) retryAfter(value.header("Retry-After"))?.let {
                                 requestGate.block(it, if (value.code == 503) MusicFailure.SOURCE_UNAVAILABLE else MusicFailure.SOURCE_TIMEOUT)
                             }
                             val source = value.body?.source() ?: throw MusicException(MusicFailure.INVALID_RESPONSE)
@@ -108,8 +114,8 @@ internal class MusicApiClient(
                             val body = buffer.readUtf8()
                             if (!value.isSuccessful) {
                                 val failure = MusicJson.error(body, value.code, retryAfter(value.header("Retry-After")))
-                                if (value.code == 429) requestGate.block(failure.retryAfterSeconds)
-                                if (value.code in setOf(503, 504) && failure.retryAfterSeconds != null)
+                                if (blockOnFailure && value.code == 429) requestGate.block(failure.retryAfterSeconds)
+                                if (blockOnFailure && value.code in setOf(503, 504) && failure.retryAfterSeconds != null)
                                     requestGate.block(failure.retryAfterSeconds, failure.failure)
                                 throw failure
                             }
@@ -117,10 +123,10 @@ internal class MusicApiClient(
                         }
                         if (continuation.isActive) continuation.resume(result)
                     } catch (failure: MusicException) {
-                        if (response.code == 429 && failure.failure != MusicFailure.RATE_LIMITED) requestGate.block(retryAfter(response.header("Retry-After")))
+                        if (blockOnFailure && response.code == 429 && failure.failure != MusicFailure.RATE_LIMITED) requestGate.block(retryAfter(response.header("Retry-After")))
                         if (continuation.isActive) continuation.resumeWithException(failure)
                     } catch (error: IOException) {
-                        if (response.code == 429) requestGate.block(retryAfter(response.header("Retry-After")))
+                        if (blockOnFailure && response.code == 429) requestGate.block(retryAfter(response.header("Retry-After")))
                         if (continuation.isActive) continuation.resumeWithException(ioFailure(error))
                     }
                 }

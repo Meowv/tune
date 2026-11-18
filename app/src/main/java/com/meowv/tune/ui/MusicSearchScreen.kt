@@ -112,7 +112,7 @@ internal fun MusicSearchScreen(
 
 private fun musicSourceName(provider: String) = when (provider) {
     "netease" -> R.string.music_source_netease
-    "kuwo-search" -> R.string.music_source_kuwo
+    "qqmusic" -> R.string.music_source_qq
     "search" -> R.string.music_search
     else -> R.string.music_source_other
 }

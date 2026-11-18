@@ -39,7 +39,7 @@
   <string name="music_search_source_unavailable">%1$s 暂时不可用</string>
   <string name="music_track_unavailable">暂不可播放</string>
   <string name="music_source_netease">网易云音乐</string>
-  <string name="music_source_kuwo">酷我音乐</string>
+  <string name="music_source_qq">QQ 音乐</string>
   <string name="music_metadata_only">仅提供搜索信息</string>
   <string name="music_source_other">其他音源</string>
   <string name="setting_autoplay">自动播放</string>

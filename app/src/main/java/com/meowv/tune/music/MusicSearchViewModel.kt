@@ -80,7 +80,7 @@ internal class MusicSearchViewModel(
                     else mutableMapOf()
                 for (warning in page.warnings) {
                     val provider = warning.substringBefore(':')
-                    if (provider !in setOf("netease", "kuwo-search", "search")) continue
+                    if (provider !in setOf("netease", "qqmusic", "search")) continue
                     warnings[provider] = when (warning.substringAfter(':')) {
                         "deferred" -> MusicSearchWarning.DEFERRED
                         "source_timeout" -> MusicSearchWarning.TIMEOUT

@@ -114,12 +114,12 @@ class MusicSearchViewModelTest {
 
     @Test fun deferredPlayableSourceUpgradesMetadataRowWithoutDuplicatingOrKeepingItDisabled() {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
-        val metadata = track.copy(id = "metadata", availability = "metadata_only", matches = listOf(MusicTrackMatch("kuwo-search", "12")))
-        val playable = track.copy(id = "playable", matches = listOf(MusicTrackMatch("netease", "34"), MusicTrackMatch("kuwo-search", "12", .99, "studio")))
+        val metadata = track.copy(id = "metadata", availability = "metadata_only", matches = listOf(MusicTrackMatch("qqmusic", "12")))
+        val playable = track.copy(id = "playable", matches = listOf(MusicTrackMatch("netease", "34"), MusicTrackMatch("qqmusic", "12", .99, "studio")))
         try {
             val model = MusicSearchViewModel(Repository { _, cursor ->
                 if (cursor == null) MusicPage(listOf(metadata), "later", partial = true, warnings = listOf("netease:deferred"))
-                else MusicPage(listOf(playable), partial = true, warnings = listOf("kuwo-search:rate_limited", "unknown:forbidden"))
+                else MusicPage(listOf(playable), partial = true, warnings = listOf("qqmusic:rate_limited", "unknown:forbidden"))
             }, {}, scope)
             model.open(); model.queryChanged("qix"); model.search()
             assertFalse(model.state.value.items.single().canStartPlayback)
@@ -128,7 +128,7 @@ class MusicSearchViewModelTest {
             assertEquals(listOf(playable), model.state.value.items)
             assertTrue(model.state.value.items.single().canStartPlayback)
             assertTrue(model.state.value.partial)
-            assertEquals(mapOf("kuwo-search" to MusicSearchWarning.RATE_LIMITED), model.state.value.sourceWarnings)
+            assertEquals(mapOf("qqmusic" to MusicSearchWarning.RATE_LIMITED), model.state.value.sourceWarnings)
         } finally { scope.cancel() }
     }
 

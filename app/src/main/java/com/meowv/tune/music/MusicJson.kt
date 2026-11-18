@@ -13,8 +13,8 @@ internal object MusicJson {
         MusicPage(
             items = root.array("items").map { track(it.jsonObject) },
             nextCursor = root.optionalText("nextCursor"),
-            partial = if (recommendation) false else root.boolean("partial"),
-            warnings = if (recommendation) emptyList() else root.array("warnings").map { it.text() },
+            partial = if (recommendation && "partial" !in root) false else root.boolean("partial"),
+            warnings = if (recommendation && root["warnings"] in listOf(null, JsonNull)) emptyList() else root.array("warnings").map { it.text() },
             strategy = if (recommendation) root.requiredText("strategy") else null,
             generatedAt = if (recommendation) Instant.parse(root.requiredText("generatedAt")) else null
         )
@@ -32,9 +32,15 @@ internal object MusicJson {
             audio.optionalText("expiresAt")?.let(Instant::parse), audio.boolean("seekable"))
     }
 
+    fun lyrics(body: String, trackId: String): List<MusicLyricLine> = parse {
+        val root = Json.parseToJsonElement(body).jsonObject
+        require(root.requiredText("trackId") == trackId)
+        root.optionalText("lrc")?.takeIf { it.length <= 48 * 1024 }?.let(MusicLyrics::parse).orEmpty()
+    }
+
     private fun track(root: JsonObject) = MusicTrack(
         root.requiredText("id"), root.requiredText("title"), root.array("artists").map { it.text().also { text -> require(text.isNotBlank()) } },
-        root.optionalText("album"), root.optionalLong("durationMs"), root.optionalText("coverUrl"), root.optionalText("isrc"),
+        root.optionalText("album"), root.optionalLong("durationMs"), root.optionalText("coverUrl")?.takeIf(MusicAudioUrlPolicy::allows), root.optionalText("isrc"),
         root.requiredText("availability"), root.array("sources").map {
             val source = it.jsonObject
             MusicTrackMatch(source.requiredText("providerId"), source.requiredText("sourceTrackId"),

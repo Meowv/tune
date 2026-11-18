@@ -1,6 +1,7 @@
 package com.meowv.tune.playback
 
 import android.content.Context
+import android.net.Uri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -33,6 +34,7 @@ internal class MusicPlaybackEngine(
     private var generation = 0L
     private var pending: Job? = null
     private var refill: Job? = null
+    private var lyricsRequest: Job? = null
     private var refillSuppressed = false
     private var promoted: Deferred<Result<PlayableAudio>>? = null
     private val nextPreparation = MusicNextPreparation(repository, scope, ::backgroundFailure)
@@ -194,13 +196,17 @@ internal class MusicPlaybackEngine(
     }
 
     private fun prepare(selection: MusicSelection, playable: PlayableAudio, id: Long) {
+        lyricsRequest?.cancel()
+        lyricsRequest = null
         current = selection; audio = playable; confirmed = false
         endedItem = null
         itemId = "music:$id:${selection.token}"
         publishState(PlayerUiState(source = PlaybackSource.MUSIC, phase = PlaybackPhase.BUFFERING, music = selection.track))
         if (!focus.acquire()) { fail(MusicFailure.PLAYBACK_UNAVAILABLE); return }
         val metadata = MediaMetadata.Builder().setTitle(selection.track.title)
-            .setArtist(selection.track.artists.joinToString(" / ")).setAlbumTitle(selection.track.album).setIsPlayable(true).build()
+            .setArtist(selection.track.artists.joinToString(" / ")).setAlbumTitle(selection.track.album).setIsPlayable(true)
+            .apply { selection.track.coverUrl?.takeIf { MediaUrlPolicy.parse(it)?.isHttps == true }?.let { setArtworkUri(Uri.parse(it)) } }
+            .build()
         val item = MediaItem.Builder().setMediaId(itemId!!).setUri(playable.url).setMediaMetadata(metadata)
         playable.mimeType?.let(item::setMimeType)
         player.setMediaItem(item.build()); player.prepare(); player.play()
@@ -246,6 +252,7 @@ internal class MusicPlaybackEngine(
                     if (confirmed) {
                         failures = 0
                         refillSuppressed = false
+                        loadLyrics()
                     }
                 }
                 publishState(state.copy(phase = PlaybackPhase.PLAYING, error = null, musicFailure = null))
@@ -298,6 +305,22 @@ internal class MusicPlaybackEngine(
         }
     }
 
+    private fun loadLyrics() {
+        val track = current?.track ?: return
+        val provider = audio?.providerId ?: return
+        val owner = itemId ?: return
+        lyricsRequest = scope.launch {
+            val lines = try {
+                repository()?.lyrics(track.id, provider).orEmpty()
+            } catch (_: MusicException) {
+                emptyList()
+            }
+            if (isActive && owner == itemId && state.music?.id == track.id && lines.isNotEmpty()) {
+                publishState(state.copy(musicLyrics = lines))
+            }
+        }
+    }
+
     fun seek(positionMs: Long) {
         if (active && state.canSeek && !loading) {
             val position = positionMs.coerceIn(0, state.durationMs ?: Long.MAX_VALUE)
@@ -312,6 +335,8 @@ internal class MusicPlaybackEngine(
         invalidate()
         desiredPlay = false; loading = false
         interruptions.reset(); focus.abandon()
+        lyricsRequest?.cancel()
+        lyricsRequest = null
         itemId = null; current = null; audio = null
         player.stop(); player.clearMediaItems()
         publishState(PlayerUiState(source = PlaybackSource.MUSIC))
