@@ -11,11 +11,25 @@ internal class PlaybackCoordinator(
 ) : RadioSessionPlayer.SessionCommands {
     var activeSource = PlaybackSource.RADIO
         private set
+    private var entryHandled = false
 
     fun publishRadio(state: PlayerUiState) { if (activeSource == PlaybackSource.RADIO) publish(state) }
     fun publishMusic(state: PlayerUiState) { if (activeSource == PlaybackSource.MUSIC) publish(state) }
 
+    suspend fun restoreMusicOnEntry(): Boolean {
+        if (entryHandled) return activeSource == PlaybackSource.MUSIC
+        val point = music.rememberedPlayback()
+        // 读盘期间可能有用户操作，以用户刚刚选择的来源为准。
+        if (entryHandled) return activeSource == PlaybackSource.MUSIC
+        entryHandled = true
+        if (point == null) return false
+        selectMusic()
+        music.restore(point)
+        return true
+    }
+
     fun playRadio(station: Station) {
+        entryHandled = true
         if (activeSource != PlaybackSource.RADIO) {
             music.deactivate(); activeSource = PlaybackSource.RADIO; radio.activate()
         }
@@ -23,10 +37,15 @@ internal class PlaybackCoordinator(
     }
 
     fun playMusic(track: MusicTrack?) {
+        entryHandled = true
+        selectMusic()
+        music.play(track)
+    }
+
+    private fun selectMusic() {
         if (activeSource != PlaybackSource.MUSIC) {
             radio.deactivate(); activeSource = PlaybackSource.MUSIC; music.activate()
         }
-        music.play(track)
     }
 
     fun dispatch(command: PlayerCommand) {

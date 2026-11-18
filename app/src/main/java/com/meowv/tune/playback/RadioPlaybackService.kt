@@ -71,7 +71,7 @@ class RadioPlaybackService : MediaSessionService() {
             app::resolveStream,
             { state -> coordinator?.publishRadio(state) ?: app.playerController.publish(state) }
         )
-        val music = MusicPlaybackEngine(this, player, { app.musicRepository }, app.networkState,
+        val music = MusicPlaybackEngine(this, player, { app.musicRepository }, app.networkState, app.musicResume,
             { state -> coordinator?.publishMusic(state) })
         coordinator = PlaybackCoordinator(engine, music, app.playerController::publish)
         app.playerController.coordinator = coordinator
@@ -153,6 +153,11 @@ class RadioPlaybackService : MediaSessionService() {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
         session.takeIf { canConnect(controllerInfo) }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        (application as TuneApplication).playerController.checkpointMusic()
+        super.onTaskRemoved(rootIntent)
+    }
 
     override fun onDestroy() {
         scope.cancel()

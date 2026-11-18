@@ -357,21 +357,54 @@ class MusicPlaybackIntegrationTest {
         }
     }
 
-    @Test fun destroyedMusicServiceRebuildsIdleAndOnlyPlaysOnExplicitRequest() = runBlocking {
+    @Test fun newMusicServiceRestoresPausedTrackWithoutStartingIt() = runBlocking {
         withMusic { scenario ->
             connection.dispatch(PlayerCommand.PlayMusic())
             awaitMusic(1)
+            connection.dispatch(PlayerCommand.Seek(3500))
+            withTimeout(4000) { connection.state.first { (it.positionMs ?: 0) >= 3500 } }
             connection.dispatch(PlayerCommand.TogglePause)
             awaitPhase(PlaybackPhase.PAUSED)
             rebuildService(scenario)
-            assertNull(connection.state.value.music)
-            assertFalse(connection.state.value.canPrevious)
-            delay(300)
+            val restored = awaitPhase(PlaybackPhase.PAUSED)
+            assertEquals(tracks[0].id, restored.music?.id)
+            assertTrue((restored.positionMs ?: 0) >= 3500)
+            assertFalse(restored.canPrevious)
             assertEquals(1, resolves.values.sumOf { it.get() })
-            assertEquals(PlaybackPhase.IDLE, connection.state.value.phase)
+            connection.dispatch(PlayerCommand.TogglePause)
+            assertTrue((awaitMusic(1).positionMs ?: 0) >= 3500)
+            assertEquals(2, resolves[tracks[0].id]?.get())
+        }
+    }
+
+    @Test fun missingRememberedTrackStartsTheNextCandidateFromZero() = runBlocking {
+        withMusic { scenario ->
             connection.dispatch(PlayerCommand.PlayMusic())
             awaitMusic(1)
-            assertEquals(2, resolves[tracks[0].id]?.get())
+            connection.dispatch(PlayerCommand.Seek(3500))
+            withTimeout(4000) { connection.state.first { (it.positionMs ?: 0) >= 3500 } }
+            connection.dispatch(PlayerCommand.TogglePause)
+            awaitPhase(PlaybackPhase.PAUSED)
+            rebuildService(scenario)
+            awaitPhase(PlaybackPhase.PAUSED)
+            resolveOverride = { id ->
+                if (id == tracks[0].id) throw MusicException(MusicFailure.TRACK_NOT_FOUND)
+            }
+            connection.dispatch(PlayerCommand.TogglePause)
+            val next = awaitMusic(2)
+            assertTrue((next.positionMs ?: -1) in 0..2000)
+            assertEquals(tracks[1].id, withContext(Dispatchers.Main) { app.musicResume.read()?.track?.id })
+        }
+    }
+
+    @Test fun finishedLastTrackClearsTheResumePoint() = runBlocking {
+        recommendationsOverride = { _, _ -> MusicPage(listOf(tracks[0])) }
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            connection.dispatch(PlayerCommand.Seek(11_500))
+            awaitPhase(PlaybackPhase.ERROR)
+            assertNull(withContext(Dispatchers.Main) { app.musicResume.read() })
         }
     }
 
@@ -411,7 +444,6 @@ class MusicPlaybackIntegrationTest {
         assertEquals(1, manager.getRunningServices(Int.MAX_VALUE).count {
             it.service.className == RadioPlaybackService::class.java.name
         })
-        assertEquals(PlaybackPhase.IDLE, connection.state.value.phase)
     }
 
     @Test fun expiredUrlRefreshesCurrentProviderOnlyOnceBeforePlaying() = runBlocking {

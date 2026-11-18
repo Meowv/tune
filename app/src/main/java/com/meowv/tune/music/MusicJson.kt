@@ -38,6 +38,43 @@ internal object MusicJson {
         root.optionalText("lrc")?.takeIf { it.length <= 48 * 1024 }?.let(MusicLyrics::parse).orEmpty()
     }
 
+    fun encodeResumePoint(point: MusicResumePoint): String = buildJsonObject {
+        put("positionMs", point.positionMs)
+        put("playOnEntry", point.playOnEntry)
+        putJsonObject("track") {
+            val track = point.track
+            put("id", track.id)
+            put("title", track.title)
+            put("album", track.album)
+            put("durationMs", track.durationMs)
+            put("coverUrl", track.coverUrl?.substringBefore('?')?.substringBefore('#'))
+            put("availability", track.availability)
+            putJsonArray("artists") { track.artists.forEach { add(it) } }
+            putJsonArray("sources") {
+                track.matches.forEach { match ->
+                    add(buildJsonObject {
+                        put("providerId", match.providerId)
+                        put("sourceTrackId", match.sourceTrackId)
+                    })
+                }
+            }
+        }
+    }.toString()
+
+    fun decodeResumePoint(body: String): MusicResumePoint? = try {
+        parse {
+            require(body.length <= 32 * 1024)
+            val root = Json.parseToJsonElement(body).jsonObject
+            val track = track(root.getValue("track").jsonObject)
+            require(track.id.length in 1..128 && track.id.none(Char::isISOControl) && track.canStartPlayback)
+            val position = (root["positionMs"] as? JsonPrimitive)?.takeUnless { it.isString }
+                ?.longOrNull?.takeIf { it in 0..86_400_000 } ?: 0
+            MusicResumePoint(track, position, root.boolean("playOnEntry"))
+        }
+    } catch (_: MusicException) {
+        null
+    }
+
     private fun track(root: JsonObject) = MusicTrack(
         root.requiredText("id"), root.requiredText("title"), root.array("artists").map { it.text().also { text -> require(text.isNotBlank()) } },
         root.optionalText("album"), root.optionalLong("durationMs"), root.optionalText("coverUrl")?.takeIf(MusicAudioUrlPolicy::allows), root.optionalText("isrc"),

@@ -8,6 +8,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
 import java.io.IOException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -52,6 +53,8 @@ class MainActivity : ComponentActivity() {
     private var firstFrameReady = false
     private var carShell = false
     private var mediaLease: AutoCloseable? = null
+    private var playbackEntryJob: Job? = null
+    private var resumeRadioOnEntry = false
     private var notificationRequested = false
     private val snackbar = SnackbarHostState()
     private val notificationPermission =
@@ -139,11 +142,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        // 只有普通前台冷启动才尝试恢复；进程重建、回前台和配置变更都不重开流。
-        if (savedInstanceState == null && !tuneApp.autoPlayAttempted) {
-            tuneApp.autoPlayAttempted = true
-            resumeLastStation()
-        }
+        resumeRadioOnEntry = savedInstanceState == null && !tuneApp.autoPlayAttempted
         setContent {
             val musicState by musicModel.state.collectAsStateWithLifecycle()
             val musicSearch by musicSearchModel.state.collectAsStateWithLifecycle()
@@ -218,27 +217,25 @@ class MainActivity : ComponentActivity() {
     }
 
     // 恢复上次电台信息；仅在开启自动播放时，等待目录与服务就绪后起播。
-    private fun resumeLastStation() {
-        lifecycleScope.launch {
-            val settings = settingsModel.settings.filterNotNull().first()
-            val uuid = settings.lastSuccessfulStation
-            // 旧记录只有 UUID 时补齐展示元数据；关闭自动播放也恢复目标，但不发播放命令。
-            if (uuid != null && settings.lastPlayedStation == null && !settings.autoPlay) {
-                val remembered = runCatching { tuneApp.radioRepository.stationByUuid(uuid) }.getOrNull()
-                if (remembered != null) tuneApp.userSettings.refreshRememberedStation(remembered)
-            }
-            if (!settings.autoPlay) return@launch
-            withTimeoutOrNull(8000) {
-                radioModel.radioState.first { !it.isLoading && (it.stations.isNotEmpty() || it.error != null) }
-            } ?: return@launch
-            // 目录可能比媒体服务连接更快就绪，等控制器可用再发命令。
-            withTimeoutOrNull(5000) { tuneApp.playerController.connected.first { it } } ?: return@launch
-            if (!tuneApp.userSettings.settings.first().autoPlay ||
-                tuneApp.playerController.state.value.phase != com.meowv.tune.domain.PlaybackPhase.IDLE
-            ) return@launch
-            if (uuid != null) dispatchPlayback(PlayerCommand.Resume(uuid))
-            else radioModel.radioState.value.stations.firstOrNull()?.let { dispatchPlayback(PlayerCommand.Play(it)) }
+    private suspend fun resumeLastStation() {
+        val settings = settingsModel.settings.filterNotNull().first()
+        val uuid = settings.lastSuccessfulStation
+        // 旧记录只有 UUID 时补齐展示元数据；关闭自动播放也恢复目标，但不发播放命令。
+        if (uuid != null && settings.lastPlayedStation == null && !settings.autoPlay) {
+            val remembered = runCatching { tuneApp.radioRepository.stationByUuid(uuid) }.getOrNull()
+            if (remembered != null) tuneApp.userSettings.refreshRememberedStation(remembered)
         }
+        if (!settings.autoPlay) return
+        withTimeoutOrNull(8000) {
+            radioModel.radioState.first { !it.isLoading && (it.stations.isNotEmpty() || it.error != null) }
+        } ?: return
+        // 目录可能比媒体服务连接更快就绪，等控制器可用再发命令。
+        withTimeoutOrNull(5000) { tuneApp.playerController.connected.first { it } } ?: return
+        if (!tuneApp.userSettings.settings.first().autoPlay ||
+            tuneApp.playerController.state.value.phase != com.meowv.tune.domain.PlaybackPhase.IDLE
+        ) return
+        if (uuid != null) dispatchPlayback(PlayerCommand.Resume(uuid))
+        else radioModel.radioState.value.stations.firstOrNull()?.let { dispatchPlayback(PlayerCommand.Play(it)) }
     }
 
     private fun dispatchPlayback(command: PlayerCommand) {
@@ -269,10 +266,22 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        mediaLease = tuneApp.playerController.acquire()
+        val controller = tuneApp.playerController
+        mediaLease = controller.acquire()
+        playbackEntryJob = lifecycleScope.launch {
+            withTimeoutOrNull(5000) { controller.connected.first { it } } ?: return@launch
+            val restoredMusic = controller.restoreMusicOnEntry()
+            if (resumeRadioOnEntry && !tuneApp.autoPlayAttempted) {
+                resumeRadioOnEntry = false
+                tuneApp.autoPlayAttempted = true
+                if (!restoredMusic) resumeLastStation()
+            }
+        }
     }
 
     override fun onStop() {
+        playbackEntryJob?.cancel()
+        tuneApp.playerController.checkpointMusic()
         mediaLease?.close()
         mediaLease = null
         super.onStop()

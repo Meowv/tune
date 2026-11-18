@@ -11,6 +11,9 @@ import com.meowv.tune.domain.*
 import com.meowv.tune.domain.music.*
 import com.meowv.tune.music.MusicQueueManager
 import com.meowv.tune.music.MusicSelection
+import com.meowv.tune.music.MusicResumePoint
+import com.meowv.tune.music.MusicResumeStore
+import com.meowv.tune.music.findRememberedTrack
 import com.meowv.tune.music.MusicNextPreparation
 import com.meowv.tune.music.MusicRequestGate
 import com.meowv.tune.music.musicRetryAfterSeconds
@@ -23,6 +26,7 @@ internal class MusicPlaybackEngine(
     private val player: Player,
     private val repository: () -> MusicRepository?,
     private val network: StateFlow<NetworkState>,
+    private val resumeStore: MusicResumeStore,
     private val publish: (PlayerUiState) -> Unit
 ) : Player.Listener {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -51,6 +55,8 @@ internal class MusicPlaybackEngine(
     private val requestGate = MusicRequestGate()
     private var failures = 0
     private var operationSequence = 0L
+    private var resumePoint: MusicResumePoint? = null
+    private var lastCheckpointAt = 0L
     private var state = PlayerUiState(source = PlaybackSource.MUSIC)
     val snapshot: PlayerUiState get() = state
 
@@ -61,7 +67,10 @@ internal class MusicPlaybackEngine(
                 if (!active) return@collect
                 if (NetworkPolicy.evaluate(value) != NetworkDecision.ALLOWED) {
                     if (desiredPlay || interruptions.hasResumeIntent) pause(PauseReason.NETWORK)
-                } else if (interruptions.networkAvailable()) resume()
+                } else if (interruptions.networkAvailable() ||
+                    resumePoint?.playOnEntry == true && state.phase == PlaybackPhase.PAUSED && state.error == null) {
+                    resume()
+                }
             }
         }
         scope.launch {
@@ -69,6 +78,9 @@ internal class MusicPlaybackEngine(
                 delay(500)
                 if (active && !loading && itemMatches()) {
                     publishState(state)
+                    if (player.isPlaying && android.os.SystemClock.elapsedRealtime() - lastCheckpointAt >= 3_000) {
+                        checkpoint()
+                    }
                     maintainAhead()
                 }
             }
@@ -78,9 +90,48 @@ internal class MusicPlaybackEngine(
     fun activate() { active = true }
     fun deactivate() { if (active) stop(); active = false }
 
+    suspend fun rememberedPlayback(): MusicResumePoint? =
+        if (repository() == null) null else resumeStore.read()
+
+    fun restore(point: MusicResumePoint) {
+        queue.reset()
+        resumePoint = point
+        if (point.playOnEntry && NetworkPolicy.evaluate(network.value) == NetworkDecision.ALLOWED) {
+            continueRemembered(point)
+        } else {
+            showRemembered(point)
+        }
+    }
+
+    private fun continueRemembered(point: MusicResumePoint) {
+        if (!mayRequest(preserveCurrent = true)) return
+        begin(saved = point) { queue.select(point.track) }
+    }
+
+    private fun showRemembered(point: MusicResumePoint, failure: MusicFailure? = null) {
+        desiredPlay = false
+        loading = false
+        resumePoint = point
+        publishState(PlayerUiState(source = PlaybackSource.MUSIC, phase = PlaybackPhase.PAUSED,
+            music = point.track, musicFailure = failure, error = failure?.let { TuneError.PLAYBACK }))
+    }
+
+    fun checkpoint() {
+        if (!active || !confirmed || !itemMatches() || player.playbackState == Player.STATE_ENDED) return
+        val track = current?.track ?: return
+        if (state.music?.id != track.id) return
+        val duration = player.duration.takeIf { it > 0 } ?: audio?.durationMs
+        val position = player.currentPosition.coerceAtLeast(0)
+        // 在结束事件来得及提交之前，尾部等于总时长的位置也不能当作未完成歌曲保存。
+        if (duration != null && position >= duration) return
+        resumeStore.save(MusicResumePoint(track, position, desiredPlay || interruptions.hasResumeIntent))
+        lastCheckpointAt = android.os.SystemClock.elapsedRealtime()
+    }
+
     fun play(track: MusicTrack? = null, resetSession: Boolean = true) {
         if (!active || !mayRequest()) return
         failures = 0
+        resumePoint = null
         interruptions.reset()
         if (resetSession || !queue.canNext) queue.reset()
         begin { if (track == null) queue.next() else queue.select(track) }
@@ -94,6 +145,7 @@ internal class MusicPlaybackEngine(
         }
         interruptions.reset()
         val prepared = nextPreparation.take(queue.nextTrack?.id)
+        resumePoint = null
         begin(keepRefill = true, prepared = prepared) { queue.next() }
     }
 
@@ -108,10 +160,14 @@ internal class MusicPlaybackEngine(
         refreshProvider: String? = null,
         excludedProvider: String? = null,
         keepRefill: Boolean = false,
+        saved: MusicResumePoint? = null,
         prepared: Deferred<Result<PlayableAudio>>? = null,
         select: suspend () -> MusicSelection?
     ) {
         val oldState = state
+        val previousPosition = if (refreshProvider != null || excludedProvider != null)
+            player.currentPosition.coerceAtLeast(0) else 0
+        checkpoint()
         var refreshed = refreshProvider != null || excludedProvider != null
         val attemptedAlternate = excludedProvider != null || refreshProvider != null && alternateAttempted
         if (NetworkPolicy.evaluate(network.value) != NetworkDecision.ALLOWED) {
@@ -133,7 +189,7 @@ internal class MusicPlaybackEngine(
             var selected = false
             try {
                 val result = withTimeout(8000) {
-                    val selection = select() ?: throw MusicException(MusicFailure.NO_PLAYABLE_MATCH)
+                    var selection = select() ?: throw MusicException(MusicFailure.NO_PLAYABLE_MATCH)
                     ensureActive()
                     selected = true
                     if (!preserveCurrent) publishState(state.copy(music = selection.track))
@@ -142,8 +198,16 @@ internal class MusicPlaybackEngine(
                     ensureActive()
                     val cached = ahead?.takeIf { it.trackId == selection.track.id && nextPreparation.fresh(it) }
                     if (ahead != null && cached == null) refreshed = true
-                    var playable = if (excludedProvider != null) source.resolveAlternate(selection.track.id, excludedProvider)
+                    var playable = try {
+                        if (excludedProvider != null) source.resolveAlternate(selection.track.id, excludedProvider)
                         else cached ?: source.resolve(selection.track.id, refreshProvider ?: ahead?.providerId)
+                    } catch (failure: MusicException) {
+                        if (saved == null || failure.failure !in MissingTrack) throw failure
+                        val fresh = source.findRememberedTrack(saved.track)
+                        ensureActive()
+                        selection = queue.select(fresh)
+                        source.resolve(fresh.id)
+                    }
                     ensureActive()
                     if (!nextPreparation.fresh(playable) && !refreshed) {
                         refreshed = true
@@ -158,14 +222,23 @@ internal class MusicPlaybackEngine(
                 loading = false
                 resourceRefreshed = refreshed
                 alternateAttempted = attemptedAlternate
-                prepare(result.first, result.second, id)
+                val (selection, playable) = result
+                val duration = playable.durationMs ?: selection.track.durationMs
+                val position = saved?.startPosition(playable.seekable, duration)
+                    ?: previousPosition.takeIf { playable.seekable && duration != null && it in 0 until duration } ?: 0
+                prepare(selection, playable, id, position)
             } catch (failure: TimeoutCancellationException) {
-                if (active && id == generation) loadFailed(MusicException(MusicFailure.SOURCE_TIMEOUT), preserveCurrent, oldState, selected)
+                if (active && id == generation) {
+                    val error = MusicException(MusicFailure.SOURCE_TIMEOUT)
+                    if (saved == null) loadFailed(error, preserveCurrent, oldState, selected) else restoreFailed(error, saved)
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: MusicException) {
                 ensureActive()
-                if (active && id == generation) loadFailed(failure, preserveCurrent, oldState, selected)
+                if (active && id == generation) {
+                    if (saved == null) loadFailed(failure, preserveCurrent, oldState, selected) else restoreFailed(failure, saved)
+                }
             } finally {
                 prepared?.cancel()
                 if (promoted === prepared) promoted = null
@@ -195,7 +268,18 @@ internal class MusicPlaybackEngine(
         }
     }
 
-    private fun prepare(selection: MusicSelection, playable: PlayableAudio, id: Long) {
+    private fun restoreFailed(failure: MusicException, point: MusicResumePoint) {
+        if (failure.failure in MissingTrack) {
+            resumeStore.save(null)
+            resumePoint = null
+            next(userInitiated = false)
+        } else {
+            backgroundFailure(failure)
+            showRemembered(point, failure.failure)
+        }
+    }
+
+    private fun prepare(selection: MusicSelection, playable: PlayableAudio, id: Long, positionMs: Long) {
         lyricsRequest?.cancel()
         lyricsRequest = null
         current = selection; audio = playable; confirmed = false
@@ -209,7 +293,7 @@ internal class MusicPlaybackEngine(
             .build()
         val item = MediaItem.Builder().setMediaId(itemId!!).setUri(playable.url).setMediaMetadata(metadata)
         playable.mimeType?.let(item::setMimeType)
-        player.setMediaItem(item.build()); player.prepare(); player.play()
+        player.setMediaItem(item.build(), positionMs); player.prepare(); player.play()
         watchBuffer(id)
     }
 
@@ -252,6 +336,8 @@ internal class MusicPlaybackEngine(
                     if (confirmed) {
                         failures = 0
                         refillSuppressed = false
+                        resumePoint = null
+                        checkpoint()
                         loadLyrics()
                     }
                 }
@@ -259,10 +345,14 @@ internal class MusicPlaybackEngine(
                 maintainAhead()
             }
             player.playbackState == Player.STATE_ENDED -> {
-                if (desiredPlay && endedItem != itemId) {
+                if (endedItem != itemId) {
                     endedItem = itemId
-                    next(userInitiated = false)
-                    queue.clearSkipSignal()
+                    resumeStore.save(null)
+                    resumePoint = null
+                    if (desiredPlay) {
+                        next(userInitiated = false)
+                        queue.clearSkipSignal()
+                    }
                 }
             }
             !player.playWhenReady -> publishState(state.copy(phase = PlaybackPhase.PAUSED))
@@ -281,7 +371,11 @@ internal class MusicPlaybackEngine(
         loading = false; desiredPlay = false
         if (reason != PauseReason.TRANSIENT_FOCUS) focus.abandon()
         player.pause(); player.volume = 1f
+        if (reason == PauseReason.USER) resumePoint?.let {
+            resumePoint = it.copy(playOnEntry = false).also(resumeStore::save)
+        }
         publishState(paused)
+        checkpoint()
     }
 
     fun resume() {
@@ -290,6 +384,7 @@ internal class MusicPlaybackEngine(
         if (NetworkPolicy.evaluate(network.value) != NetworkDecision.ALLOWED) {
             publishState(state.copy(error = TuneError.NETWORK_OFFLINE)); return
         }
+        resumePoint?.let { continueRemembered(it); return }
         if (!itemMatches() || player.playbackState == Player.STATE_ENDED || state.phase == PlaybackPhase.ERROR) {
             play(state.music, resetSession = false)
         } else if (audio?.let { !nextPreparation.fresh(it) } == true) {
@@ -327,11 +422,14 @@ internal class MusicPlaybackEngine(
             if ((state.durationMs ?: Long.MAX_VALUE) - position > 8000) nextPreparation.cancel()
             player.seekTo(position)
             publishState(state)
+            checkpoint()
             maintainAhead()
         }
     }
 
-    fun stop() {
+    fun stop(forget: Boolean = true) {
+        if (forget) resumeStore.save(null)
+        resumePoint = null
         invalidate()
         desiredPlay = false; loading = false
         interruptions.reset(); focus.abandon()
@@ -343,7 +441,11 @@ internal class MusicPlaybackEngine(
     }
 
     fun close() {
-        if (active) deactivate()
+        if (active) {
+            checkpoint()
+            stop(forget = false)
+            active = false
+        }
         scope.cancel(); route.close(); focus.abandon(); player.removeListener(this)
     }
 
@@ -411,10 +513,14 @@ internal class MusicPlaybackEngine(
     private fun itemMatches() = itemId != null && player.currentMediaItem?.mediaId == itemId
 
     private fun publishState(value: PlayerUiState) {
-        val duration = if (itemMatches()) player.duration.takeIf { it > 0 } else null
+        val matches = itemMatches()
+        val duration = if (matches) player.duration.takeIf { it > 0 } ?: audio?.durationMs else null
+        val remembered = resumePoint?.takeIf { it.track.id == value.music?.id }
         state = value.copy(canPrevious = queue.canPrevious, canNext = queue.canNext,
-            durationMs = duration ?: audio?.durationMs,
-            positionMs = if (itemMatches()) player.currentPosition.coerceAtLeast(0) else null,
+            durationMs = duration ?: remembered?.track?.durationMs,
+            positionMs = if (matches) player.currentPosition.coerceAtLeast(0) else remembered?.let {
+                it.track.durationMs?.let { duration -> it.startPosition(true, duration) } ?: it.positionMs
+            },
             canSeek = !loading && value.phase != PlaybackPhase.ERROR && itemMatches() && audio?.seekable == true &&
                 player.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM))
         if (active) publish(state)
@@ -443,5 +549,9 @@ internal class MusicPlaybackEngine(
             AudioFocusEvent.PERMANENT_LOSS -> pause(PauseReason.PERMANENT_FOCUS)
             AudioFocusEvent.DENIED -> fail(MusicFailure.PLAYBACK_UNAVAILABLE)
         }
+    }
+
+    private companion object {
+        val MissingTrack = setOf(MusicFailure.TRACK_NOT_FOUND, MusicFailure.NO_PLAYABLE_MATCH)
     }
 }

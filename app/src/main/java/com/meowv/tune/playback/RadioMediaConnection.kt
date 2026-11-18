@@ -38,6 +38,10 @@ internal class RadioMediaConnection(
 
     internal var coordinator: PlaybackCoordinator? = null
 
+    internal suspend fun restoreMusicOnEntry(): Boolean = coordinator?.restoreMusicOnEntry() == true
+
+    internal fun checkpointMusic() { coordinator?.music?.checkpoint() }
+
     internal fun stopActive() { coordinator?.onSessionStop() ?: engine?.stop() }
 
     internal var engine: RadioPlayback? = null

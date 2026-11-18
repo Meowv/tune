@@ -133,6 +133,7 @@ class TuneTestApplication : TuneApplication() {
     }
 
     override val directoryCache by lazy { DirectoryCache(testDirectory) }
+    override val musicResume by lazy { com.meowv.tune.music.MusicResumeStore(testSettings) }
     override val userSettings by lazy { DataStoreSettingsRepository(testSettings) }
     internal val country = requireNotNull(CountryCode.parse("JP"))
     internal val foreignStation = Station(UUID(0, 500), "Foreign station", CountryCode.parse("US"))
