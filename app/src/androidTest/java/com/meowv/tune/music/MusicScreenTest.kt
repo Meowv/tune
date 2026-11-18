@@ -21,7 +21,7 @@ class MusicScreenTest {
 
     @Test fun unconfiguredShowsUnavailableWithoutConfigurationPage() {
         var configured = 0
-        compose.setContent { TuneTheme { MusicScreen(isCar, MusicUiState.NotConfigured, { error("Must not start") }, {}, { configured++ }) } }
+        compose.setContent { TuneTheme { MusicScreen(isCar, MusicUiState.NotConfigured, MusicBrowseState(), { error("Must not start") }, {}, { configured++ }, true, {}, {}, {}, {}) } }
         compose.onNodeWithText("音乐服务暂未就绪").assertIsDisplayed()
         compose.onNodeWithTag("music_start").assertDoesNotExist()
         compose.onNodeWithTag("music_configure").assertDoesNotExist()
@@ -33,28 +33,28 @@ class MusicScreenTest {
         val state = mutableStateOf<MusicUiState>(MusicUiState.Idle)
         var started = 0
         var cancelled = 0
-        compose.setContent { TuneTheme { MusicScreen(isCar, state.value, { started++; state.value = MusicUiState.Loading }, { cancelled++ }, {}) } }
-        compose.onNodeWithTag("music_start").performScrollTo().performClick()
+        compose.setContent { TuneTheme { MusicScreen(isCar, state.value, MusicBrowseState(), { started++; state.value = MusicUiState.Loading }, { cancelled++ }, {}, true, {}, {}, {}, {}) } }
+        compose.onNodeWithTag("music_start").performClick()
         compose.onNodeWithTag("music_loading").assertExists()
         compose.onNodeWithTag("music_start").assertDoesNotExist()
-        compose.onNodeWithTag("music_cancel").performScrollTo().performClick()
+        compose.onNodeWithTag("music_cancel").performClick()
         assertEquals(1, started)
         assertEquals(1, cancelled)
     }
 
     @Test fun candidateIsShownWithoutPretendingToBePlaying() {
         val track = MusicTrack("original-001", "睡醒就好了（测试片段）", listOf("qix"), "今天也不错")
-        compose.setContent { TuneTheme { MusicScreen(isCar, MusicUiState.Ready(track), {}, {}, {}) } }
-        compose.onNodeWithTag("music_title").performScrollTo().assertTextEquals(track.title)
+        compose.setContent { TuneTheme { MusicScreen(isCar, MusicUiState.Ready(track), MusicBrowseState(), {}, {}, {}, true, {}, {}, {}, {}) } }
+        compose.onNodeWithTag("music_title").assertTextEquals(track.title)
         compose.onNodeWithText("待播放").assertIsDisplayed()
         capture("candidate")
     }
 
     @Test fun errorsAndEmptyStatesOfferAppropriateActions() {
         val state = mutableStateOf<MusicUiState>(MusicUiState.Error(MusicFailure.RATE_LIMITED))
-        compose.setContent { TuneTheme { MusicScreen(isCar, state.value, {}, {}, {}) } }
+        compose.setContent { TuneTheme { MusicScreen(isCar, state.value, MusicBrowseState(), {}, {}, {}, true, {}, {}, {}, {}) } }
         compose.onNodeWithText("请求较多，请稍后再试").assertExists()
-        compose.onNodeWithTag("music_start").performScrollTo().assertIsEnabled()
+        compose.onNodeWithTag("music_start").assertIsEnabled()
         compose.runOnIdle { state.value = MusicUiState.Empty }
         compose.onNodeWithText("暂时没有可播放的音乐").assertExists()
         compose.runOnIdle { state.value = MusicUiState.Error(MusicFailure.UNAUTHORIZED) }

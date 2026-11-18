@@ -54,3 +54,8 @@ enum class MusicFailure {
 class MusicException(val failure: MusicFailure, val retryAfterSeconds: Long? = null) : Exception(failure.name)
 
 internal val MusicTrack.canStartPlayback: Boolean get() = availability in setOf("candidate", "available")
+
+
+data class MusicChartRank(val source: String, val rank: Int)
+data class MusicChartRow(val track: MusicTrack, val ranks: List<MusicChartRank> = emptyList())
+data class MusicChartPage(val rows: List<MusicChartRow>, val partial: Boolean = false, val stale: Boolean = false)

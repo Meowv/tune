@@ -1,6 +1,5 @@
 package com.meowv.tune.ui
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -12,6 +11,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import com.meowv.tune.music.MusicLyrics
@@ -21,7 +23,6 @@ import com.meowv.tune.R
 import com.meowv.tune.domain.*
 import com.meowv.tune.domain.music.MusicFailure
 import com.meowv.tune.ui.theme.*
-import coil3.compose.AsyncImage
 
 @Composable
 internal fun MusicNowPlayingContent(
@@ -30,68 +31,104 @@ internal fun MusicNowPlayingContent(
     connected: Boolean,
     onCommand: (PlayerCommand) -> Unit,
     modifier: Modifier = Modifier,
-    onSleepTimer: (() -> Unit)? = null
+    onSleepTimer: (() -> Unit)? = null,
+    sleepRemaining: String? = null
 ) {
-    Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        Column(Modifier.widthIn(max = 640.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            val track = state.music
-            val artwork = Modifier.size(if (isCar) 144.dp else 180.dp).testTag("music_artwork")
-            val placeholder = painterResource(if (isCar) R.drawable.music_record_car else R.drawable.music_record)
-            if (track?.coverUrl.isNullOrBlank()) {
-                Image(placeholder, null, artwork)
-            } else {
-                AsyncImage(track?.coverUrl, null, artwork, placeholder = placeholder, error = placeholder)
-            }
-            Spacer(Modifier.height(16.dp))
-            Text(track?.title ?: stringResource(R.string.menu_music), color = TuneColors.Text, fontSize = 24.sp,
-                fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.testTag("music_title"))
-            Text(track?.artists?.joinToString(" / ").orEmpty(), color = TuneColors.Muted)
-            if (state.phase in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.BUFFERING, PlaybackPhase.RETRYING)) {
-                Text(stringResource(R.string.music_loading), color = TuneColors.Muted)
-            }
-            if (state.phase == PlaybackPhase.ERROR || state.error != null) {
-                Text(stringResource(musicPlaybackFailureMessage(state.musicFailure)), color = TuneColors.Error)
-            }
-            val duration = state.durationMs
-            if (state.canSeek && duration != null && duration > 0) {
-                var drag by remember(track?.id) { mutableStateOf<Float?>(null) }
-                Slider(value = drag ?: (state.positionMs ?: 0).toFloat().coerceIn(0f, duration.toFloat()),
-                    onValueChange = { drag = it },
-                    onValueChangeFinished = { drag?.let { onCommand(PlayerCommand.Seek(it.toLong())) }; drag = null },
-                    valueRange = 0f..duration.toFloat(), enabled = connected,
-                    modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth().testTag("music_seek"))
-                Text("${musicTime(drag?.toLong() ?: state.positionMs ?: 0)} / ${musicTime(duration)}", color = TuneColors.Muted)
-            }
-            if (state.musicLyrics.isNotEmpty()) {
-                val index = MusicLyrics.activeLine(state.musicLyrics, state.positionMs ?: 0)
-                Column(Modifier.fillMaxWidth().padding(top = 8.dp).testTag("music_lyrics"),
-                    horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(state.musicLyrics.getOrNull(index)?.text.orEmpty(), color = TuneColors.Text,
-                        fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(state.musicLyrics.getOrNull(index + 1)?.text.orEmpty(), color = TuneColors.Muted,
-                        textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        val wide = maxWidth >= 560.dp && (isCar || maxWidth > maxHeight)
+        val coverSize = if (wide) minOf(240.dp, maxHeight * .54f, maxWidth * .35f)
+            else minOf(260.dp, maxHeight * .34f, maxWidth - 32.dp).coerceAtLeast(64.dp)
+        val artwork: @Composable () -> Unit = {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Surface(shape = TuneShapes.Player, color = MaterialTheme.colorScheme.surfaceVariant) {
+                    MusicCover(state.music, Modifier.size(coverSize).testTag("music_artwork"))
                 }
-            }
-            Spacer(Modifier.height(16.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { onCommand(PlayerCommand.Previous) }, enabled = connected && state.canPrevious,
-                    modifier = Modifier.size(56.dp).testTag("music_previous")) {
-                    Icon(painterResource(R.drawable.ic_now_playing_previous), stringResource(R.string.music_previous))
-                }
-                Button(onClick = { onCommand(PlayerCommand.TogglePause) }, enabled = connected,
-                    modifier = Modifier.heightIn(min = 56.dp).testTag("music_toggle")) {
-                    Text(stringResource(if (state.phase in setOf(PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING, PlaybackPhase.RESOLVING)) R.string.action_pause else R.string.action_play))
-                }
-                IconButton(onClick = { onCommand(PlayerCommand.Next) }, enabled = connected && state.canNext,
-                    modifier = Modifier.size(56.dp).testTag("music_next")) {
-                    Icon(painterResource(R.drawable.ic_now_playing_next), stringResource(R.string.music_next))
-                }
-            }
-            if (onSleepTimer != null) TextButton(onClick = onSleepTimer, modifier = Modifier.heightIn(min = 56.dp).testTag("music_sleep_timer")) {
-                Text(stringResource(R.string.now_playing_sleep_timer))
+                Spacer(Modifier.height(12.dp))
+                Text(state.music?.title ?: stringResource(R.string.menu_music), color = TuneColors.Text,
+                    fontSize = 26.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
+                    modifier = Modifier.testTag("music_title"))
+                Text(state.music?.artists?.joinToString(" / ").orEmpty(), color = TuneColors.Muted,
+                    textAlign = TextAlign.Center)
             }
         }
+        if (wide) {
+            Row(Modifier.fillMaxSize().padding(8.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                Box(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()), contentAlignment = Alignment.Center) { artwork() }
+                Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                    MusicPlaybackControls(isCar, state, connected, onCommand, onSleepTimer, sleepRemaining)
+                }
+            }
+        } else {
+            Column(Modifier.widthIn(max = 640.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally) {
+                artwork()
+                Spacer(Modifier.height(12.dp))
+                MusicPlaybackControls(isCar, state, connected, onCommand, onSleepTimer, sleepRemaining)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MusicPlaybackControls(
+    isCar: Boolean,
+    state: PlayerUiState,
+    connected: Boolean,
+    onCommand: (PlayerCommand) -> Unit,
+    onSleepTimer: (() -> Unit)?,
+    sleepRemaining: String?
+) {
+    if (state.phase in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.BUFFERING, PlaybackPhase.RETRYING)) {
+        Text(stringResource(R.string.music_loading), color = TuneColors.Muted)
+    }
+    if (state.phase == PlaybackPhase.ERROR || state.error != null) {
+        Text(stringResource(musicPlaybackFailureMessage(state.musicFailure)), color = TuneColors.Error)
+    }
+    if (state.musicLyrics.isNotEmpty()) {
+        val index = MusicLyrics.activeLine(state.musicLyrics, state.positionMs ?: 0)
+        Column(Modifier.fillMaxWidth().padding(top = 8.dp).testTag("music_lyrics"),
+            horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(state.musicLyrics.getOrNull(index)?.text.orEmpty(), color = TuneColors.Text,
+                fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(state.musicLyrics.getOrNull(index + 1)?.text.orEmpty(), color = TuneColors.Muted,
+                textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+    val duration = state.durationMs
+    if (duration != null && duration > 0) {
+        var drag by remember(state.music?.id) { mutableStateOf<Float?>(null) }
+        val position = drag?.toLong() ?: state.positionMs ?: 0
+        val description = stringResource(R.string.music_seek_description,
+            position / 60_000, position / 1000 % 60, duration / 60_000, duration / 1000 % 60)
+        if (state.canSeek) Slider(value = drag ?: (state.positionMs ?: 0).toFloat().coerceIn(0f, duration.toFloat()),
+            onValueChange = { drag = it },
+            onValueChangeFinished = { drag?.let { onCommand(PlayerCommand.Seek(it.toLong())) }; drag = null },
+            valueRange = 0f..duration.toFloat(), enabled = connected,
+            modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth().semantics { stateDescription = description }.testTag("music_seek"))
+        Text("${musicTime(position)} / ${musicTime(duration)}", color = TuneColors.Muted,
+            fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+    }
+    Spacer(Modifier.height(16.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = { onCommand(PlayerCommand.Previous) }, enabled = connected && state.canPrevious,
+            modifier = Modifier.size(if (isCar) 56.dp else 48.dp).testTag("music_previous")) {
+            Icon(painterResource(R.drawable.ic_now_playing_previous), stringResource(R.string.music_previous))
+        }
+        FilledIconButton(onClick = { onCommand(PlayerCommand.TogglePause) }, enabled = connected,
+            modifier = Modifier.size(64.dp).testTag("music_toggle")) {
+            MusicToggleIcon(state.phase in setOf(PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING,
+                PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING))
+        }
+        IconButton(onClick = { onCommand(PlayerCommand.Next) }, enabled = connected && state.canNext,
+            modifier = Modifier.size(if (isCar) 56.dp else 48.dp).testTag("music_next")) {
+            Icon(painterResource(R.drawable.ic_now_playing_next), stringResource(R.string.music_next))
+        }
+    }
+    if (onSleepTimer != null) TextButton(onClick = onSleepTimer, modifier = Modifier.heightIn(min = 56.dp).testTag("music_sleep_timer")) {
+        val label = stringResource(R.string.now_playing_sleep_timer)
+        Text(listOfNotNull(label, sleepRemaining).joinToString(" · "))
     }
 }
 
@@ -106,4 +143,4 @@ internal fun musicPlaybackFailureMessage(failure: MusicFailure?) = when (failure
     else -> R.string.music_failed
 }
 
-private fun musicTime(ms: Long): String = "${ms.coerceAtLeast(0) / 60000}:${(ms.coerceAtLeast(0) / 1000 % 60).toString().padStart(2, '0')}"
+internal fun musicTime(ms: Long): String = "${ms.coerceAtLeast(0) / 60000}:${(ms.coerceAtLeast(0) / 1000 % 60).toString().padStart(2, '0')}"

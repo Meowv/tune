@@ -20,6 +20,21 @@ internal object MusicJson {
         )
     }
 
+    fun chart(body: String): MusicChartPage = parse {
+        val root = Json.parseToJsonElement(body).jsonObject
+        val rows = root.array("items").map { item ->
+            val row = item.jsonObject
+            val ranks = row.array("ranks").map { entry ->
+                val rank = entry.jsonObject
+                val position = rank.optionalLong("rank") ?: error("rank")
+                require(position in 1..100)
+                MusicChartRank(rank.requiredText("source"), position.toInt())
+            }
+            MusicChartRow(track(row.getValue("track").jsonObject), ranks)
+        }
+        MusicChartPage(rows, root.boolean("partial"), root.array("sources").any { it.jsonObject.boolean("stale") })
+    }
+
     fun resolved(body: String): PlayableAudio = parse {
         val root = Json.parseToJsonElement(body).jsonObject
         val audio = root.getValue("audio").jsonObject

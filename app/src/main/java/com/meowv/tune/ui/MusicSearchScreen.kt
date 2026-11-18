@@ -1,8 +1,14 @@
 package com.meowv.tune.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -22,7 +28,6 @@ import com.meowv.tune.domain.music.MusicTrack
 import com.meowv.tune.domain.music.canStartPlayback
 import com.meowv.tune.music.MusicSearchState
 import com.meowv.tune.music.MusicSearchWarning
-import com.meowv.tune.ui.theme.TuneColors
 
 @Composable
 internal fun MusicSearchScreen(
@@ -31,46 +36,54 @@ internal fun MusicSearchScreen(
     onSearch: () -> Unit,
     onMore: () -> Unit,
     onSelect: (MusicTrack) -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    list: LazyListState = rememberLazyListState()
 ) {
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
     val submit = { keyboard?.hide(); focus.clearFocus(); onSearch() }
-    Surface(color = TuneColors.Background, modifier = Modifier.fillMaxSize().testTag("music_search_page")) {
+    val requester = remember { FocusRequester() }
+    val configuration = LocalConfiguration.current
+    val wide = configuration.screenWidthDp > configuration.screenHeightDp
+    LaunchedEffect(Unit) { if (!wide && !state.searched) requester.requestFocus() }
+    Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize().testTag("music_search_page")) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
             Column(Modifier.widthIn(max = 960.dp).fillMaxSize().safeDrawingPadding().imePadding().padding(16.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(stringResource(R.string.music_search), style = MaterialTheme.typography.headlineSmall, color = TuneColors.Text)
+                    Text(stringResource(R.string.music_search), style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurface)
                     TextButton(onClick = onClose, modifier = Modifier.testTag("music_search_close")) {
                         Text(stringResource(R.string.music_search_close))
                     }
                 }
                 OutlinedTextField(value = state.query, onValueChange = onQuery, singleLine = true,
                     enabled = !state.selecting, label = { Text(stringResource(R.string.music_search_hint)) },
+                    trailingIcon = if (state.query.isNotEmpty() && !state.selecting) {
+                        { TextButton(onClick = { onQuery("") }) { Text(stringResource(R.string.music_clear_query)) } }
+                    } else null,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { submit() }),
-                    modifier = Modifier.fillMaxWidth().testTag("music_search_query"))
+                    modifier = Modifier.fillMaxWidth().focusRequester(requester).testTag("music_search_query"))
                 Button(onClick = submit, enabled = !state.loading && !state.selecting && state.query.isNotBlank(),
                     modifier = Modifier.heightIn(min = 56.dp).testTag("music_search_submit")) {
                     Text(stringResource(R.string.music_search))
                 }
                 if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("music_search_loading"))
-                state.failure?.let { failure ->
+                state.failure?.takeIf { state.selectedId == null }?.let { failure ->
                     Text(stringResource(when (failure) {
                         MusicFailure.INVALID_REQUEST -> R.string.music_search_invalid
                         MusicFailure.NOT_CONFIGURED -> R.string.music_not_configured
                         MusicFailure.UNAUTHORIZED -> R.string.music_unauthorized
                         MusicFailure.RATE_LIMITED -> R.string.music_rate_limited
                         else -> R.string.music_search_failed
-                    }), color = TuneColors.Error)
+                    }), color = MaterialTheme.colorScheme.error)
                 }
                 if (state.searched && !state.loading && state.failure == null && state.items.isEmpty()) {
-                    Text(stringResource(R.string.music_search_empty), color = TuneColors.Muted,
+                    Text(stringResource(R.string.music_search_empty), color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.testTag("music_search_empty"))
                 }
-                LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("music_search_results")) {
+                LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("music_search_results"), state = list) {
                     if (state.partial && state.sourceWarnings.isEmpty()) item {
-                        Text(stringResource(R.string.music_search_partial), color = TuneColors.Muted)
+                        Text(stringResource(R.string.music_search_partial), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     state.sourceWarnings.forEach { (provider, warning) ->
                         item {
@@ -80,22 +93,18 @@ internal fun MusicSearchScreen(
                                 MusicSearchWarning.RATE_LIMITED -> R.string.music_search_source_limited
                                 MusicSearchWarning.UNAVAILABLE -> R.string.music_search_source_unavailable
                             }
-                            Text(stringResource(message, stringResource(musicSourceName(provider))), color = TuneColors.Muted)
+                            Text(stringResource(message, stringResource(musicSourceName(provider))), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                     items(state.items, key = { it.id }) { track ->
-                        Column(Modifier.fillMaxWidth().heightIn(min = 72.dp)
-                            .clickable(enabled = !state.selecting && track.canStartPlayback) { onSelect(track) }
-                            .padding(vertical = 12.dp).testTag("music_search_result_${track.id}")) {
-                            Text(track.title, color = TuneColors.Text, style = MaterialTheme.typography.titleMedium)
-                            Text(track.artists.joinToString(" / "), color = TuneColors.Muted)
-                            track.album?.let { Text(it, color = TuneColors.Muted) }
-                            if (track.matches.isNotEmpty()) {
-                                val names = track.matches.take(3).map { stringResource(musicSourceName(it.providerId)) }.distinct()
-                                Text(names.joinToString(" · "), color = TuneColors.Muted)
-                            }
-                            if (!track.canStartPlayback) Text(stringResource(if (track.availability == "metadata_only")
-                                R.string.music_metadata_only else R.string.music_track_unavailable), color = TuneColors.Muted)
+                        val sources = track.matches.map { stringResource(musicSourceName(it.providerId)) }.distinct()
+                        MusicTrackRow(track, current = false, playing = false, enabled = !state.selecting,
+                            detail = sources.takeIf { it.size > 1 || !track.canStartPlayback }?.joinToString(" · "),
+                            modifier = Modifier.testTag("music_search_result_${track.id}"),
+                            pending = state.selecting && state.selectedId == track.id) { onSelect(track) }
+                        if (state.selectedId == track.id && state.failure != null) {
+                            Text(stringResource(musicPlaybackFailureMessage(state.failure)),
+                                color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 10.dp))
                         }
                     }
                     if (state.nextCursor != null) item {
@@ -110,7 +119,7 @@ internal fun MusicSearchScreen(
     }
 }
 
-private fun musicSourceName(provider: String) = when (provider) {
+internal fun musicSourceName(provider: String) = when (provider) {
     "netease" -> R.string.music_source_netease
     "qqmusic" -> R.string.music_source_qq
     "search" -> R.string.music_search

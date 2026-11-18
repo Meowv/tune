@@ -30,6 +30,21 @@ class MusicRepositoryTest {
         assertTrue(resolved.seekable)
     }
 
+    @Test fun dailyChartPreservesSourceRanksAndStaleness() = runBlocking {
+        server { server, repository ->
+            val track = fixture.getValue("search").jsonObject.getValue("items").jsonArray.single()
+            server.enqueue(MockResponse().setBody(
+                """{"items":[{"track":$track,"ranks":[{"source":"netease","rank":3},{"source":"qqmusic","rank":7}]}],
+                    "sources":[{"stale":true}],"partial":true}"""
+            ))
+            val page = repository.charts()
+            assertEquals("/api/music/charts/daily", server.takeRequest(1, TimeUnit.SECONDS)?.requestUrl?.encodedPath)
+            assertEquals("original-001", page.rows.single().track.id)
+            assertEquals(listOf(MusicChartRank("netease", 3), MusicChartRank("qqmusic", 7)), page.rows.single().ranks)
+            assertTrue(page.partial && page.stale)
+        }
+    }
+
     @Test fun alternateResolveSendsExclusionAndRejectsThatProviderInTheResponse() = runBlocking {
         server { server, repository ->
             val response = fixture.getValue("resolved").jsonObject

@@ -11,6 +11,16 @@ import java.io.IOException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.key
+import com.meowv.tune.domain.PlaybackPhase
+import com.meowv.tune.domain.PlaybackSource
+import com.meowv.tune.domain.music.MusicException
+import com.meowv.tune.domain.music.MusicFailure
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -52,6 +62,7 @@ class MainActivity : ComponentActivity() {
     private val tuneApp get() = application as TuneApplication
     private var firstFrameReady = false
     private var carShell = false
+    private var lightMusicBars = false
     private var mediaLease: AutoCloseable? = null
     private var playbackEntryJob: Job? = null
     private var resumeRadioOnEntry = false
@@ -74,7 +85,18 @@ class MainActivity : ComponentActivity() {
     private val musicSearchModel by viewModels<MusicSearchViewModel> {
         viewModelFactory { initializer {
             MusicSearchViewModel(tuneApp.musicRepository,
-                play = { track -> tuneApp.playerController.dispatch(PlayerCommand.PlayMusic(track)) })
+                play = { track ->
+                    val controller = tuneApp.playerController
+                    controller.dispatch(PlayerCommand.PlayMusic(track))
+                    val result = withTimeoutOrNull(18_000) {
+                        controller.state.first {
+                            it.source == PlaybackSource.MUSIC && (it.phase == PlaybackPhase.ERROR ||
+                                it.phase == PlaybackPhase.PLAYING)
+                        }
+                    }
+                    if (result == null || result.phase == PlaybackPhase.ERROR || result.music?.id != track.id)
+                        throw MusicException(result?.musicFailure ?: MusicFailure.PLAYBACK_UNAVAILABLE)
+                })
         } }
     }
     private val settingsModel by viewModels<SettingsViewModel> {
@@ -144,8 +166,10 @@ class MainActivity : ComponentActivity() {
         }
         resumeRadioOnEntry = savedInstanceState == null && !tuneApp.autoPlayAttempted
         setContent {
+            val musicBrowse by musicModel.browse.collectAsStateWithLifecycle()
             val musicState by musicModel.state.collectAsStateWithLifecycle()
             val musicSearch by musicSearchModel.state.collectAsStateWithLifecycle()
+            val searchList = key(musicSearch.query) { rememberLazyListState() }
             val settings by settingsModel.settings.collectAsStateWithLifecycle()
             val storageError by settingsModel.storageError.collectAsStateWithLifecycle()
             val countries by radioModel.countries.collectAsStateWithLifecycle()
@@ -158,6 +182,10 @@ class MainActivity : ComponentActivity() {
                 TuneApp(
                     settings = settings ?: TuneSettings(),
                     musicState = musicState,
+                    musicBrowse = musicBrowse,
+                    onEnterMusic = musicModel::enter,
+                    onMusicSection = musicModel::selectSection,
+                    onLoadMusic = musicModel::loadFeed,
                     onStartMusic = { ensureNotificationPermission(); musicModel.startListening() },
                     onCancelMusic = { musicModel.cancel(); dispatchPlayback(PlayerCommand.CancelMusic) },
                     onSearchMusic = musicSearchModel::open,
@@ -199,13 +227,35 @@ class MainActivity : ComponentActivity() {
                         carShell = it
                         applySystemBars()
                     },
+                    onLightSystemBars = { light ->
+                        if (lightMusicBars != light) {
+                            lightMusicBars = light
+                            applySystemBars()
+                        }
+                    },
                     onFirstLayout = { firstFrameReady = true }
                 )
                 if (musicSearch.visible) Dialog(onDismissRequest = musicSearchModel::close,
                     properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-                    MusicSearchScreen(musicSearch, musicSearchModel::queryChanged, musicSearchModel::search,
-                        musicSearchModel::more,
-                        { track -> ensureNotificationPermission(); musicSearchModel.select(track) }, musicSearchModel::close)
+                    val light = !isSystemInDarkTheme()
+                    val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
+                    SideEffect {
+                        dialogWindow?.let {
+                            if (Build.VERSION.SDK_INT < 35) {
+                                @Suppress("DEPRECATION")
+                                it.navigationBarColor = if (light) 0xFFF8F7FC.toInt() else getColor(R.color.background)
+                            }
+                            WindowCompat.getInsetsController(it, it.decorView).apply {
+                                isAppearanceLightStatusBars = light
+                                isAppearanceLightNavigationBars = light
+                            }
+                        }
+                    }
+                    TuneTheme(light = light) {
+                        MusicSearchScreen(musicSearch, musicSearchModel::queryChanged, musicSearchModel::search,
+                            musicSearchModel::more,
+                            { track -> ensureNotificationPermission(); musicSearchModel.select(track) }, musicSearchModel::close, searchList)
+                    }
                 }
             }
         }
@@ -308,10 +358,16 @@ class MainActivity : ComponentActivity() {
         }
     )
 
+    @Suppress("DEPRECATION")
     private fun applySystemBars() {
+        if (Build.VERSION.SDK_INT < 35) {
+            val scrim = if (lightMusicBars) 0xFFF8F7FC.toInt() else getColor(R.color.background)
+            window.statusBarColor = scrim
+            window.navigationBarColor = scrim
+        }
         WindowCompat.getInsetsController(window, window.decorView).apply {
-            isAppearanceLightStatusBars = false
-            isAppearanceLightNavigationBars = false
+            isAppearanceLightStatusBars = lightMusicBars
+            isAppearanceLightNavigationBars = lightMusicBars
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             if (carShell) hide(WindowInsetsCompat.Type.systemBars()) else show(WindowInsetsCompat.Type.systemBars())
         }

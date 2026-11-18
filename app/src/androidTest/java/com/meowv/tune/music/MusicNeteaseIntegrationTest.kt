@@ -72,8 +72,10 @@ class MusicNeteaseIntegrationTest {
                     } }
                     val index = MusicLyrics.activeLine(seeked.musicLyrics, seeked.positionMs!!)
                     assertTrue(index >= 0)
+                    compose.onNodeWithTag("music_current").performClick()
                     compose.onNodeWithTag("music_artwork").assertExists()
                     compose.onNodeWithTag("music_lyrics").performScrollTo().assertIsDisplayed()
+                    compose.onNodeWithTag("now_playing_collapse").performClick()
                     player.dispatch(PlayerCommand.Stop)
                     withTimeout(5000) { player.state.first { state -> state.music == null } }
                 }
@@ -97,7 +99,7 @@ class MusicNeteaseIntegrationTest {
             withTimeout(5000) { app.playerController.connected.first { connected -> connected } }
             try {
                 compose.onNodeWithTag("nav_music").performClick()
-                compose.onNodeWithTag("music_start").performScrollTo().performClick()
+                compose.onNodeWithTag("music_start").performClick()
                 val state = withTimeout(20000) { app.playerController.state.first { s ->
                     s.phase == PlaybackPhase.PLAYING && s.music?.id?.startsWith("nt-") == true
                 } }

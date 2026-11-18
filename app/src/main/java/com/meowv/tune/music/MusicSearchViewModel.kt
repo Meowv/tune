@@ -18,7 +18,8 @@ internal data class MusicSearchState(
     val partial: Boolean = false,
     val sourceWarnings: Map<String, MusicSearchWarning> = emptyMap(),
     val failure: MusicFailure? = null,
-    val selecting: Boolean = false
+    val selecting: Boolean = false,
+    val selectedId: String? = null
 )
 
 internal enum class MusicSearchWarning { DEFERRED, TIMEOUT, RATE_LIMITED, UNAVAILABLE }
@@ -67,7 +68,7 @@ internal class MusicSearchViewModel(
         val cursor = if (more) old.nextCursor ?: return else null
         if (more && old.items.size >= 200) return
         val id = ++generation
-        mutable.value = old.copy(loading = true, failure = null, searched = true,
+        mutable.value = old.copy(loading = true, failure = null, selectedId = null, searched = true,
             partial = more && old.partial, sourceWarnings = if (more) old.sourceWarnings else emptyMap(),
             items = if (more) old.items else emptyList(), nextCursor = if (more) cursor else null)
         pending = viewModelScope.launch {
@@ -118,13 +119,13 @@ internal class MusicSearchViewModel(
         if (!mutable.value.visible || mutable.value.selecting ||
             mutable.value.items.none { it.id == track.id && it.canStartPlayback }) return
         selection = viewModelScope.launch {
-            mutable.value = mutable.value.copy(selecting = true, failure = null)
+            mutable.value = mutable.value.copy(selecting = true, selectedId = track.id, failure = null)
             try {
                 play(track)
                 ensureActive()
                 generation++
                 pending?.cancel()
-                mutable.value = mutable.value.copy(visible = false, loading = false, selecting = false)
+                mutable.value = mutable.value.copy(visible = false, loading = false, selecting = false, selectedId = null)
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: TuneFailure) {
                 mutable.value = mutable.value.copy(selecting = false, failure = MusicFailure.PLAYBACK_UNAVAILABLE)

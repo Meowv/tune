@@ -61,6 +61,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -168,7 +169,8 @@ internal fun NowPlayingScreen(
                             is PlayerCommand.Seek -> onSeek(command.positionMs)
                             else -> Unit
                         }
-                    }, Modifier.weight(1f), onSleepTimer = { sleepPanelOpen = true })
+                    }, Modifier.weight(1f), onSleepTimer = { sleepPanelOpen = true },
+                        sleepRemaining = if (sleepTimer.isActive) sleepRemainingLabel(sleepTimer.remainingMillis) else null)
                 } else if (station == null) {
                     Column(
                         Modifier.weight(1f).fillMaxWidth().testTag("now_playing_empty"),
@@ -259,6 +261,13 @@ internal fun NowPlayingScreen(
 
 @Composable
 private fun NowPlayingBackdrop(wide: Boolean, modifier: Modifier = Modifier) {
+    val background = TuneColors.Background
+    val primary = TuneColors.Primary
+    val primaryLight = TuneColors.PrimaryLight
+    val accent = TuneColors.Accent
+    val light = background.luminance() > .5f
+    val glowCenter = if (light) Color(0xFFEEE8FB) else Color(0xFF2A214F)
+    val glowEdge = if (light) Color(0xFFF6F2FB) else Color(0xFF151A34)
     Canvas(modifier.fillMaxSize()) {
         val center = Offset(
             x = size.width * if (wide) .31f else .5f,
@@ -267,9 +276,9 @@ private fun NowPlayingBackdrop(wide: Boolean, modifier: Modifier = Modifier) {
         drawRect(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    Color(0xFF2A214F),
-                    Color(0xFF151A34),
-                    TuneColors.Background
+                    glowCenter,
+                    glowEdge,
+                    background
                 ),
                 center = center,
                 radius = size.maxDimension * .78f
@@ -278,8 +287,8 @@ private fun NowPlayingBackdrop(wide: Boolean, modifier: Modifier = Modifier) {
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    TuneColors.Primary.copy(alpha = .19f),
-                    TuneColors.Accent.copy(alpha = .07f),
+                    primary.copy(alpha = .19f),
+                    accent.copy(alpha = .07f),
                     Color.Transparent
                 ),
                 center = center,
@@ -292,7 +301,7 @@ private fun NowPlayingBackdrop(wide: Boolean, modifier: Modifier = Modifier) {
             brush = Brush.radialGradient(
                 colors = listOf(
                     Color.Transparent,
-                    TuneColors.Primary.copy(alpha = .09f),
+                    primary.copy(alpha = .09f),
                     Color.Transparent
                 ),
                 center = center,
@@ -308,7 +317,7 @@ private fun NowPlayingBackdrop(wide: Boolean, modifier: Modifier = Modifier) {
             )
         )
         drawCircle(
-            color = TuneColors.PrimaryLight.copy(alpha = .055f),
+            color = primaryLight.copy(alpha = .055f),
             radius = size.minDimension * if (wide) .37f else .49f,
             center = center,
             style = Stroke(width = 1.dp.toPx())
@@ -395,7 +404,8 @@ private fun NowPlayingBackdrop(wide: Boolean, modifier: Modifier = Modifier) {
         drawPath(
             lowerWave,
             Brush.verticalGradient(
-                listOf(Color(0xFF34205E).copy(alpha = .46f), Color(0xFF111832))
+                if (light) listOf(primary.copy(alpha = .10f), background)
+                else listOf(Color(0xFF34205E).copy(alpha = .46f), Color(0xFF111832))
             )
         )
 
@@ -415,7 +425,7 @@ private fun NowPlayingBackdrop(wide: Boolean, modifier: Modifier = Modifier) {
             lineTo(0f, size.height)
             close()
         }
-        drawPath(bottomWave, Color(0xFF14162F).copy(alpha = .9f))
+        drawPath(bottomWave, if (light) background.copy(alpha = .92f) else Color(0xFF14162F).copy(alpha = .9f))
     }
 }
 
@@ -1024,6 +1034,8 @@ private fun PlayingWaveform(
         0f
     }
     val staticLevels = remember { listOf(.36f, .62f, .84f, 1f, .74f, .5f, .3f) }
+    val primary = TuneColors.Primary
+    val primaryLight = TuneColors.PrimaryLight
     Box(modifier, contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             val count = staticLevels.size
@@ -1045,7 +1057,7 @@ private fun PlayingWaveform(
                 val left = gap + index * (gap + barWidth) + (gap - barWidth) / 2f
                 if (animating) {
                     drawRoundRect(
-                        color = TuneColors.Primary.copy(alpha = .1f),
+                        color = primary.copy(alpha = .1f),
                         topLeft = Offset(left - barWidth * .65f, (size.height - height) / 2f - 3.dp.toPx()),
                         size = Size(barWidth * 2.3f, height + 6.dp.toPx()),
                         cornerRadius = CornerRadius(barWidth)
@@ -1054,8 +1066,8 @@ private fun PlayingWaveform(
                 drawRoundRect(
                     brush = Brush.verticalGradient(
                         listOf(
-                            TuneColors.PrimaryLight.copy(alpha = if (animating) .94f else .45f),
-                            TuneColors.Primary.copy(alpha = if (animating) .72f else .3f)
+                            primaryLight.copy(alpha = if (animating) .94f else .45f),
+                            primary.copy(alpha = if (animating) .72f else .3f)
                         ),
                         startY = (size.height - height) / 2f,
                         endY = (size.height + height) / 2f

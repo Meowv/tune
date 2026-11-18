@@ -38,6 +38,8 @@ import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.RadioDisplayMode
 import com.meowv.tune.music.MusicUiState
+import com.meowv.tune.music.MusicBrowseState
+import com.meowv.tune.music.MusicSection
 import com.meowv.tune.domain.PlaybackSource
 import com.meowv.tune.domain.RadioUiState
 import com.meowv.tune.domain.Station
@@ -46,13 +48,16 @@ import com.meowv.tune.domain.TuneSettings
 import com.meowv.tune.radio.CountryOptions
 import com.meowv.tune.playback.SleepTimerState
 import com.meowv.tune.ui.theme.TuneColors
+import com.meowv.tune.ui.theme.TuneTheme
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.SideEffect
 import com.meowv.tune.update.LocalVersion
 import com.meowv.tune.update.UpdateUiState
 import com.meowv.tune.update.install.InstallState
 import kotlinx.coroutines.flow.StateFlow
 
 @Composable
-fun TuneApp(
+internal fun TuneApp(
     settings: TuneSettings,
     storageError: Boolean,
     radio: StateFlow<RadioUiState>,
@@ -85,7 +90,12 @@ fun TuneApp(
     musicState: MusicUiState = MusicUiState.NotConfigured,
     onStartMusic: () -> Unit = {},
     onCancelMusic: () -> Unit = {},
-    onSearchMusic: () -> Unit = {}
+    onSearchMusic: () -> Unit = {},
+    musicBrowse: MusicBrowseState = MusicBrowseState(),
+    onEnterMusic: () -> Unit = {},
+    onMusicSection: (MusicSection) -> Unit = {},
+    onLoadMusic: (Boolean) -> Unit = {},
+    onLightSystemBars: (Boolean) -> Unit = {}
 ) {
     val connected by playbackConnected.collectAsStateWithLifecycle()
     val playbackState by playback.collectAsStateWithLifecycle()
@@ -95,6 +105,7 @@ fun TuneApp(
     var showScopePicker by rememberSaveable { mutableStateOf(false) }
     var showUpdate by rememberSaveable { mutableStateOf(false) }
     var nowPlayingOpen by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(page) { if (page == TunePage.Music) onEnterMusic() }
     LaunchedEffect(showScopePicker) { if (showScopePicker) onLoadCountries(false) }
     // 进入版本页时检查一次；重复进入由 ViewModel 的进行中判断挡住，不会叠加请求。
     LaunchedEffect(showUpdate) { if (showUpdate) onCheckUpdate() }
@@ -163,151 +174,158 @@ fun TuneApp(
         nowPlayingOpen = false
     }
     val motionEnabled = rememberMotionEnabled()
-    val fullscreenAnimMillis = if (motionEnabled) 280 else 0
+    val fullscreenAnimMillis = if (motionEnabled) (if (playbackState.source == PlaybackSource.MUSIC) 220 else 280) else 0
 
-    Surface(color = TuneColors.Background) {
-        BoxWithConstraints(Modifier.fillMaxSize()) {
-            val windowWidth = maxWidth
-            val isCar = isCarWindow(windowWidth.value, maxHeight.value)
-            LaunchedEffect(isCar) { onShellChanged(isCar) }
-            val updateSubtitle = updateSubtitle(update, localVersion.versionName)
-            val playerEntry: @Composable () -> Unit = {
-                CircularPlayerEntry(playbackState, connected, rotation, isCar, shellEnabled, {
-                    if (playbackState.station == null && target != null) onSelectTarget(target)
-                    nowPlayingOpen = true
-                })
-            }
-            Column(
-                Modifier.fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .onGloballyPositioned { onFirstLayout() }
-                    .testTag(if (isCar) "shell_car" else "shell_phone")
-                    .then(
-                        if (!shellEnabled) {
-                            Modifier.semantics { hideFromAccessibility() }
-                        } else Modifier
-                    )
-            ) {
-                if (storageError) {
-                    Text(
-                        stringResource(R.string.settings_storage_error), color = TuneColors.Text,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                    )
+    val lightMusic = !isSystemInDarkTheme() &&
+        (if (nowPlayingOpen) playbackState.source == PlaybackSource.MUSIC else page == TunePage.Music)
+    SideEffect { onLightSystemBars(lightMusic) }
+    TuneTheme(light = lightMusic) {
+        Surface(color = TuneColors.Background) {
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val windowWidth = maxWidth
+                val isCar = isCarWindow(windowWidth.value, maxHeight.value)
+                LaunchedEffect(isCar) { onShellChanged(isCar) }
+                val updateSubtitle = updateSubtitle(update, localVersion.versionName)
+                val playerEntry: @Composable () -> Unit = {
+                    CircularPlayerEntry(playbackState, connected, rotation, isCar, shellEnabled, {
+                        if (playbackState.source == PlaybackSource.RADIO && playbackState.station == null && target != null) onSelectTarget(target)
+                        nowPlayingOpen = true
+                    })
                 }
-                if (isCar) {
-                    Row(Modifier.weight(1f)) {
-                        MeowvNavigationRail(page, playerEntry) { page = it }
+                Column(
+                    Modifier.fillMaxSize()
+                        .windowInsetsPadding(WindowInsets.safeDrawing)
+                        .onGloballyPositioned { onFirstLayout() }
+                        .testTag(if (isCar) "shell_car" else "shell_phone")
+                        .then(
+                            if (!shellEnabled) {
+                                Modifier.semantics { hideFromAccessibility() }
+                            } else Modifier
+                        )
+                ) {
+                    if (storageError) {
+                        Text(
+                            stringResource(R.string.settings_storage_error), color = TuneColors.Text,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                        )
+                    }
+                    if (isCar) {
+                        Row(Modifier.weight(1f)) {
+                            MeowvNavigationRail(page, playerEntry) { page = it }
+                            TunePager(
+                                pagerState, Modifier.weight(1f).fillMaxHeight(), pageStates, isCar,
+                                settings, displayRadioState, playbackState, connected, directoryRefreshing,
+                                updateSubtitle, onPlayback, onSelectTarget, onDisplayModeChange,
+                                onSettingsChange, onRefreshRadio, onRefreshFromSettings, onLoadMore,
+                                onClearDirectoryCache, { showUpdate = true }, { showScopePicker = true },
+                                musicState = musicState, onStartMusic = onStartMusic, onCancelMusic = onCancelMusic, onSearchMusic = onSearchMusic,
+                                musicBrowse = musicBrowse, onMusicSection = onMusicSection, onLoadMusic = onLoadMusic,
+                                onOpenMusicPlayer = { nowPlayingOpen = true },
+                                radioAnimationsEnabled = !fullscreenOccupied && !showUpdate && !showScopePicker
+                            )
+                        }
+                    } else {
                         TunePager(
-                            pagerState, Modifier.weight(1f).fillMaxHeight(), pageStates, isCar,
+                            pagerState, Modifier.weight(1f).fillMaxWidth(), pageStates, isCar,
                             settings, displayRadioState, playbackState, connected, directoryRefreshing,
                             updateSubtitle, onPlayback, onSelectTarget, onDisplayModeChange,
                             onSettingsChange, onRefreshRadio, onRefreshFromSettings, onLoadMore,
                             onClearDirectoryCache, { showUpdate = true }, { showScopePicker = true },
                             musicState = musicState, onStartMusic = onStartMusic, onCancelMusic = onCancelMusic, onSearchMusic = onSearchMusic,
-                            onOpenMusicSettings = { page = TunePage.Settings },
+                            musicBrowse = musicBrowse, onMusicSection = onMusicSection, onLoadMusic = onLoadMusic,
+                                onOpenMusicPlayer = { nowPlayingOpen = true },
                             radioAnimationsEnabled = !fullscreenOccupied && !showUpdate && !showScopePicker
                         )
                     }
-                } else {
-                    TunePager(
-                        pagerState, Modifier.weight(1f).fillMaxWidth(), pageStates, isCar,
-                        settings, displayRadioState, playbackState, connected, directoryRefreshing,
-                        updateSubtitle, onPlayback, onSelectTarget, onDisplayModeChange,
-                        onSettingsChange, onRefreshRadio, onRefreshFromSettings, onLoadMore,
-                        onClearDirectoryCache, { showUpdate = true }, { showScopePicker = true },
-                        musicState = musicState, onStartMusic = onStartMusic, onCancelMusic = onCancelMusic, onSearchMusic = onSearchMusic,
-                        onOpenMusicSettings = { page = TunePage.Settings },
-                        radioAnimationsEnabled = !fullscreenOccupied && !showUpdate && !showScopePicker
+                    if (!isCar) MeowvBottomDock(page, playerEntry) { page = it }
+                }
+                if (!shellEnabled) {
+                    Box(Modifier.fillMaxSize().pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) awaitPointerEvent().changes.forEach { it.consume() }
+                        }
+                    })
+                }
+                AnimatedVisibility(
+                    visibleState = fullscreenTransition,
+                    enter = slideInVertically(
+                        initialOffsetY = { it },
+                        animationSpec = tween(fullscreenAnimMillis)
+                    ) + fadeIn(tween(fullscreenAnimMillis)),
+                    exit = slideOutVertically(
+                        targetOffsetY = { it },
+                        animationSpec = tween(fullscreenAnimMillis)
+                    ) + fadeOut(tween(fullscreenAnimMillis))
+                ) {
+                    NowPlayingScreen(
+                        isCar = isCar,
+                        connected = connected,
+                        state = playbackState,
+                        station = visibleStation,
+                        shuffle = shuffle,
+                        sleepTimer = sleepTimerState,
+                        onCollapse = { nowPlayingOpen = false },
+                        onToggle = toggle,
+                        onNext = next,
+                        onPrevious = previous,
+                        onToggleShuffle = {
+                            onSettingsChange { current ->
+                                current.copy(
+                                    playbackOrder = if (current.playbackOrder == PlaybackOrder.SHUFFLE) {
+                                        PlaybackOrder.SEQUENTIAL
+                                    } else {
+                                        PlaybackOrder.SHUFFLE
+                                    }
+                                )
+                            }
+                        },
+                        onSetSleepTimer = onSetSleepTimer,
+                        onSeek = { onPlayback(PlayerCommand.Seek(it)) },
+                        onSelectStation = { nowPlayingOpen = false; page = if (playbackState.source == PlaybackSource.MUSIC) TunePage.Music else TunePage.Radio },
+                        modifier = Modifier.fillMaxSize().testTag("now_playing_screen")
                     )
                 }
-                if (!isCar) MeowvBottomDock(page, playerEntry) { page = it }
-            }
-            if (!shellEnabled) {
-                Box(Modifier.fillMaxSize().pointerInput(Unit) {
-                    awaitPointerEventScope {
-                        while (true) awaitPointerEvent().changes.forEach { it.consume() }
-                    }
-                })
-            }
-            AnimatedVisibility(
-                visibleState = fullscreenTransition,
-                enter = slideInVertically(
-                    initialOffsetY = { it },
-                    animationSpec = tween(fullscreenAnimMillis)
-                ) + fadeIn(tween(fullscreenAnimMillis)),
-                exit = slideOutVertically(
-                    targetOffsetY = { it },
-                    animationSpec = tween(fullscreenAnimMillis)
-                ) + fadeOut(tween(fullscreenAnimMillis))
-            ) {
-                NowPlayingScreen(
-                    isCar = isCar,
-                    connected = connected,
-                    state = playbackState,
-                    station = visibleStation,
-                    shuffle = shuffle,
-                    sleepTimer = sleepTimerState,
-                    onCollapse = { nowPlayingOpen = false },
-                    onToggle = toggle,
-                    onNext = next,
-                    onPrevious = previous,
-                    onToggleShuffle = {
-                        onSettingsChange { current ->
-                            current.copy(
-                                playbackOrder = if (current.playbackOrder == PlaybackOrder.SHUFFLE) {
-                                    PlaybackOrder.SEQUENTIAL
-                                } else {
-                                    PlaybackOrder.SHUFFLE
-                                }
+                // 版本页覆盖整个外壳（含播放器与导航），保持主菜单仍是三个。
+                if (showUpdate) {
+                    UpdateScreen(
+                        isCar = isCar,
+                        local = localVersion,
+                        state = update,
+                        install = install,
+                        upgradedTo = upgradedTo,
+                        onBack = { showUpdate = false },
+                        onCheck = onCheckUpdate,
+                        onDownload = onDownloadUpdate,
+                        onCancelDownload = onCancelDownload,
+                        onInstall = onInstallUpdate,
+                        modifier = Modifier.fillMaxSize()
+                            .background(TuneColors.Background)
+                            .windowInsetsPadding(
+                                if (isCar) WindowInsets.displayCutout else WindowInsets.safeDrawing
                             )
-                        }
-                    },
-                    onSetSleepTimer = onSetSleepTimer,
-                    onSeek = { onPlayback(PlayerCommand.Seek(it)) },
-                    onSelectStation = { nowPlayingOpen = false; page = if (playbackState.source == PlaybackSource.MUSIC) TunePage.Music else TunePage.Radio },
-                    modifier = Modifier.fillMaxSize().testTag("now_playing_screen")
-                )
-            }
-            // 版本页覆盖整个外壳（含播放器与导航），保持主菜单仍是三个。
-            if (showUpdate) {
-                UpdateScreen(
-                    isCar = isCar,
-                    local = localVersion,
-                    state = update,
-                    install = install,
-                    upgradedTo = upgradedTo,
-                    onBack = { showUpdate = false },
-                    onCheck = onCheckUpdate,
-                    onDownload = onDownloadUpdate,
-                    onCancelDownload = onCancelDownload,
-                    onInstall = onInstallUpdate,
-                    modifier = Modifier.fillMaxSize()
-                        .background(TuneColors.Background)
-                        .windowInsetsPadding(
-                            if (isCar) WindowInsets.displayCutout else WindowInsets.safeDrawing
+                    )
+                }
+                SnackbarHost(
+                    snackbar,
+                    // 让出系统栏高度后再按播放器/导航栏厚度上移，避免提示压在播放器上。
+                    Modifier.align(Alignment.BottomCenter)
+                        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
+                        .padding(
+                            bottom = when {
+                                nowPlayingOpen -> 24.dp
+                                isCar -> 16.dp
+                                else -> 88.dp
+                            }
                         )
                 )
-            }
-            SnackbarHost(
-                snackbar,
-                // 让出系统栏高度后再按播放器/导航栏厚度上移，避免提示压在播放器上。
-                Modifier.align(Alignment.BottomCenter)
-                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
-                    .padding(
-                        bottom = when {
-                            nowPlayingOpen -> 24.dp
-                            isCar -> 16.dp
-                            else -> 88.dp
-                        }
-                    )
-            )
-            if (showScopePicker) {
-                ScopePicker(
-                    isCar, maxHeight, settings.scope, countries, { onLoadCountries(true) },
-                    onDismiss = { showScopePicker = false }
-                ) { selected ->
-                    onSettingsChange { current -> current.copy(scope = selected) }
-                    showScopePicker = false
+                if (showScopePicker) {
+                    ScopePicker(
+                        isCar, maxHeight, settings.scope, countries, { onLoadCountries(true) },
+                        onDismiss = { showScopePicker = false }
+                    ) { selected ->
+                        onSettingsChange { current -> current.copy(scope = selected) }
+                        showScopePicker = false
+                    }
                 }
             }
         }
@@ -370,7 +388,10 @@ private fun TunePager(
     onOpenUpdate: () -> Unit,
     onScopeClick: () -> Unit,
     radioAnimationsEnabled: Boolean,
-    onOpenMusicSettings: () -> Unit,
+    onOpenMusicPlayer: () -> Unit,
+    musicBrowse: MusicBrowseState,
+    onMusicSection: (MusicSection) -> Unit,
+    onLoadMusic: (Boolean) -> Unit,
     musicState: MusicUiState,
     onStartMusic: () -> Unit,
     onCancelMusic: () -> Unit,
@@ -386,7 +407,7 @@ private fun TunePager(
                 onRefreshFromSettings, onLoadMore, onClearDirectoryCache,
                 onOpenUpdate, onScopeClick,
                 radioAnimationsEnabled && index == state.settledPage && !state.isScrollInProgress,
-                onOpenMusicSettings, musicState, onStartMusic, onCancelMusic, onSearchMusic
+                onOpenMusicPlayer, musicBrowse, onMusicSection, onLoadMusic, musicState, onStartMusic, onCancelMusic, onSearchMusic
             )
         }
     }
@@ -414,7 +435,10 @@ private fun pageContent(
     onOpenUpdate: () -> Unit,
     onScopeClick: () -> Unit,
     radioAnimationsEnabled: Boolean,
-    onOpenMusicSettings: () -> Unit,
+    onOpenMusicPlayer: () -> Unit,
+    musicBrowse: MusicBrowseState,
+    onMusicSection: (MusicSection) -> Unit,
+    onLoadMusic: (Boolean) -> Unit,
     musicState: MusicUiState,
     onStartMusic: () -> Unit,
     onCancelMusic: () -> Unit,
@@ -436,7 +460,8 @@ private fun pageContent(
                 onScopeClick = onScopeClick,
                 animationsEnabled = radioAnimationsEnabled
             )
-            TunePage.Music -> MusicScreen(isCar, musicState, onStartMusic, onCancelMusic, onOpenMusicSettings, connected, onPlayback, onSearchMusic)
+            TunePage.Music -> MusicScreen(isCar, musicState, musicBrowse, onStartMusic, onCancelMusic, onOpenMusicPlayer,
+                connected, onPlayback, onSearchMusic, onMusicSection, onLoadMusic)
             TunePage.Settings -> SettingsScreen(
                 isCar = isCar,
                 settings = settings,

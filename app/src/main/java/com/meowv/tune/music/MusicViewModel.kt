@@ -22,6 +22,25 @@ sealed interface MusicUiState {
     data class Error(val failure: MusicFailure) : MusicUiState
 }
 
+internal enum class MusicSection { Recommendations, Chart }
+
+internal data class MusicFeed(
+    val rows: List<MusicChartRow> = emptyList(),
+    val cursor: String? = null,
+    val loaded: Boolean = false,
+    val loading: Boolean = false,
+    val partial: Boolean = false,
+    val stale: Boolean = false,
+    val failure: MusicFailure? = null
+)
+
+internal data class MusicBrowseState(
+    val section: MusicSection = MusicSection.Recommendations,
+    val feeds: Map<MusicSection, MusicFeed> = emptyMap()
+) {
+    val feed: MusicFeed get() = feeds[section] ?: MusicFeed()
+}
+
 internal class MusicViewModel(
     private val repository: MusicRepository?,
     private val requestPlayback: (suspend () -> Unit)? = null,
@@ -43,6 +62,49 @@ internal class MusicViewModel(
                 }
             }
         }
+    }
+
+    private val mutableBrowse = MutableStateFlow(MusicBrowseState())
+    val browse = mutableBrowse.asStateFlow()
+
+    fun enter() = selectSection(mutableBrowse.value.section)
+
+    fun selectSection(section: MusicSection) {
+        mutableBrowse.value = mutableBrowse.value.copy(section = section)
+        val feed = mutableBrowse.value.feed
+        if (!feed.loaded && feed.failure == null) loadFeed()
+    }
+
+    fun loadFeed(more: Boolean = false) {
+        val source = repository ?: return
+        val (section) = mutableBrowse.value
+        val previous = mutableBrowse.value.feed
+        if (previous.loading || more && previous.cursor == null) return
+        val cursor = if (more) previous.cursor else null
+        updateFeed(section, previous.copy(loading = true, failure = null))
+        viewModelScope.launch {
+            try {
+                val feed = when (section) {
+                    MusicSection.Chart -> source.charts().let {
+                        MusicFeed(rows = it.rows.distinctBy { row -> row.track.id }, loaded = true,
+                            partial = it.partial, stale = it.stale)
+                    }
+                    MusicSection.Recommendations -> source.recommendations(cursor = cursor).let {
+                        val rows = (if (more) previous.rows else emptyList()) + it.items.map { track -> MusicChartRow(track) }
+                        MusicFeed(rows = rows.distinctBy { row -> row.track.id }, loaded = true,
+                            cursor = it.nextCursor?.takeUnless { next -> next == cursor }, partial = it.partial)
+                    }
+                }
+                updateFeed(section, feed)
+            } catch (failure: MusicException) {
+                updateFeed(section, previous.copy(loading = false, failure = failure.failure))
+            }
+        }
+    }
+
+    private fun updateFeed(section: MusicSection, feed: MusicFeed) {
+        val state = mutableBrowse.value
+        mutableBrowse.value = state.copy(feeds = state.feeds + (section to feed))
     }
 
     fun startListening() {

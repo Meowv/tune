@@ -266,6 +266,7 @@ private fun StationRow(
     )
     // 未播放用灰紫实心三角，当前台用品牌紫实心暂停：实心比线性三角更有分量，车机上也能一眼看清。
     val tint = if (selected) TuneColors.Primary else TuneColors.IconIdle
+    val markerColor = TuneColors.Primary
     val glyph = TuneSizes.IconMd
     Row(
         Modifier.fillMaxWidth().height(if (isCar) 72.dp else 78.dp)
@@ -276,7 +277,7 @@ private fun StationRow(
                     val barWidth = 3.dp.toPx()
                     val barHeight = (if (isCar) 30.dp else 26.dp).toPx()
                     drawRoundRect(
-                        color = TuneColors.Primary,
+                        color = markerColor,
                         topLeft = Offset(0f, (size.height - barHeight) / 2f),
                         size = Size(barWidth, barHeight),
                         cornerRadius = CornerRadius(barWidth / 2f)
