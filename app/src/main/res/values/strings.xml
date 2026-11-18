@@ -40,6 +40,8 @@
   <string name="music_track_unavailable">暂不可播放</string>
   <string name="music_source_netease">网易云音乐</string>
   <string name="music_source_kuwo">酷我音乐</string>
+  <string name="music_source_incompetech">Incompetech</string>
+  <string name="music_incompetech_credit">Kevin MacLeod (incompetech.com) · CC BY 4.0\ncreativecommons.org/licenses/by/4.0/</string>
   <string name="music_metadata_only">仅提供搜索信息</string>
   <string name="music_source_other">其他音源</string>
   <string name="setting_autoplay">自动播放</string>

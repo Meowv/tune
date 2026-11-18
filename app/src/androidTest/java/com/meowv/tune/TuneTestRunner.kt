@@ -86,6 +86,23 @@ class TuneTestApplication : TuneApplication() {
     }
 
     override val mediaHttp by lazy {
+        if (InstrumentationRegistry.getArguments().getString("musicLiveFallback") == "true") {
+            return@lazy super.mediaHttp.newBuilder().addInterceptor { chain ->
+                val request = chain.request()
+                val host = request.url.host
+                if (host.endsWith(".music.126.net")) {
+                    musicMediaRequests.computeIfAbsent("live-netease-gone") { AtomicInteger() }.incrementAndGet()
+                    Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(410)
+                        .message("Controlled media failure").body(byteArrayOf().toResponseBody()).build()
+                } else {
+                    val response = chain.proceed(request)
+                    if (host == "incompetech.com" && response.isSuccessful) {
+                        musicMediaRequests.computeIfAbsent("live-incompetech") { AtomicInteger() }.incrementAndGet()
+                    }
+                    response
+                }
+            }.build()
+        }
         if (liveRadio || InstrumentationRegistry.getArguments().getString("musicLiveNetease") == "true") return@lazy super.mediaHttp
         val builder = OkHttpClient.Builder()
         builder.addInterceptor { chain ->

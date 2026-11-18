@@ -134,7 +134,7 @@ internal class MusicPlaybackEngine(
                     val selection = select() ?: throw MusicException(MusicFailure.NO_PLAYABLE_MATCH)
                     ensureActive()
                     selected = true
-                    if (!preserveCurrent) publishState(state.copy(music = selection.track))
+                    if (!preserveCurrent) publishState(state.copy(music = selection.track, musicProviderId = null))
                     val source = repository() ?: throw MusicException(MusicFailure.NOT_CONFIGURED)
                     val ahead = prepared?.await()?.getOrThrow()
                     ensureActive()
@@ -197,7 +197,8 @@ internal class MusicPlaybackEngine(
         current = selection; audio = playable; confirmed = false
         endedItem = null
         itemId = "music:$id:${selection.token}"
-        publishState(PlayerUiState(source = PlaybackSource.MUSIC, phase = PlaybackPhase.BUFFERING, music = selection.track))
+        publishState(PlayerUiState(source = PlaybackSource.MUSIC, phase = PlaybackPhase.BUFFERING,
+            music = selection.track, musicProviderId = playable.providerId))
         if (!focus.acquire()) { fail(MusicFailure.PLAYBACK_UNAVAILABLE); return }
         val metadata = MediaMetadata.Builder().setTitle(selection.track.title)
             .setArtist(selection.track.artists.joinToString(" / ")).setAlbumTitle(selection.track.album).setIsPlayable(true).build()
