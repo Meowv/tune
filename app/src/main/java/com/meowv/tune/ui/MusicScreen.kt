@@ -70,12 +70,7 @@ internal fun MusicScreen(
                     MusicUiState.Empty -> R.string.music_empty
                     is MusicUiState.Ready -> R.string.music_ready
                     is MusicUiState.Active -> R.string.music_ready
-                    is MusicUiState.Error -> when (state.failure) {
-                        MusicFailure.NOT_CONFIGURED -> R.string.music_not_configured
-                        MusicFailure.UNAUTHORIZED -> R.string.music_unauthorized
-                        MusicFailure.RATE_LIMITED -> R.string.music_rate_limited
-                        else -> R.string.music_failed
-                    }
+                    is MusicUiState.Error -> musicPlaybackFailureMessage(state.failure)
                 }
                 if (state is MusicUiState.Ready) {
                     Text(state.track.title, color = TuneColors.Text, style = TuneTextStyle,

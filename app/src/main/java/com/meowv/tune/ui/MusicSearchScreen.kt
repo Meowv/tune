@@ -21,6 +21,7 @@ import com.meowv.tune.domain.music.MusicFailure
 import com.meowv.tune.domain.music.MusicTrack
 import com.meowv.tune.domain.music.canStartPlayback
 import com.meowv.tune.music.MusicSearchState
+import com.meowv.tune.music.MusicSearchWarning
 import com.meowv.tune.ui.theme.TuneColors
 
 @Composable
@@ -63,12 +64,25 @@ internal fun MusicSearchScreen(
                         else -> R.string.music_search_failed
                     }), color = TuneColors.Error)
                 }
-                if (state.partial) Text(stringResource(R.string.music_search_partial), color = TuneColors.Muted)
                 if (state.searched && !state.loading && state.failure == null && state.items.isEmpty()) {
                     Text(stringResource(R.string.music_search_empty), color = TuneColors.Muted,
                         modifier = Modifier.testTag("music_search_empty"))
                 }
                 LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("music_search_results")) {
+                    if (state.partial && state.sourceWarnings.isEmpty()) item {
+                        Text(stringResource(R.string.music_search_partial), color = TuneColors.Muted)
+                    }
+                    state.sourceWarnings.forEach { (provider, warning) ->
+                        item {
+                            val message = when (warning) {
+                                MusicSearchWarning.DEFERRED -> R.string.music_search_source_deferred
+                                MusicSearchWarning.TIMEOUT -> R.string.music_search_source_timeout
+                                MusicSearchWarning.RATE_LIMITED -> R.string.music_search_source_limited
+                                MusicSearchWarning.UNAVAILABLE -> R.string.music_search_source_unavailable
+                            }
+                            Text(stringResource(message, stringResource(musicSourceName(provider))), color = TuneColors.Muted)
+                        }
+                    }
                     items(state.items, key = { it.id }) { track ->
                         Column(Modifier.fillMaxWidth().heightIn(min = 72.dp)
                             .clickable(enabled = !state.selecting && track.canStartPlayback) { onSelect(track) }
@@ -77,11 +91,7 @@ internal fun MusicSearchScreen(
                             Text(track.artists.joinToString(" / "), color = TuneColors.Muted)
                             track.album?.let { Text(it, color = TuneColors.Muted) }
                             if (track.matches.isNotEmpty()) {
-                                val names = track.matches.take(3).map { source -> stringResource(when (source.providerId) {
-                                    "netease" -> R.string.music_source_netease
-                                    "kuwo-search" -> R.string.music_source_kuwo
-                                    else -> R.string.music_source_other
-                                }) }.distinct()
+                                val names = track.matches.take(3).map { stringResource(musicSourceName(it.providerId)) }.distinct()
                                 Text(names.joinToString(" · "), color = TuneColors.Muted)
                             }
                             if (!track.canStartPlayback) Text(stringResource(if (track.availability == "metadata_only")
@@ -98,4 +108,11 @@ internal fun MusicSearchScreen(
             }
         }
     }
+}
+
+private fun musicSourceName(provider: String) = when (provider) {
+    "netease" -> R.string.music_source_netease
+    "kuwo-search" -> R.string.music_source_kuwo
+    "search" -> R.string.music_search
+    else -> R.string.music_source_other
 }

@@ -13,7 +13,6 @@ import com.meowv.tune.music.MusicSelection
 import com.meowv.tune.music.MusicNextPreparation
 import com.meowv.tune.music.MusicRequestGate
 import com.meowv.tune.music.musicRetryAfterSeconds
-import java.time.Instant
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.StateFlow
 
@@ -140,11 +139,11 @@ internal class MusicPlaybackEngine(
                     if (ahead != null && cached == null) resourceRefreshed = true
                     var playable = cached ?: source.resolve(selection.track.id, refreshProvider ?: ahead?.providerId)
                     ensureActive()
-                    if (playable.expiresAt?.isAfter(Instant.now()) == false && !resourceRefreshed) {
+                    if (!nextPreparation.fresh(playable) && !resourceRefreshed) {
                         resourceRefreshed = true
                         playable = source.resolve(selection.track.id, playable.providerId)
                     }
-                    if (playable.trackId != selection.track.id || playable.expiresAt?.isAfter(Instant.now()) == false ||
+                    if (playable.trackId != selection.track.id || !nextPreparation.fresh(playable) ||
                         !com.meowv.tune.music.MusicAudioUrlPolicy.allows(playable.url)) throw MusicException(MusicFailure.INVALID_RESPONSE)
                     selection to playable
                 }
@@ -273,9 +272,12 @@ internal class MusicPlaybackEngine(
         if (NetworkPolicy.evaluate(network.value) != NetworkDecision.ALLOWED) {
             publishState(state.copy(error = TuneError.NETWORK_OFFLINE)); return
         }
-        if (!itemMatches() || player.playbackState == Player.STATE_ENDED || state.phase == PlaybackPhase.ERROR ||
-            audio?.expiresAt?.isAfter(Instant.now()) == false) {
+        if (!itemMatches() || player.playbackState == Player.STATE_ENDED || state.phase == PlaybackPhase.ERROR) {
             play(state.music, resetSession = false)
+        } else if (audio?.let { !nextPreparation.fresh(it) } == true) {
+            val selection = current ?: return
+            val provider = audio?.providerId ?: return
+            if (mayRequest()) begin(refreshProvider = provider) { queue.renew(selection) }
         } else if (focus.acquire()) {
             if (!confirmed) current = current?.let(queue::renew)
             desiredPlay = true

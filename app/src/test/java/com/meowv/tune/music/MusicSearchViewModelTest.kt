@@ -118,15 +118,17 @@ class MusicSearchViewModelTest {
         val playable = track.copy(id = "playable", matches = listOf(MusicTrackMatch("netease", "34"), MusicTrackMatch("kuwo-search", "12", .99, "studio")))
         try {
             val model = MusicSearchViewModel(Repository { _, cursor ->
-                if (cursor == null) MusicPage(listOf(metadata), "later", partial = true)
-                else MusicPage(listOf(playable))
+                if (cursor == null) MusicPage(listOf(metadata), "later", partial = true, warnings = listOf("netease:deferred"))
+                else MusicPage(listOf(playable), partial = true, warnings = listOf("kuwo-search:rate_limited", "unknown:forbidden"))
             }, {}, scope)
             model.open(); model.queryChanged("qix"); model.search()
             assertFalse(model.state.value.items.single().canStartPlayback)
+            assertEquals(mapOf("netease" to MusicSearchWarning.DEFERRED), model.state.value.sourceWarnings)
             model.more()
             assertEquals(listOf(playable), model.state.value.items)
             assertTrue(model.state.value.items.single().canStartPlayback)
             assertTrue(model.state.value.partial)
+            assertEquals(mapOf("kuwo-search" to MusicSearchWarning.RATE_LIMITED), model.state.value.sourceWarnings)
         } finally { scope.cancel() }
     }
 

@@ -48,13 +48,7 @@ internal fun MusicNowPlayingContent(
                 Text(stringResource(R.string.music_loading), color = TuneColors.Muted)
             }
             if (state.phase == PlaybackPhase.ERROR || state.error != null) {
-                Text(stringResource(when (state.musicFailure) {
-                    MusicFailure.NOT_CONFIGURED -> R.string.music_not_configured
-                    MusicFailure.UNAUTHORIZED -> R.string.music_unauthorized
-                    MusicFailure.RATE_LIMITED -> R.string.music_rate_limited
-                    MusicFailure.NO_PLAYABLE_MATCH -> R.string.music_empty
-                    else -> R.string.music_failed
-                }), color = TuneColors.Error)
+                Text(stringResource(musicPlaybackFailureMessage(state.musicFailure)), color = TuneColors.Error)
             }
             val duration = state.durationMs
             if (state.canSeek && duration != null && duration > 0) {
@@ -86,6 +80,17 @@ internal fun MusicNowPlayingContent(
             }
         }
     }
+}
+
+internal fun musicPlaybackFailureMessage(failure: MusicFailure?) = when (failure) {
+    MusicFailure.NOT_CONFIGURED -> R.string.music_not_configured
+    MusicFailure.UNAUTHORIZED -> R.string.music_unauthorized
+    MusicFailure.FORBIDDEN -> R.string.music_playback_forbidden
+    MusicFailure.RATE_LIMITED -> R.string.music_rate_limited
+    MusicFailure.SOURCE_TIMEOUT -> R.string.music_playback_timeout
+    MusicFailure.SOURCE_UNAVAILABLE -> R.string.music_playback_source_unavailable
+    MusicFailure.NO_PLAYABLE_MATCH -> R.string.music_empty
+    else -> R.string.music_failed
 }
 
 private fun musicTime(ms: Long): String = "${ms.coerceAtLeast(0) / 60000}:${(ms.coerceAtLeast(0) / 1000 % 60).toString().padStart(2, '0')}"

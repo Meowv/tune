@@ -16,9 +16,12 @@ internal data class MusicSearchState(
     val nextCursor: String? = null,
     val loading: Boolean = false,
     val partial: Boolean = false,
+    val sourceWarnings: Map<String, MusicSearchWarning> = emptyMap(),
     val failure: MusicFailure? = null,
     val selecting: Boolean = false
 )
+
+internal enum class MusicSearchWarning { DEFERRED, TIMEOUT, RATE_LIMITED, UNAVAILABLE }
 
 internal class MusicSearchViewModel(
     private val repository: MusicRepository?,
@@ -65,6 +68,7 @@ internal class MusicSearchViewModel(
         if (more && old.items.size >= 200) return
         val id = ++generation
         mutable.value = old.copy(loading = true, failure = null, searched = true,
+            partial = more && old.partial, sourceWarnings = if (more) old.sourceWarnings else emptyMap(),
             items = if (more) old.items else emptyList(), nextCursor = if (more) cursor else null)
         pending = viewModelScope.launch {
             try {
@@ -72,9 +76,23 @@ internal class MusicSearchViewModel(
                 ensureActive()
                 if (id != generation) return@launch
                 val items = mergeResults(if (more) old.items else emptyList(), page.items)
+                val warnings = if (more) old.sourceWarnings.filterValues { it != MusicSearchWarning.DEFERRED }.toMutableMap()
+                    else mutableMapOf()
+                for (warning in page.warnings) {
+                    val provider = warning.substringBefore(':')
+                    if (provider !in setOf("netease", "kuwo-search", "search")) continue
+                    warnings[provider] = when (warning.substringAfter(':')) {
+                        "deferred" -> MusicSearchWarning.DEFERRED
+                        "source_timeout" -> MusicSearchWarning.TIMEOUT
+                        "rate_limited" -> MusicSearchWarning.RATE_LIMITED
+                        "source_unavailable", "forbidden", "unauthorized" -> MusicSearchWarning.UNAVAILABLE
+                        else -> continue
+                    }
+                }
                 mutable.value = mutable.value.copy(items = items, loading = false,
                     nextCursor = page.nextCursor?.takeUnless { it == cursor || items.size >= 200 },
-                    partial = page.partial || more && old.partial)
+                    sourceWarnings = warnings, partial = page.partial || warnings.isNotEmpty() ||
+                        more && old.partial && old.sourceWarnings.isEmpty())
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: MusicException) {
                 ensureActive()

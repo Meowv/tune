@@ -437,6 +437,24 @@ class MusicPlaybackIntegrationTest {
         }
     }
 
+    @Test fun nearlyExpiredUrlRefreshesBeforeAnyMediaRequest() = runBlocking {
+        audioOverride = { audio, attempt, provider ->
+            if (attempt == 1) audio.copy(
+                expiresAt = Instant.now().plusSeconds(3),
+                url = "https://test.example/missing"
+            ) else {
+                assertEquals("test", provider)
+                audio
+            }
+        }
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            assertEquals(2, resolves[tracks[0].id]?.get())
+            assertNull(app.musicMediaRequests["missing"])
+        }
+    }
+
     @Test fun missingMediaRefreshesSameTrackBeforeAdvancing() = runBlocking {
         audioOverride = { audio, attempt, provider ->
             if (attempt == 1) audio.copy(url = "https://test.example/missing")
@@ -499,8 +517,9 @@ class MusicPlaybackIntegrationTest {
 
     @Test fun pausedExpiredAudioResolvesAgainOnlyAfterExplicitResume() = runBlocking {
         var expiresAt = Instant.MAX
-        audioOverride = { audio, attempt, _ ->
-            if (attempt == 1) expiresAt = Instant.now().plusSeconds(2)
+        audioOverride = { audio, attempt, provider ->
+            if (attempt == 1) expiresAt = Instant.now().plusSeconds(6)
+            else assertEquals("test", provider)
             audio.copy(expiresAt = expiresAt)
         }
         withMusic {

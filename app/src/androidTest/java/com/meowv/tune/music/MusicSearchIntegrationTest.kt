@@ -128,7 +128,8 @@ class MusicSearchIntegrationTest {
         val fake = FakeMusicRepository(tracks)
         app.testMusicRepository = object : MusicRepository by fake {
             override suspend fun search(query: String, limit: Int, cursor: String?) =
-                if (cursor == null) MusicPage(listOf(metadata), "later", partial = true) else MusicPage(listOf(playable))
+                if (cursor == null) MusicPage(listOf(metadata), "later", partial = true, warnings = listOf("netease:deferred"))
+                else MusicPage(listOf(playable))
             override suspend fun resolve(trackId: String, preferredProviderId: String?) = PlayableAudio(
                 trackId, "test", trackId, 1.0, "https://test.example/radio.mp3", "audio/mpeg", 12000, seekable = true)
         }
@@ -143,9 +144,11 @@ class MusicSearchIntegrationTest {
                 compose.onNodeWithTag("music_search_submit").performClick()
                 compose.waitUntil(4000) { compose.onAllNodesWithTag("music_search_result_metadata").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("music_search_result_metadata").assertIsNotEnabled()
+                compose.onNodeWithText("网易云音乐 响应较慢，加载更多可继续搜索").assertIsDisplayed()
                 compose.onNodeWithTag("music_search_more").performScrollTo().performClick()
                 compose.waitUntil(4000) { compose.onAllNodesWithTag("music_search_result_original-001").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("music_search_result_metadata").assertDoesNotExist()
+                compose.onNodeWithText("网易云音乐 响应较慢，加载更多可继续搜索").assertDoesNotExist()
                 compose.onNodeWithTag("music_search_result_original-001").assertIsEnabled().performClick()
                 awaitTrack("original-001")
                 Unit
