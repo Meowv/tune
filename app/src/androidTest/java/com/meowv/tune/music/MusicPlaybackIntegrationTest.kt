@@ -42,6 +42,7 @@ class MusicPlaybackIntegrationTest {
     private var resolveOverride: (suspend (String) -> Unit)? = null
     private var recommendationsOverride: (suspend (Int, String?) -> MusicPage)? = null
     private var audioOverride: (PlayableAudio, Int, String?) -> PlayableAudio = { audio, _, _ -> audio }
+    private var alternateOverride: (suspend (String, String) -> PlayableAudio)? = null
     private var media: MediaController? = null
 
     @Test fun musicSeeksContinuesAtEofAndPreviousUsesConfirmedHistory() = runBlocking {
@@ -482,10 +483,47 @@ class MusicPlaybackIntegrationTest {
         }
     }
 
+    @Test fun goneMediaRefreshesThenPlaysOneMatchingAlternate() = runBlocking {
+        val track = tracks[0].copy(matches = listOf(MusicTrackMatch("test", "primary"), MusicTrackMatch("alternate", "match")))
+        audioOverride = { audio, _, _ -> audio.copy(url = "https://test.example/music-gone") }
+        alternateOverride = { id, excluded ->
+            assertEquals(track.id, id)
+            assertEquals("test", excluded)
+            assertEquals(2, app.musicMediaRequests["music-gone"]?.get())
+            PlayableAudio(id, "alternate", "match", 1.0, "https://test.example/radio.mp3", "audio/mpeg", 12000, seekable = true)
+        }
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic(track))
+            awaitMusic(1)
+            assertEquals(2, resolves[track.id]?.get())
+            assertFalse(connection.state.value.canPrevious)
+        }
+    }
+
+    @Test fun missingAlternateCannotStartAnotherRefreshOrFallback() = runBlocking {
+        val attempts = AtomicInteger()
+        val track = tracks[0].copy(matches = listOf(MusicTrackMatch("test", "primary"), MusicTrackMatch("alternate", "match")))
+        catalog = listOf(track)
+        audioOverride = { audio, _, _ -> audio.copy(url = "https://test.example/missing") }
+        alternateOverride = { id, _ ->
+            attempts.incrementAndGet()
+            PlayableAudio(id, "alternate", "match", 1.0, "https://test.example/missing", "audio/mpeg", 12000, seekable = true)
+        }
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic(track))
+            awaitPhase(PlaybackPhase.ERROR)
+            assertEquals(1, attempts.get())
+            assertEquals(2, resolves[track.id]?.get())
+            assertEquals(3, app.musicMediaRequests["missing"]?.get())
+        }
+    }
+
     @Test fun forbiddenMediaStopsWithoutRefreshingOrSkipping() = runBlocking {
         audioOverride = { audio, _, _ -> audio.copy(url = "https://test.example/music-forbidden") }
         withMusic {
-            connection.dispatch(PlayerCommand.PlayMusic())
+            val track = tracks[0].copy(matches = listOf(MusicTrackMatch("alternate", "match")))
+            alternateOverride = { _, _ -> error("Forbidden media must not request an alternate") }
+            connection.dispatch(PlayerCommand.PlayMusic(track))
             awaitPhase(PlaybackPhase.ERROR)
             assertEquals(MusicFailure.FORBIDDEN, connection.state.value.musicFailure)
             assertEquals(1, app.musicMediaRequests["music-forbidden"]?.get())
@@ -817,6 +855,8 @@ class MusicPlaybackIntegrationTest {
                 return audioOverride(PlayableAudio(trackId, "test", trackId, 1.0,
                     if (originals) "https://original.test/$file" else "https://test.example/radio.mp3", "audio/mpeg", 12000, seekable = true), attempt, preferredProviderId)
             }
+            override suspend fun resolveAlternate(trackId: String, excludedProviderId: String): PlayableAudio =
+                alternateOverride?.invoke(trackId, excludedProviderId) ?: super.resolveAlternate(trackId, excludedProviderId)
         }
         app.mockNetwork.value = NetworkState(NetworkType.WIFI)
         app.userSettings.update { it.copy(autoPlay = false, scope = RadioScope(ScopeMode.COUNTRY, app.country)) }

@@ -30,6 +30,22 @@ class MusicRepositoryTest {
         assertTrue(resolved.seekable)
     }
 
+    @Test fun alternateResolveSendsExclusionAndRejectsThatProviderInTheResponse() = runBlocking {
+        server { server, repository ->
+            val response = fixture.getValue("resolved").jsonObject
+            val provider = response.getValue("providerId").jsonPrimitive.content
+            server.enqueue(MockResponse().setBody(response.toString()))
+            assertEquals(MusicFailure.INVALID_RESPONSE,
+                failureSuspend { repository.resolveAlternate("original-001", provider) }.failure)
+            val request = server.takeRequest(1, TimeUnit.SECONDS)!!
+            val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+            assertEquals(provider, body.getValue("excludedProviderId").jsonPrimitive.content)
+            assertFalse("preferredProviderId" in body)
+            server.enqueue(MockResponse().setBody(JsonObject(response + ("providerId" to JsonPrimitive("alternate"))).toString()))
+            assertEquals("alternate", repository.resolveAlternate("original-001", provider).providerId)
+        }
+    }
+
     @Test fun unknownFieldsAreIgnoredButMissingOrWrongRequiredFieldsFail() {
         val page = fixture.getValue("search").jsonObject
         assertEquals(1, MusicJson.page(JsonObject(page + ("future" to JsonPrimitive(true))).toString()).items.size)

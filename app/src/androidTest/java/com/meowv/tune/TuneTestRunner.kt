@@ -91,15 +91,15 @@ class TuneTestApplication : TuneApplication() {
         builder.addInterceptor { chain ->
             val request = chain.request()
             val file = request.url.pathSegments.last()
-            if (file in listOf("missing", "music-forbidden", "music-limited")) {
+            if (file in listOf("missing", "music-gone", "music-forbidden", "music-limited")) {
                 musicMediaRequests.computeIfAbsent(file) { AtomicInteger() }.incrementAndGet()
             }
             val response = Response.Builder().request(request).protocol(Protocol.HTTP_1_1)
             if (file == "music-forbidden" || file == "music-limited") {
                 response.code(if (file == "music-forbidden") 403 else 429).message("Unavailable")
                     .header("Retry-After", "1").body(byteArrayOf().toResponseBody()).build()
-            } else if (file == "missing") {
-                response.code(404).message("Not found").body(byteArrayOf().toResponseBody()).build()
+            } else if (file == "missing" || file == "music-gone") {
+                response.code(if (file == "missing") 404 else 410).message("Unavailable").body(byteArrayOf().toResponseBody()).build()
             } else {
                 val assets = InstrumentationRegistry.getInstrumentation().context.assets
                 val body = if (request.url.host == "original.test") {

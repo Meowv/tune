@@ -51,7 +51,7 @@ class RadioPlaybackService : MediaSessionService() {
                     .filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()
                 // 音乐错误由引擎统一处理刷新/权限/冷却，禁止底层先行重试这些响应。
                 if (app.playerController.state.value.source == PlaybackSource.MUSIC &&
-                    http?.responseCode in listOf(401, 403, 404, 429)) return C.TIME_UNSET
+                    http?.responseCode in listOf(401, 403, 404, 410, 429)) return C.TIME_UNSET
                 return super.getRetryDelayMsFor(info)
             }
         }

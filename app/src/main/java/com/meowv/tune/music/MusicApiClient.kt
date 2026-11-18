@@ -49,14 +49,26 @@ internal class MusicApiClient(
         return MusicJson.page(request("search", limit, cursor, query))
     }
     override suspend fun recommendations(limit: Int, cursor: String?) = MusicJson.page(request("recommendations", limit, cursor), recommendation = true)
-    override suspend fun resolve(trackId: String, preferredProviderId: String?): PlayableAudio {
+    override suspend fun resolve(trackId: String, preferredProviderId: String?): PlayableAudio =
+        resolve(trackId, preferredProviderId, excludedProviderId = null)
+
+    override suspend fun resolveAlternate(trackId: String, excludedProviderId: String): PlayableAudio =
+        resolve(trackId, preferredProviderId = null, excludedProviderId = excludedProviderId)
+
+    private suspend fun resolve(trackId: String, preferredProviderId: String?, excludedProviderId: String?): PlayableAudio {
         if (trackId.isBlank() || trackId.length > 128) throw MusicException(MusicFailure.INVALID_REQUEST)
         val body = buildJsonObject {
             put("trackId", trackId); put("quality", "auto")
             preferredProviderId?.let { put("preferredProviderId", it) }
+            excludedProviderId?.let { put("excludedProviderId", it) }
         }.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
         return MusicJson.resolved(execute(Request.Builder().url(baseUrl.newBuilder().addPathSegment("resolve").build()).post(body)))
-            .also { if (it.trackId != trackId) throw MusicException(MusicFailure.INVALID_RESPONSE) }
+            .also {
+                if (it.trackId != trackId || it.providerId == excludedProviderId ||
+                    preferredProviderId != null && it.providerId != preferredProviderId) {
+                    throw MusicException(MusicFailure.INVALID_RESPONSE)
+                }
+            }
     }
 
     private suspend fun request(path: String, limit: Int, cursor: String?, query: String? = null): String {

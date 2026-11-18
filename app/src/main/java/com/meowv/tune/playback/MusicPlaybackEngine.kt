@@ -45,6 +45,7 @@ internal class MusicPlaybackEngine(
     private var endedItem: String? = null
     private var confirmed = false
     private var resourceRefreshed = false
+    private var alternateAttempted = false
     private val requestGate = MusicRequestGate()
     private var failures = 0
     private var operationSequence = 0L
@@ -103,12 +104,14 @@ internal class MusicPlaybackEngine(
     private fun begin(
         preserveCurrent: Boolean = false,
         refreshProvider: String? = null,
+        excludedProvider: String? = null,
         keepRefill: Boolean = false,
         prepared: Deferred<Result<PlayableAudio>>? = null,
         select: suspend () -> MusicSelection?
     ) {
         val oldState = state
-        resourceRefreshed = refreshProvider != null
+        var refreshed = refreshProvider != null || excludedProvider != null
+        val attemptedAlternate = excludedProvider != null || refreshProvider != null && alternateAttempted
         if (NetworkPolicy.evaluate(network.value) != NetworkDecision.ALLOWED) {
             prepared?.cancel()
             fail(MusicFailure.CONNECTION)
@@ -136,20 +139,23 @@ internal class MusicPlaybackEngine(
                     val ahead = prepared?.await()?.getOrThrow()
                     ensureActive()
                     val cached = ahead?.takeIf { it.trackId == selection.track.id && nextPreparation.fresh(it) }
-                    if (ahead != null && cached == null) resourceRefreshed = true
-                    var playable = cached ?: source.resolve(selection.track.id, refreshProvider ?: ahead?.providerId)
+                    if (ahead != null && cached == null) refreshed = true
+                    var playable = if (excludedProvider != null) source.resolveAlternate(selection.track.id, excludedProvider)
+                        else cached ?: source.resolve(selection.track.id, refreshProvider ?: ahead?.providerId)
                     ensureActive()
-                    if (!nextPreparation.fresh(playable) && !resourceRefreshed) {
-                        resourceRefreshed = true
+                    if (!nextPreparation.fresh(playable) && !refreshed) {
+                        refreshed = true
                         playable = source.resolve(selection.track.id, playable.providerId)
                     }
-                    if (playable.trackId != selection.track.id || !nextPreparation.fresh(playable) ||
+                    if (playable.trackId != selection.track.id || playable.providerId == excludedProvider || !nextPreparation.fresh(playable) ||
                         !com.meowv.tune.music.MusicAudioUrlPolicy.allows(playable.url)) throw MusicException(MusicFailure.INVALID_RESPONSE)
                     selection to playable
                 }
                 ensureActive()
                 if (!active || id != generation) return@launch
                 loading = false
+                resourceRefreshed = refreshed
+                alternateAttempted = attemptedAlternate
                 prepare(result.first, result.second, id)
             } catch (failure: TimeoutCancellationException) {
                 if (active && id == generation) loadFailed(MusicException(MusicFailure.SOURCE_TIMEOUT), preserveCurrent, oldState, selected)
@@ -209,10 +215,15 @@ internal class MusicPlaybackEngine(
                 val http = generateSequence<Throwable>(error) { it.cause }.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()
                 val selection = current
                 val provider = audio?.providerId
-                if (http?.responseCode == 404 && desiredPlay && !resourceRefreshed && selection != null && provider != null) {
-                    // 失效资源只刷新当前来源一次，继续失败后才进入既有跳歌预算。
-                    begin(refreshProvider = provider) { queue.renew(selection) }
-                    return
+                if (http?.responseCode in setOf(404, 410) && desiredPlay && selection != null && provider != null) {
+                    if (!resourceRefreshed) {
+                        if (mayRequest()) begin(refreshProvider = provider) { queue.renew(selection) }
+                        return
+                    }
+                    if (!alternateAttempted && selection.track.matches.any { it.providerId != provider }) {
+                        if (mayRequest()) begin(excludedProvider = provider) { queue.renew(selection) }
+                        return
+                    }
                 }
                 val reason = when (http?.responseCode) {
                     401 -> MusicFailure.UNAUTHORIZED
