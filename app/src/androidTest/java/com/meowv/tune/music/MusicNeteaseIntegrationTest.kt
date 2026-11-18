@@ -87,6 +87,7 @@ class MusicNeteaseIntegrationTest {
                 val state = withTimeout(20000) { app.playerController.state.first { s ->
                     s.phase == PlaybackPhase.PLAYING && s.music?.id?.startsWith("nt-") == true
                 } }
+                args.getString("musicExpectedFirstTitle")?.let { assertEquals(it, state.music?.title) }
                 assertTrue((state.durationMs ?: 0) > 60000)
                 assertTrue(state.canNext)
             } finally {
