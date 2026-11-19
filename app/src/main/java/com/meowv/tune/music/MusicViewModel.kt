@@ -66,16 +66,30 @@ internal class MusicViewModel(
         val source = repository ?: return
         val previous = mutableBrowse.value
         if (previous.loading || more && previous.cursor == null) return
-        val cursor = if (more) previous.cursor else null
+        var cursor = if (more) previous.cursor else null
+        val seenCursors = HashSet<String>().apply { cursor?.let(::add) }
+        var tracks = if (more) previous.tracks else emptyList()
+        var partial = false
+        var loaded = false
         mutableBrowse.value = previous.copy(loading = true, failure = null)
         viewModelScope.launch {
             try {
-                val page = source.recommendations(cursor = cursor)
-                val tracks = (if (more) previous.tracks else emptyList()) + page.items.filter { it.canStartPlayback }
-                mutableBrowse.value = MusicFeed(tracks = tracks.distinctBy { it.id }, loaded = true,
-                    cursor = page.nextCursor?.takeUnless { it == cursor }, partial = page.partial)
+                for (pageIndex in 0 until MAX_BROWSE_PAGES) {
+                    val page = source.recommendations(BROWSE_PAGE_SIZE, cursor)
+                    tracks = (tracks + page.items.filter { it.canStartPlayback }).distinctBy { it.id }
+                    partial = partial || page.partial
+                    loaded = true
+                    val next = page.nextCursor?.takeUnless { it == cursor }
+                    if (next == null || !seenCursors.add(next)) {
+                        cursor = null
+                        break
+                    }
+                    cursor = next
+                    mutableBrowse.value = MusicFeed(tracks, cursor, loaded, true, partial)
+                }
+                mutableBrowse.value = MusicFeed(tracks, cursor, loaded, false, partial)
             } catch (failure: MusicException) {
-                mutableBrowse.value = previous.copy(loading = false, failure = failure.failure)
+                mutableBrowse.value = MusicFeed(tracks, cursor, loaded, false, partial, failure.failure)
             }
         }
     }
@@ -110,5 +124,10 @@ internal class MusicViewModel(
         generation++
         pending?.cancel()
         mutableState.value = if (repository == null) MusicUiState.NotConfigured else MusicUiState.Idle
+    }
+
+    private companion object {
+        const val BROWSE_PAGE_SIZE = 50
+        const val MAX_BROWSE_PAGES = 20
     }
 }

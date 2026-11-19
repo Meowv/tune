@@ -6,6 +6,37 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MusicViewModelTest {
+    @Test fun browseCollectsEveryCandidatePageWithPagination() = runBlocking {
+        val limits = mutableListOf<Int>()
+        val cursors = mutableListOf<String?>()
+        val repo = object : MusicRepository {
+            override suspend fun recommendations(limit: Int, cursor: String?): MusicPage {
+                limits.add(limit); cursors.add(cursor)
+                return when (cursor) {
+                    null -> MusicPage(listOf(MusicTrack("a", "A", listOf("qix"))), "next")
+                    "next" -> MusicPage(listOf(MusicTrack("a", "A", listOf("qix")), MusicTrack("b", "B", listOf("qix")),
+                        MusicTrack("hidden", "H", listOf("qix"), availability = "metadata_only")), null, partial = true)
+                    else -> error("Unexpected cursor")
+                }
+            }
+            override suspend fun search(query: String, limit: Int, cursor: String?) = error("unused")
+            override suspend fun resolve(trackId: String, preferredProviderId: String?) = error("unused")
+        }
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val model = MusicViewModel(repo, scope = scope)
+            model.enter()
+            val feed = model.browse.value
+            assertEquals(listOf("a", "b"), feed.tracks.map { it.id })
+            assertNull(feed.cursor)
+            assertTrue(feed.loaded)
+            assertFalse(feed.loading)
+            assertTrue(feed.partial)
+            assertEquals(listOf(50, 50), limits)
+            assertEquals(listOf<String?>(null, "next"), cursors)
+        } finally { scope.cancel() }
+    }
+
     @Test fun candidatesLoadOnlyOnClickAndDuplicateRequestsAreIgnored() = runBlocking {
         val gate = CompletableDeferred<Unit>()
         var requests = 0
