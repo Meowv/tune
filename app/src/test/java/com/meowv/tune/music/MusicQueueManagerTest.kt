@@ -30,22 +30,48 @@ class MusicQueueManagerTest {
         assertEquals(1, radio)
     }
 
-    @Test fun radioOnlyFillsAnExhaustedQueueAndStopsOnRepeats() = runBlocking {
-        var calls = 0
+    @Test fun radioThenSearchFillAnExhaustedQueueAndCycleAgain() = runBlocking {
+        var radioCalls = 0
+        var searchCalls = 0
         val source = object : MusicRepository by FakeMusicRepository(tracks.take(2)) {
             override suspend fun radioRecommendations(): List<MusicTrack> {
-                calls++
-                return listOf(tracks[0], tracks[2], tracks[3].copy(availability = "unavailable"))
+                radioCalls++
+                return listOf(tracks[2], tracks[3].copy(availability = "unavailable"), tracks[0], tracks[1])
+            }
+            override suspend fun search(query: String, limit: Int, cursor: String?): MusicPage {
+                searchCalls++
+                return MusicPage(listOf(tracks[3]))
             }
         }
         val queue = MusicQueueManager({ source })
         repeat(2) { index -> assertEquals(tracks[index], queue.next()?.track) }
-        assertEquals(0, calls)
+        assertEquals(0, radioCalls)
+        assertEquals(0, searchCalls)
         assertEquals(tracks[2], queue.next()?.track)
-        assertEquals(1, calls)
+        assertEquals(1, radioCalls)
+        assertEquals(1, searchCalls)
+        assertEquals(tracks[3], queue.next()?.track)
+        assertNull(queue.next())
+        assertTrue(queue.canNext)
         assertNull(queue.next())
         assertFalse(queue.canNext)
-        assertEquals(2, calls)
+        assertEquals(3, radioCalls)
+        assertEquals(3, searchCalls)
+    }
+
+    @Test fun fallbackSearchQueriesUseRepositoryExtensionPoint() = runBlocking {
+        val queries = mutableListOf<String>()
+        val source = object : MusicRepository by FakeMusicRepository(tracks) {
+            override fun fallbackSearchQueries(context: MusicTrack?) = listOf("artist:" + context?.artists?.firstOrNull().orEmpty())
+            override suspend fun search(query: String, limit: Int, cursor: String?): MusicPage {
+                queries.add(query)
+                return MusicPage(emptyList())
+            }
+        }
+        val queue = MusicQueueManager({ source })
+        repeat(tracks.size) { assertTrue(queue.recordSuccessfulPlayback(queue.next()!!)) }
+        assertNull(queue.next())
+        assertEquals(listOf("artist:qix"), queries)
     }
 
     @Test fun shuffledQueueKeepsEarlierTracksAndThePreparedCandidate() = runBlocking {
@@ -84,6 +110,8 @@ class MusicQueueManagerTest {
     @Test fun exhaustedCatalogStopsAndDuplicatePagesHaveBoundedRequests() = runBlocking {
         val queue = MusicQueueManager({ FakeMusicRepository(tracks.take(2)) })
         repeat(2) { assertTrue(queue.recordSuccessfulPlayback(queue.next()!!)) }
+        assertNull(queue.next())
+        assertTrue(queue.canNext)
         assertNull(queue.next())
         assertFalse(queue.canNext)
         var requests = 0

@@ -1,6 +1,9 @@
 package com.meowv.tune.music
 
 import com.meowv.tune.domain.music.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
@@ -36,6 +39,8 @@ internal class MusicQueueManager(
     private var cursor: String? = null
     private var exhausted = false
     private var radioExhausted = false
+    private var searchExhausted = false
+    private var emptyCycles = 0
     private var issued = 0L
     private var committed = -1L
     private var index = -1
@@ -43,7 +48,9 @@ internal class MusicQueueManager(
 
     init { require(batchSize in 1..50 && lowWater >= 1 && historyLimit >= 2) }
     val canPrevious: Boolean get() = index > 0
-    val canNext: Boolean get() = index < history.lastIndex || pending.isNotEmpty() || !exhausted || !radioExhausted
+    val sourcesExhausted: Boolean get() = exhausted && radioExhausted && searchExhausted
+    val canCycle: Boolean get() = sourcesExhausted && emptyCycles < MAX_EMPTY_CYCLES
+    val canNext: Boolean get() = index < history.lastIndex || pending.isNotEmpty() || !sourcesExhausted || canCycle
     val nextTrack: MusicTrack? get() = if (index < history.lastIndex) history[index + 1] else nextCandidate()
     val needsReplenish: Boolean get() = pending.size + (history.lastIndex - index).coerceAtLeast(0) < lowWater && !exhausted
     val sessionVersion: Long get() = revision
@@ -75,7 +82,7 @@ internal class MusicQueueManager(
     suspend fun next(): MusicSelection? {
         if (index < history.lastIndex) return MusicSelection(++issued, history[index + 1], index + 1)
         if (pending.isEmpty()) replenish(minimumOnly = true)
-        if (pending.isEmpty() && exhausted && !radioExhausted) replenishRadio()
+        if (pending.isEmpty() && exhausted && (!radioExhausted || !searchExhausted || canCycle)) replenishFallbacks()
         currentCoroutineContext().ensureActive()
         val track = nextCandidate() ?: return null
         pending.remove(track)
@@ -110,19 +117,51 @@ internal class MusicQueueManager(
         if (added == 0) { exhausted = true; cursor = null }
     }
 
-    private suspend fun replenishRadio() = load.withLock {
-        if (pending.isNotEmpty() || !exhausted || radioExhausted) return@withLock
+    private suspend fun replenishFallbacks() = load.withLock {
         val owner = revision
-        val page = repository().radioRecommendations()
+        if (pending.isNotEmpty()) return@withLock
+        if (sourcesExhausted) {
+            if (!canCycle) return@withLock
+            radioExhausted = false
+            searchExhausted = false
+        }
+
+        val last = history.lastOrNull()
+        val (radio, search) = coroutineScope {
+            val radioCall = async {
+                if (radioExhausted) emptyList() else safe { repository().radioRecommendations() }.orEmpty()
+            }
+            val searchCall = async {
+                if (searchExhausted) emptyList<MusicTrack>() else {
+                    val queries = safe { repository().fallbackSearchQueries(last) }.orEmpty()
+                    queries.flatMap { query -> safe { searchAll(query) }.orEmpty() }
+                }
+            }
+            radioCall.await() to searchCall.await()
+        }
         currentCoroutineContext().ensureActive()
         if (owner != revision) return@withLock
-        val known = considered + played + skipped + history.map { it.id }
-        val fresh = page.filter { it.canStartPlayback && it.id !in known }.distinctBy { it.id }
-        radioExhausted = fresh.isEmpty()
-        fresh.forEach { track ->
-            pending.addLast(track)
-            remember(track.id)
+
+        val known = HashSet(considered + played + skipped + pending.map { it.id } + history.map { it.id })
+        val before = HashSet(known)
+        var added = 0
+        radio.filter { it.canStartPlayback && it.id !in before }.forEach { track ->
+            if (known.add(track.id)) { pending.addLast(track); remember(track.id); added++ }
         }
+        search.filter { it.canStartPlayback && it.id !in before }.forEach { track ->
+            if (known.add(track.id)) { pending.addLast(track); remember(track.id); added++ }
+        }
+        radioExhausted = radio.none { it.canStartPlayback && it.id !in before }
+        searchExhausted = search.none { it.canStartPlayback && it.id !in before }
+        emptyCycles = if (added == 0) emptyCycles + 1 else 0
+    }
+
+    private suspend fun <T> safe(call: suspend () -> T): T? = try {
+        call()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        null
     }
 
     fun recordSuccessfulPlayback(selection: MusicSelection): Boolean {
@@ -145,7 +184,8 @@ internal class MusicQueueManager(
         invalidate()
         pending.clear(); history.clear(); considered.clear(); played.clear(); skipped.clear(); seenCursors.clear()
         clearSkipSignal()
-        cursor = null; exhausted = false; radioExhausted = false; index = -1; randomNext = null
+        cursor = null; exhausted = false; radioExhausted = false; searchExhausted = false; emptyCycles = 0
+        index = -1; randomNext = null
         if (seed != null) {
             val tracks = seed.tracks.filter { it.canStartPlayback }.distinctBy { it.id }
             val selected = tracks.indexOfFirst { it.id == startAt }
@@ -186,4 +226,24 @@ internal class MusicQueueManager(
     private fun artists(track: MusicTrack): Set<String> = track.artists.map {
         Normalizer.normalize(it.trim(), Normalizer.Form.NFKC).lowercase(Locale.ROOT)
     }.filter { it.isNotEmpty() }.toSet()
+
+    private suspend fun searchAll(query: String): List<MusicTrack> {
+        if (query.trim().length !in 1..100 || query.any(Char::isISOControl)) return emptyList()
+        val items = mutableListOf<MusicTrack>()
+        val seenCursors = HashSet<String>()
+        var cursor: String? = null
+        for (ignored in 0 until MAX_SEARCH_PAGES) {
+            val page = repository().search(query, 50, cursor)
+            items += page.items
+            val next = page.nextCursor?.takeUnless { it == cursor }
+            if (next == null || !seenCursors.add(next)) break
+            cursor = next
+        }
+        return items.distinctBy { it.id }
+    }
+
+    private companion object {
+        const val MAX_EMPTY_CYCLES = 2
+        const val MAX_SEARCH_PAGES = 20
+    }
 }
