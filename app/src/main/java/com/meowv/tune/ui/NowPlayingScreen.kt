@@ -173,8 +173,7 @@ internal fun NowPlayingScreen(
                     NowPlayingTools(isCar, shuffle, sleepTimer, animationMillis, onToggleShuffle,
                         { sleepPanelOpen = true },
                         Modifier.align(Alignment.CenterHorizontally).widthIn(max = if (isCar) 560.dp else 540.dp)
-                            .fillMaxWidth().padding(bottom = TuneSpacing.Small),
-                        showCurrentOrder = true)
+                            .fillMaxWidth().padding(bottom = TuneSpacing.Small))
                 } else if (station == null) {
                     Column(
                         Modifier.weight(1f).fillMaxWidth().testTag("now_playing_empty"),
@@ -1190,11 +1189,21 @@ private fun NowPlayingTools(
     animationMillis: Int,
     onToggleShuffle: () -> Unit,
     onSleepTimer: () -> Unit,
-    modifier: Modifier = Modifier,
-    showCurrentOrder: Boolean = false
+    modifier: Modifier = Modifier
 ) {
     val shape = RoundedCornerShape(if (isCar) 34.dp else 28.dp)
-    val randomLabel = stringResource(if (showCurrentOrder && !shuffle) R.string.player_order_sequential else R.string.player_order_shuffle)
+    // 播放顺序按钮展示"当前生效的模式"，点击切换到另一种；图标、文字、读屏描述共用同一状态。
+    val sequential = !shuffle
+    val orderLabel = stringResource(
+        if (sequential) R.string.player_order_sequential else R.string.player_order_shuffle
+    )
+    val nextOrderLabel = stringResource(
+        if (sequential) R.string.player_order_shuffle else R.string.player_order_sequential
+    )
+    val orderDescription = stringResource(
+        R.string.player_order_accessibility, orderLabel, nextOrderLabel
+    )
+    val orderIcon = if (sequential) R.drawable.ic_order_sequential else R.drawable.ic_order_shuffle
     val sleepLabel = stringResource(R.string.now_playing_sleep_timer)
     val remaining = if (sleepTimer.isActive) {
         sleepRemainingLabel(sleepTimer.remainingMillis)
@@ -1230,13 +1239,14 @@ private fun NowPlayingTools(
     ) {
         ToolbarAction(
             tag = "now_playing_shuffle",
-            icon = R.drawable.ic_order_shuffle,
-            label = randomLabel,
+            icon = orderIcon,
+            label = orderLabel,
             detail = null,
-            selected = shuffle,
-            description = randomLabel,
+            selected = true,
+            description = orderDescription,
             isCar = isCar,
             animationMillis = animationMillis,
+            announceSelected = false,
             modifier = Modifier.weight(1f),
             onClick = onToggleShuffle
         )
@@ -1269,6 +1279,7 @@ private fun ToolbarAction(
     description: String,
     isCar: Boolean,
     animationMillis: Int,
+    announceSelected: Boolean = true,
     modifier: Modifier,
     onClick: () -> Unit
 ) {
@@ -1292,7 +1303,7 @@ private fun ToolbarAction(
             .semantics {
                 role = Role.Button
                 contentDescription = description
-                this.selected = selected
+                if (announceSelected) this.selected = selected
                 this.focused = focused
             }
             .padding(horizontal = if (isCar) 18.dp else 12.dp),

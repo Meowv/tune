@@ -198,6 +198,8 @@ class TuneAppTest {
 
     @Test
     fun orderDefaultsToShuffleAndTogglePersists() {
+        val shuffleDescription = orderDescription(PlaybackOrder.SHUFFLE)
+        val sequentialDescription = orderDescription(PlaybackOrder.SEQUENTIAL)
         compose.waitUntil(5000) { app.playerController.connected.value }
         runBlocking { app.userSettings.update { TuneSettings(scope = RadioScope(ScopeMode.GLOBAL)) } }
         compose.waitUntil(3000) { order() == PlaybackOrder.SHUFFLE }
@@ -209,21 +211,24 @@ class TuneAppTest {
                 app.playerController.state.value.phase == PlaybackPhase.PLAYING
         }
         openPlayer()
+        // 按钮展示当前生效的模式：随机模式下文案为"随机播放"。
         compose.onNodeWithTag("now_playing_shuffle")
-            .assertContentDescriptionEquals("随机播放")
-            .performClick()
+            .assertContentDescriptionEquals(shuffleDescription)
+        assertOrderLabel(PlaybackOrder.SHUFFLE)
+        compose.onNodeWithTag("now_playing_shuffle").performClick()
         compose.waitUntil(3000) { order() == PlaybackOrder.SEQUENTIAL }
         compose.waitUntil(5000) {
             compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isNotEmpty()
         }
+        // 切到顺序模式后，图标与文案必须同步变为"顺序播放"。
         compose.onNodeWithTag("now_playing_shuffle")
-            .assertContentDescriptionEquals("随机播放")
-            .assertIsNotSelected()
-            .performClick()
+            .assertContentDescriptionEquals(sequentialDescription)
+        assertOrderLabel(PlaybackOrder.SEQUENTIAL)
+        compose.onNodeWithTag("now_playing_shuffle").performClick()
         compose.waitUntil(3000) { order() == PlaybackOrder.SHUFFLE }
         compose.onNodeWithTag("now_playing_shuffle")
-            .assertContentDescriptionEquals("随机播放")
-            .assertIsSelected()
+            .assertContentDescriptionEquals(shuffleDescription)
+        assertOrderLabel(PlaybackOrder.SHUFFLE)
 
         compose.activityRule.scenario.recreate()
         compose.waitUntil(5000) { app.playerController.connected.value }
@@ -232,8 +237,8 @@ class TuneAppTest {
             compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithTag("now_playing_shuffle")
-            .assertContentDescriptionEquals("随机播放")
-            .assertIsSelected()
+            .assertContentDescriptionEquals(shuffleDescription)
+        assertOrderLabel(PlaybackOrder.SHUFFLE)
         runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
     }
 
@@ -316,7 +321,9 @@ class TuneAppTest {
         compose.onNodeWithTag("page_radio").assertIsDisplayed()
         selectPage("nav_music")
         compose.onNodeWithTag("page_music").assertIsDisplayed()
-        compose.onNodeWithText("开发中").performScrollTo().assertIsDisplayed()
+        // 测试环境未注入音乐仓库，音乐页处于未配置态；用字符串资源引用避免文案调整导致用例失效。
+        compose.onNodeWithText(compose.activity.getString(R.string.music_not_configured))
+            .performScrollTo().assertIsDisplayed()
         selectPage("nav_settings")
         compose.onNodeWithTag("page_settings").assertIsDisplayed()
         compose.onNodeWithText("自动播放").performScrollTo().assertIsDisplayed()
@@ -863,6 +870,27 @@ class TuneAppTest {
     private fun displayMode() = runBlocking { app.userSettings.settings.first().displayMode }
 
     private fun order() = runBlocking { app.userSettings.settings.first().playbackOrder }
+
+    private fun orderDescription(order: PlaybackOrder): String {
+        val current = compose.activity.getString(
+            if (order == PlaybackOrder.SHUFFLE) R.string.player_order_shuffle
+            else R.string.player_order_sequential
+        )
+        val next = compose.activity.getString(
+            if (order == PlaybackOrder.SHUFFLE) R.string.player_order_sequential
+            else R.string.player_order_shuffle
+        )
+        return compose.activity.getString(R.string.player_order_accessibility, current, next)
+    }
+
+    private fun assertOrderLabel(order: PlaybackOrder) {
+        val label = compose.activity.getString(
+            if (order == PlaybackOrder.SHUFFLE) R.string.player_order_shuffle
+            else R.string.player_order_sequential
+        )
+        compose.onNodeWithTag("now_playing_shuffle_label", useUnmergedTree = true)
+            .assertTextEquals(label)
+    }
 
     private fun openScopePicker() {
         compose.onNodeWithTag("scope_selector").performClick()

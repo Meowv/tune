@@ -40,6 +40,7 @@
   <string name="player_next">下一个电台</string>
   <string name="player_order_sequential">顺序播放</string>
   <string name="player_order_shuffle">随机播放</string>
+  <string name="player_order_accessibility">播放顺序：%1$s，点击切换为%2$s</string>
   <string name="scope_label">收听范围</string>
   <string name="scope_auto">自动</string>
   <string name="scope_change">切换地区</string>
