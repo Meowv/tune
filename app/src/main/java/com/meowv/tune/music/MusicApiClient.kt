@@ -48,7 +48,11 @@ internal class MusicApiClient(
         if (query.trim().length !in 1..100 || query.any(Char::isISOControl)) throw MusicException(MusicFailure.INVALID_REQUEST)
         return MusicJson.page(request("search", limit, cursor, query))
     }
-    override suspend fun recommendations(limit: Int, cursor: String?) = MusicJson.page(request("recommendations", limit, cursor), recommendation = true)
+    override suspend fun recommendations(limit: Int, cursor: String?): MusicPage {
+        val url = baseUrl.newBuilder().addPathSegment("recommendations").build()
+        return MusicJson.page(execute(Request.Builder().url(url).get(), maxBytes = 1024L * 1024),
+            recommendation = true).copy(nextCursor = null)
+    }
     override suspend fun radioRecommendations(): List<MusicTrack> = try {
         MusicJson.page(request("recommendations/radio", 20, null), recommendation = true).items
     } catch (failure: MusicException) {
@@ -91,7 +95,7 @@ internal class MusicApiClient(
         return execute(Request.Builder().url(url).get())
     }
 
-    private suspend fun execute(builder: Request.Builder, blockOnFailure: Boolean = true): String {
+    private suspend fun execute(builder: Request.Builder, blockOnFailure: Boolean = true, maxBytes: Long = MAX_BYTES): String {
         requestGate.check()
         val token = accessToken()?.takeIf { it.length in 32..1024 && it.none(Char::isISOControl) }
             ?: throw MusicException(MusicFailure.NOT_CONFIGURED)
@@ -113,10 +117,10 @@ internal class MusicApiClient(
                             }
                             val source = value.body?.source() ?: throw MusicException(MusicFailure.INVALID_RESPONSE)
                             val buffer = Buffer()
-                            while (buffer.size <= MAX_BYTES) {
-                                if (source.read(buffer, minOf(8192, MAX_BYTES + 1 - buffer.size)) == -1L) break
+                            while (buffer.size <= maxBytes) {
+                                if (source.read(buffer, minOf(8192, maxBytes + 1 - buffer.size)) == -1L) break
                             }
-                            if (buffer.size > MAX_BYTES) throw MusicException(MusicFailure.INVALID_RESPONSE)
+                            if (buffer.size > maxBytes) throw MusicException(MusicFailure.INVALID_RESPONSE)
                             val body = buffer.readUtf8()
                             if (!value.isSuccessful) {
                                 val failure = MusicJson.error(body, value.code, retryAfter(value.header("Retry-After")))

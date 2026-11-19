@@ -24,7 +24,6 @@ sealed interface MusicUiState {
 
 internal data class MusicFeed(
     val tracks: List<MusicTrack> = emptyList(),
-    val cursor: String? = null,
     val loaded: Boolean = false,
     val loading: Boolean = false,
     val partial: Boolean = false,
@@ -62,34 +61,18 @@ internal class MusicViewModel(
         if (!feed.loaded && feed.failure == null) loadFeed()
     }
 
-    fun loadFeed(more: Boolean = false) {
+    fun loadFeed() {
         val source = repository ?: return
         val previous = mutableBrowse.value
-        if (previous.loading || more && previous.cursor == null) return
-        var cursor = if (more) previous.cursor else null
-        val seenCursors = HashSet<String>().apply { cursor?.let(::add) }
-        var tracks = if (more) previous.tracks else emptyList()
-        var partial = false
-        var loaded = false
+        if (previous.loading) return
         mutableBrowse.value = previous.copy(loading = true, failure = null)
         viewModelScope.launch {
             try {
-                for (pageIndex in 0 until MAX_BROWSE_PAGES) {
-                    val page = source.recommendations(BROWSE_PAGE_SIZE, cursor)
-                    tracks = (tracks + page.items.filter { it.canStartPlayback }).distinctBy { it.id }
-                    partial = partial || page.partial
-                    loaded = true
-                    val next = page.nextCursor?.takeUnless { it == cursor }
-                    if (next == null || !seenCursors.add(next)) {
-                        cursor = null
-                        break
-                    }
-                    cursor = next
-                    mutableBrowse.value = MusicFeed(tracks, cursor, loaded, true, partial)
-                }
-                mutableBrowse.value = MusicFeed(tracks, cursor, loaded, false, partial)
+                val page = source.recommendations()
+                val tracks = page.items.filter { it.canStartPlayback }.distinctBy { it.id }
+                mutableBrowse.value = MusicFeed(tracks, loaded = true, partial = page.partial)
             } catch (failure: MusicException) {
-                mutableBrowse.value = MusicFeed(tracks, cursor, loaded, false, partial, failure.failure)
+                mutableBrowse.value = previous.copy(loading = false, failure = failure.failure)
             }
         }
     }
@@ -103,7 +86,7 @@ internal class MusicViewModel(
             try {
                 if (requestPlayback != null) {
                     val feed = mutableBrowse.value
-                    requestPlayback(feed.tracks.takeIf { it.isNotEmpty() }?.let { MusicQueueSeed(it, feed.cursor) })
+                    requestPlayback(feed.tracks.takeIf { it.isNotEmpty() }?.let { MusicQueueSeed(it, null) })
                     return@launch
                 }
                 val track = source.recommendations().items.firstOrNull { it.canStartPlayback }
@@ -126,8 +109,4 @@ internal class MusicViewModel(
         mutableState.value = if (repository == null) MusicUiState.NotConfigured else MusicUiState.Idle
     }
 
-    private companion object {
-        const val BROWSE_PAGE_SIZE = 50
-        const val MAX_BROWSE_PAGES = 20
-    }
 }

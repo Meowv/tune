@@ -6,18 +6,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MusicViewModelTest {
-    @Test fun browseCollectsEveryCandidatePageWithPagination() = runBlocking {
-        val limits = mutableListOf<Int>()
-        val cursors = mutableListOf<String?>()
+    @Test fun browseUsesOneRequestAndKeepsAllPlayableCandidates() = runBlocking {
+        var requests = 0
         val repo = object : MusicRepository {
             override suspend fun recommendations(limit: Int, cursor: String?): MusicPage {
-                limits.add(limit); cursors.add(cursor)
-                return when (cursor) {
-                    null -> MusicPage(listOf(MusicTrack("a", "A", listOf("qix"))), "next")
-                    "next" -> MusicPage(listOf(MusicTrack("a", "A", listOf("qix")), MusicTrack("b", "B", listOf("qix")),
-                        MusicTrack("hidden", "H", listOf("qix"), availability = "metadata_only")), null, partial = true)
-                    else -> error("Unexpected cursor")
-                }
+                requests++
+                assertNull(cursor)
+                val tracks = (1..75).map { MusicTrack(it.toString(), "Track $it", listOf("qix")) }
+                return MusicPage(tracks + tracks.first() +
+                    MusicTrack("hidden", "H", listOf("qix"), availability = "metadata_only"), partial = true)
             }
             override suspend fun search(query: String, limit: Int, cursor: String?) = error("unused")
             override suspend fun resolve(trackId: String, preferredProviderId: String?) = error("unused")
@@ -27,13 +24,11 @@ class MusicViewModelTest {
             val model = MusicViewModel(repo, scope = scope)
             model.enter()
             val feed = model.browse.value
-            assertEquals(listOf("a", "b"), feed.tracks.map { it.id })
-            assertNull(feed.cursor)
+            assertEquals((1..75).map(Int::toString), feed.tracks.map { it.id })
             assertTrue(feed.loaded)
             assertFalse(feed.loading)
             assertTrue(feed.partial)
-            assertEquals(listOf(50, 50), limits)
-            assertEquals(listOf<String?>(null, "next"), cursors)
+            assertEquals(1, requests)
         } finally { scope.cancel() }
     }
 

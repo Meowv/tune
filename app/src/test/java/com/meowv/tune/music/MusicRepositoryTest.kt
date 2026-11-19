@@ -96,6 +96,24 @@ class MusicRepositoryTest {
         }
     }
 
+    @Test fun recommendationRequestDoesNotSendPaginationParameters() = runBlocking {
+        server { server, repository ->
+            val track = fixture.getValue("search").jsonObject.getValue("items").jsonArray.single().jsonObject
+            val items = (1..75).map { JsonObject(track + ("id" to JsonPrimitive("track-$it"))) }
+            val body = buildJsonObject {
+                put("items", JsonArray(items))
+                put("nextCursor", JsonNull)
+                put("strategy", "public_daily_music")
+                put("generatedAt", "2026-11-19T01:00:00Z")
+            }
+            server.enqueue(MockResponse().setBody(body.toString()))
+            val page = repository.recommendations(limit = 1, cursor = "legacy")
+            assertEquals(75, page.items.size)
+            assertNull(page.nextCursor)
+            assertEquals("/api/music/recommendations", server.takeRequest(1, TimeUnit.SECONDS)?.path)
+        }
+    }
+
     @Test fun limitedAndUnauthorizedRequestsAreNotRetried() = runBlocking {
         server { server, repository ->
             server.enqueue(MockResponse().setResponseCode(429).setHeader("Retry-After", "30").setBody(fixture.getValue("error").toString()))

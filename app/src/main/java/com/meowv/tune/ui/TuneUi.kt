@@ -87,7 +87,7 @@ internal fun TuneApp(
     onSearchMusic: () -> Unit = {},
     musicBrowse: MusicFeed = MusicFeed(),
     onEnterMusic: () -> Unit = {},
-    onLoadMusic: (Boolean) -> Unit = {}
+    onLoadMusic: () -> Unit = {}
 ) {
     val connected by playbackConnected.collectAsStateWithLifecycle()
     val playbackState by playback.collectAsStateWithLifecycle()
@@ -377,7 +377,7 @@ private fun TunePager(
     radioAnimationsEnabled: Boolean,
     onOpenMusicPlayer: () -> Unit,
     musicBrowse: MusicFeed,
-    onLoadMusic: (Boolean) -> Unit,
+    onLoadMusic: () -> Unit,
     musicState: MusicUiState,
     onSearchMusic: () -> Unit
 ) {
@@ -421,7 +421,7 @@ private fun pageContent(
     radioAnimationsEnabled: Boolean,
     onOpenMusicPlayer: () -> Unit,
     musicBrowse: MusicFeed,
-    onLoadMusic: (Boolean) -> Unit,
+    onLoadMusic: () -> Unit,
     musicState: MusicUiState,
     onSearchMusic: () -> Unit
 ) {

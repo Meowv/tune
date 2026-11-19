@@ -51,7 +51,7 @@ internal fun MusicScreen(
     connected: Boolean,
     onCommand: (PlayerCommand) -> Unit,
     onSearch: () -> Unit,
-    onLoad: (Boolean) -> Unit
+    onLoad: () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
     val playback = (state as? MusicUiState.Active)?.playback
@@ -78,14 +78,14 @@ internal fun MusicScreen(
             val track = playback?.music?.takeIf { playback.phase != PlaybackPhase.ERROR }
             val play: (MusicTrack) -> Unit = { song ->
                 if (song.id == track?.id) onOpenPlayer()
-                else onCommand(PlayerCommand.PlayMusic(song, MusicQueueSeed(feed.tracks, feed.cursor)))
+                else onCommand(PlayerCommand.PlayMusic(song, MusicQueueSeed(feed.tracks, null)))
             }
             if (mode == RadioDisplayMode.CARD && feed.tracks.isNotEmpty()) {
                 MusicCards(feed.tracks, track?.id, playing, connected, isCar, Modifier.weight(1f), play)
                 if (feed.failure != null) Text(stringResource(musicPlaybackFailureMessage(feed.failure)), color = colors.error)
                 if (feed.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-                else if (feed.cursor != null || feed.failure != null) TextButton(onClick = { onLoad(feed.cursor != null) }) {
-                    Text(stringResource(if (feed.failure != null) R.string.music_retry else R.string.music_search_more))
+                else if (feed.failure != null) TextButton(onClick = onLoad) {
+                    Text(stringResource(R.string.music_retry))
                 }
                 return@Column
             }
@@ -110,13 +110,13 @@ internal fun MusicScreen(
                     MusicTrackRow(song, current, current && playing, connected, detail = null,
                         modifier = Modifier.testTag("music_feed_track_${song.id}")) {
                         if (current) onOpenPlayer()
-                        else onCommand(PlayerCommand.PlayMusic(song, MusicQueueSeed(feed.tracks, feed.cursor)))
+                        else onCommand(PlayerCommand.PlayMusic(song, MusicQueueSeed(feed.tracks, null)))
                     }
                 }
-                if (feed.failure != null || feed.cursor != null) item {
+                if (feed.failure != null) item {
                     feed.failure?.let { Text(stringResource(musicPlaybackFailureMessage(it)), color = colors.error) }
-                    TextButton(enabled = !feed.loading, onClick = { onLoad(feed.cursor != null) }) {
-                        Text(stringResource(if (feed.failure != null) R.string.music_retry else R.string.music_search_more))
+                    TextButton(enabled = !feed.loading, onClick = onLoad) {
+                        Text(stringResource(R.string.music_retry))
                     }
                 } else if (feed.loaded && feed.tracks.isEmpty()) item {
                     Text(stringResource(R.string.music_empty), Modifier.padding(top = 16.dp))
