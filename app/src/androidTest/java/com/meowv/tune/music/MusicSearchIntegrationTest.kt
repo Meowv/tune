@@ -38,7 +38,7 @@ class MusicSearchIntegrationTest {
 
     @Test fun searchSelectionPlaysAndEofReturnsToRecommendationsOnTheSameSession() = runBlocking {
         installFakeUnlessUsingLocalBuild()
-        app.userSettings.update { it.copy(autoPlay = false) }
+        app.userSettings.update { it.copy(autoPlay = false, playbackOrder = com.meowv.tune.domain.PlaybackOrder.SEQUENTIAL) }
         ActivityScenario.launch(MainActivity::class.java).use {
             withTimeout(5000) { connection.connected.first { it } }
             val future = main { MediaController.Builder(app, SessionToken(app,
@@ -76,7 +76,7 @@ class MusicSearchIntegrationTest {
 
     @Test fun emptySearchCanBeEditedAndClosedWithoutStartingPlayback() = runBlocking {
         installFakeUnlessUsingLocalBuild()
-        app.userSettings.update { it.copy(autoPlay = false) }
+        app.userSettings.update { it.copy(autoPlay = false, playbackOrder = com.meowv.tune.domain.PlaybackOrder.SEQUENTIAL) }
         ActivityScenario.launch(MainActivity::class.java).use {
             withTimeout(5000) { connection.connected.first { it } }
             connection.dispatch(PlayerCommand.Stop)
@@ -102,7 +102,7 @@ class MusicSearchIntegrationTest {
 
     @Test fun metadataOnlySearchResultIsHidden() = runBlocking {
         installFakeUnlessUsingLocalBuild()
-        app.userSettings.update { it.copy(autoPlay = false) }
+        app.userSettings.update { it.copy(autoPlay = false, playbackOrder = com.meowv.tune.domain.PlaybackOrder.SEQUENTIAL) }
         ActivityScenario.launch(MainActivity::class.java).use {
             withTimeout(5000) { connection.connected.first { connected -> connected } }
             connection.dispatch(PlayerCommand.Stop)
@@ -130,7 +130,7 @@ class MusicSearchIntegrationTest {
             override suspend fun resolve(trackId: String, preferredProviderId: String?) = PlayableAudio(
                 trackId, "test", trackId, 1.0, "https://test.example/radio.mp3", "audio/mpeg", 12000, seekable = true)
         }
-        app.userSettings.update { it.copy(autoPlay = false) }
+        app.userSettings.update { it.copy(autoPlay = false, playbackOrder = com.meowv.tune.domain.PlaybackOrder.SEQUENTIAL) }
         ActivityScenario.launch(MainActivity::class.java).use {
             withTimeout(5000) { connection.connected.first { connected -> connected } }
             connection.dispatch(PlayerCommand.Stop)

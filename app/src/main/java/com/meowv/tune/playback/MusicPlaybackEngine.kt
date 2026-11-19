@@ -87,6 +87,12 @@ internal class MusicPlaybackEngine(
         }
     }
 
+    fun setShuffle(enabled: Boolean) {
+        if (queue.shuffle == enabled) return
+        queue.shuffle = enabled
+        nextPreparation.cancel()
+    }
+
     fun activate() { active = true }
     fun deactivate() { if (active) stop(); active = false }
 

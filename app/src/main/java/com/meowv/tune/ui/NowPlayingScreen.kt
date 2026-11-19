@@ -168,8 +168,10 @@ internal fun NowPlayingScreen(
                             is PlayerCommand.Seek -> onSeek(command.positionMs)
                             else -> Unit
                         }
-                    }, Modifier.weight(1f), onSleepTimer = { sleepPanelOpen = true },
-                        sleepRemaining = if (sleepTimer.isActive) sleepRemainingLabel(sleepTimer.remainingMillis) else null)
+                    }, Modifier.weight(1f))
+                    NowPlayingTools(isCar, shuffle, sleepTimer, animationMillis, onToggleShuffle,
+                        { sleepPanelOpen = true }, Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                        showCurrentOrder = true)
                 } else if (station == null) {
                     Column(
                         Modifier.weight(1f).fillMaxWidth().testTag("now_playing_empty"),
@@ -1192,10 +1194,11 @@ private fun NowPlayingTools(
     animationMillis: Int,
     onToggleShuffle: () -> Unit,
     onSleepTimer: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    showCurrentOrder: Boolean = false
 ) {
     val shape = RoundedCornerShape(if (isCar) 34.dp else 28.dp)
-    val randomLabel = stringResource(R.string.player_order_shuffle)
+    val randomLabel = stringResource(if (showCurrentOrder && !shuffle) R.string.player_order_sequential else R.string.player_order_shuffle)
     val sleepLabel = stringResource(R.string.now_playing_sleep_timer)
     val remaining = if (sleepTimer.isActive) {
         sleepRemainingLabel(sleepTimer.remainingMillis)

@@ -32,13 +32,14 @@ class MusicPlaybackUiTest {
         val unavailable = MusicTrack("unavailable", "不存在的曲目", listOf("qix"), availability = "unavailable")
         app.testMusicRepository = FakeMusicRepository(listOf(unavailable) + tracks, audio)
         app.mockNetwork.value = NetworkState(NetworkType.WIFI)
-        app.userSettings.update { it.copy(autoPlay = false) }
+        app.userSettings.update { it.copy(autoPlay = false, playbackOrder = PlaybackOrder.SEQUENTIAL) }
         ActivityScenario.launch(MainActivity::class.java).use {
             val connection = app.playerController
             withTimeout(5000) { connection.connected.first { ready -> ready } }
             try {
                 compose.onNodeWithTag("nav_music").performClick()
-                compose.onNodeWithTag("music_start").performClick()
+                compose.waitUntil(5000) { compose.onAllNodesWithTag("music_feed_track_ui-1").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("music_feed_track_ui-1").performClick()
                 withTimeout(6000) { connection.state.first { state -> state.phase == PlaybackPhase.PLAYING && state.music?.id == "ui-1" } }
                 compose.onNodeWithTag("music_feed").assertIsDisplayed()
                 compose.waitUntil(5000) {
@@ -50,14 +51,17 @@ class MusicPlaybackUiTest {
                 compose.onNodeWithText("不存在的曲目").assertDoesNotExist()
                 compose.onNodeWithTag("music_feed_track_ui-2").performClick()
                 withTimeout(6000) { connection.state.first { it.phase == PlaybackPhase.PLAYING && it.music?.id == "ui-2" } }
+                compose.onNodeWithTag("layout_card").performClick()
+                compose.onNodeWithTag("music_cards").assertIsDisplayed()
+                compose.onNodeWithTag("layout_list").performClick()
                 capture("page")
-                compose.onNodeWithTag("music_current").performClick()
+                compose.onNodeWithTag("circular_player_entry").performClick()
                 compose.onNodeWithTag("now_playing_screen").assertExists()
                 compose.onNodeWithTag("music_toggle").performScrollTo().performClick()
                 withTimeout(3000) { connection.state.first { state -> state.phase == PlaybackPhase.PAUSED } }
                 compose.onNodeWithTag("music_seek").performScrollTo().performTouchInput { swipe(centerLeft, centerRight, 200) }
                 assertTrue(connection.state.value.canSeek)
-                compose.onNodeWithTag("music_sleep_timer").performScrollTo().assertIsEnabled()
+                compose.onNodeWithTag("now_playing_sleep").assertIsEnabled()
                 compose.onNodeWithTag("music_next").performScrollTo().performClick()
                 withTimeout(6000) { connection.state.first { state -> state.phase == PlaybackPhase.PLAYING && state.music?.id == "ui-3" } }
                 compose.onNodeWithTag("music_toggle").performScrollTo().performClick()

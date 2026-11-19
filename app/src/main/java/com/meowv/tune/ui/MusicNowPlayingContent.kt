@@ -30,9 +30,7 @@ internal fun MusicNowPlayingContent(
     state: PlayerUiState,
     connected: Boolean,
     onCommand: (PlayerCommand) -> Unit,
-    modifier: Modifier = Modifier,
-    onSleepTimer: (() -> Unit)? = null,
-    sleepRemaining: String? = null
+    modifier: Modifier = Modifier
 ) {
     BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         val wide = maxWidth >= 560.dp && (isCar || maxWidth > maxHeight)
@@ -57,7 +55,7 @@ internal fun MusicNowPlayingContent(
                 Box(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()), contentAlignment = Alignment.Center) { artwork() }
                 Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
                     horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                    MusicPlaybackControls(isCar, state, connected, onCommand, onSleepTimer, sleepRemaining)
+                    MusicPlaybackControls(isCar, state, connected, onCommand)
                 }
             }
         } else {
@@ -65,7 +63,7 @@ internal fun MusicNowPlayingContent(
                 horizontalAlignment = Alignment.CenterHorizontally) {
                 artwork()
                 Spacer(Modifier.height(12.dp))
-                MusicPlaybackControls(isCar, state, connected, onCommand, onSleepTimer, sleepRemaining)
+                MusicPlaybackControls(isCar, state, connected, onCommand)
             }
         }
     }
@@ -76,9 +74,7 @@ private fun MusicPlaybackControls(
     isCar: Boolean,
     state: PlayerUiState,
     connected: Boolean,
-    onCommand: (PlayerCommand) -> Unit,
-    onSleepTimer: (() -> Unit)?,
-    sleepRemaining: String?
+    onCommand: (PlayerCommand) -> Unit
 ) {
     if (state.phase in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.BUFFERING, PlaybackPhase.RETRYING)) {
         Text(stringResource(R.string.music_loading), color = TuneColors.Muted)
@@ -126,10 +122,7 @@ private fun MusicPlaybackControls(
             Icon(painterResource(R.drawable.ic_now_playing_next), stringResource(R.string.music_next))
         }
     }
-    if (onSleepTimer != null) TextButton(onClick = onSleepTimer, modifier = Modifier.heightIn(min = 56.dp).testTag("music_sleep_timer")) {
-        val label = stringResource(R.string.now_playing_sleep_timer)
-        Text(listOfNotNull(label, sleepRemaining).joinToString(" · "))
-    }
+
 }
 
 internal fun musicPlaybackFailureMessage(failure: MusicFailure?) = when (failure) {

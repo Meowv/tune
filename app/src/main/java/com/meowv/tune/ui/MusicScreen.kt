@@ -1,6 +1,13 @@
 package com.meowv.tune.ui
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PageSize
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -27,9 +34,9 @@ import coil3.request.crossfade
 import com.meowv.tune.R
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlayerCommand
+import com.meowv.tune.domain.RadioDisplayMode
 import com.meowv.tune.domain.music.MusicTrack
 import com.meowv.tune.domain.music.MusicQueueSeed
-import com.meowv.tune.domain.music.MusicFailure
 import com.meowv.tune.domain.music.canStartPlayback
 import com.meowv.tune.music.MusicFeed
 import com.meowv.tune.music.MusicUiState
@@ -40,8 +47,6 @@ internal fun MusicScreen(
     isCar: Boolean,
     state: MusicUiState,
     browse: MusicFeed,
-    onStart: () -> Unit,
-    onCancel: () -> Unit,
     onOpenPlayer: () -> Unit,
     connected: Boolean,
     onCommand: (PlayerCommand) -> Unit,
@@ -53,72 +58,36 @@ internal fun MusicScreen(
     val playing = playback?.phase == PlaybackPhase.PLAYING
     val list = rememberLazyListState()
     val feed = browse
+    var mode by rememberSaveable { mutableStateOf(RadioDisplayMode.LIST) }
     Surface(color = colors.background, modifier = Modifier.fillMaxSize().testTag("page_music")) {
         Column(Modifier.fillMaxSize().padding(horizontal = if (isCar) 24.dp else 16.dp)) {
-            if (state != MusicUiState.NotConfigured) {
-                IconButton(onClick = onSearch, modifier = Modifier.align(Alignment.End).testTag("music_search_open")) {
-                    Icon(painterResource(R.drawable.ic_ui_search), stringResource(R.string.music_search))
+            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(onClick = onSearch, enabled = state != MusicUiState.NotConfigured,
+                    modifier = Modifier.heightIn(min = if (isCar) 56.dp else 48.dp).testTag("music_search_open")) {
+                    Icon(painterResource(R.drawable.ic_ui_search), null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.music_search))
                 }
+                LayoutSwitcher(mode, { mode = it }, isCar)
             }
             if (state == MusicUiState.NotConfigured) {
                 Text(stringResource(R.string.music_not_configured), Modifier.padding(vertical = 24.dp))
                 return@Column
             }
-            val track = playback?.music?.takeIf { it.canStartPlayback && playback.phase != PlaybackPhase.ERROR }
-            if (playback != null && track != null) {
-                val busy = playback.phase in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.BUFFERING, PlaybackPhase.RETRYING)
-                Surface(shape = TuneShapes.Player, color = colors.surfaceVariant,
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                    Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Row(Modifier.weight(1f).heightIn(min = 64.dp).clip(TuneShapes.Control)
-                            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.music_open_player),
-                                onClick = onOpenPlayer).testTag("music_current"),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            MusicCover(track, Modifier.size(64.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(track.title, style = MaterialTheme.typography.titleMedium,
-                                    maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("music_title"))
-                                Text(track.artists.joinToString(" / "), color = colors.onSurfaceVariant,
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                val status = when {
-                                    playback.musicFailure != null -> stringResource(musicPlaybackFailureMessage(playback.musicFailure))
-                                    busy -> stringResource(R.string.music_loading)
-                                    playback.phase == PlaybackPhase.PAUSED && playback.positionMs != null ->
-                                        stringResource(R.string.music_resume_at, musicTime(playback.positionMs))
-                                    else -> null
-                                }
-                                status?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                            }
-                        }
-                        FilledIconButton(onClick = { onCommand(PlayerCommand.TogglePause) },
-                            enabled = connected, modifier = Modifier.size(if (isCar) 56.dp else 48.dp).testTag("music_home_toggle")) {
-                            MusicToggleIcon(playing || busy)
-                        }
-                    }
+            val track = playback?.music?.takeIf { playback.phase != PlaybackPhase.ERROR }
+            val play: (MusicTrack) -> Unit = { song ->
+                if (song.id == track?.id) onOpenPlayer()
+                else onCommand(PlayerCommand.PlayMusic(song, MusicQueueSeed(feed.tracks, feed.cursor)))
+            }
+            if (mode == RadioDisplayMode.CARD && feed.tracks.isNotEmpty()) {
+                MusicCards(feed.tracks, track?.id, playing, connected, isCar, Modifier.weight(1f), play)
+                if (feed.failure != null) Text(stringResource(musicPlaybackFailureMessage(feed.failure)), color = colors.error)
+                if (feed.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                else if (feed.cursor != null || feed.failure != null) TextButton(onClick = { onLoad(feed.cursor != null) }) {
+                    Text(stringResource(if (feed.failure != null) R.string.music_retry else R.string.music_search_more))
                 }
-            } else if (state == MusicUiState.Loading || playback?.phase == PlaybackPhase.RESOLVING) {
-                LinearProgressIndicator(Modifier.fillMaxWidth().testTag("music_loading"))
-                TextButton(onClick = onCancel, modifier = Modifier.testTag("music_cancel")) {
-                    Text(stringResource(R.string.music_cancel))
-                }
-            } else {
-                when (state) {
-                    is MusicUiState.Active -> if (playback?.phase == PlaybackPhase.ERROR)
-                        Text(stringResource(musicPlaybackFailureMessage(playback.musicFailure)), color = colors.error) else Unit
-                    is MusicUiState.Error -> Text(stringResource(musicPlaybackFailureMessage(state.failure)), color = colors.error)
-                    MusicUiState.Empty -> Text(stringResource(R.string.music_empty))
-                    is MusicUiState.Ready -> {
-                        Text(state.track.title, Modifier.testTag("music_title"))
-                        Text(stringResource(R.string.music_ready))
-                    }
-                    else -> Unit
-                }
-                val canStart = state !is MusicUiState.Ready && (state !is MusicUiState.Error ||
-                    state.failure !in setOf(MusicFailure.UNAUTHORIZED, MusicFailure.NOT_CONFIGURED))
-                if (canStart) Button(onClick = onStart, enabled = connected, modifier = Modifier.heightIn(min = 48.dp).testTag("music_start")) {
-                    Text(stringResource(R.string.music_start))
-                }
+                return@Column
             }
             LazyColumn(state = list, modifier = Modifier.weight(1f).fillMaxWidth().testTag("music_feed"),
                 contentPadding = PaddingValues(vertical = 8.dp)) {
@@ -152,6 +121,37 @@ internal fun MusicScreen(
                 } else if (feed.loaded && feed.tracks.isEmpty()) item {
                     Text(stringResource(R.string.music_empty), Modifier.padding(top = 16.dp))
                     TextButton(onClick = onSearch) { Text(stringResource(R.string.music_search)) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MusicCards(
+    tracks: List<MusicTrack>, currentId: String?, playing: Boolean, connected: Boolean,
+    isCar: Boolean, modifier: Modifier, onPlay: (MusicTrack) -> Unit
+) {
+    val pager = rememberPagerState(initialPage = tracks.indexOfFirst { it.id == currentId }.coerceAtLeast(0)) { tracks.size }
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val width = minOf(if (isCar) 366.dp else 262.dp, (maxWidth - 40.dp).coerceAtLeast(1.dp))
+        val height = minOf(if (isCar) 340.dp else 300.dp, maxHeight)
+        HorizontalPager(state = pager, pageSize = PageSize.Fixed(width),
+            contentPadding = PaddingValues(horizontal = (maxWidth - width) / 2),
+            pageSpacing = 12.dp, key = { tracks[it].id }, modifier = Modifier.fillMaxSize().testTag("music_cards")) { index ->
+            val song = tracks[index]
+            val current = song.id == currentId
+            Surface(onClick = { onPlay(song) }, enabled = connected, shape = TuneShapes.Card,
+                color = if (current) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.fillMaxWidth().height(height).testTag("music_feed_card_${song.id}")) {
+                Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center) {
+                    MusicCover(song, Modifier.size(minOf(150.dp, height * .48f)))
+                    Spacer(Modifier.height(12.dp))
+                    Text(song.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(song.artists.joinToString(" / "), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Icon(painterResource(if (current && playing) R.drawable.ic_wave else R.drawable.ic_radio_play),
+                        if (current && playing) stringResource(R.string.music_now_playing) else null)
                 }
             }
         }

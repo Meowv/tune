@@ -556,7 +556,7 @@ private fun RegionChip(name: String, isCar: Boolean, modifier: Modifier, onClick
 }
 
 @Composable
-private fun LayoutSwitcher(mode: RadioDisplayMode, onChange: (RadioDisplayMode) -> Unit, isCar: Boolean) {
+internal fun LayoutSwitcher(mode: RadioDisplayMode, onChange: (RadioDisplayMode) -> Unit, isCar: Boolean) {
     // 触控格保持 48/52dp；选中块 40/44dp，四周留 4dp 内边距，两块之间自然形成分隔。
     val cell = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch
     val tile = if (isCar) 44.dp else 40.dp

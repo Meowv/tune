@@ -891,7 +891,7 @@ class MusicPlaybackIntegrationTest {
                 alternateOverride?.invoke(trackId, excludedProviderId) ?: super.resolveAlternate(trackId, excludedProviderId)
         }
         app.mockNetwork.value = NetworkState(NetworkType.WIFI)
-        app.userSettings.update { it.copy(autoPlay = false, scope = RadioScope(ScopeMode.COUNTRY, app.country)) }
+        app.userSettings.update { it.copy(autoPlay = false, playbackOrder = PlaybackOrder.SEQUENTIAL, scope = RadioScope(ScopeMode.COUNTRY, app.country)) }
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             withTimeout(5000) { connection.connected.first { it } }
             withTimeout(5000) { app.radioQueue.activeScope.first { it != null } }

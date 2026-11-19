@@ -1,17 +1,14 @@
 package com.meowv.tune.music
 
 import android.graphics.Bitmap
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.platform.app.InstrumentationRegistry
-import com.meowv.tune.domain.music.MusicFailure
 import com.meowv.tune.domain.music.MusicTrack
 import com.meowv.tune.ui.MusicScreen
 import com.meowv.tune.ui.theme.TuneTheme
 import java.io.File
-import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 
@@ -19,47 +16,26 @@ class MusicScreenTest {
     @get:Rule val compose = createComposeRule()
     private val isCar get() = InstrumentationRegistry.getInstrumentation().targetContext.resources.configuration.screenWidthDp >= 600
 
-    @Test fun unconfiguredShowsUnavailableWithoutConfigurationPage() {
-        var configured = 0
-        compose.setContent { TuneTheme { MusicScreen(isCar, MusicUiState.NotConfigured, MusicFeed(), { error("Must not start") }, {}, { configured++ }, true, {}, {}, {}) } }
+    @Test fun unconfiguredShowsUnavailableWithoutStartOrPlaybackCard() {
+        compose.setContent { TuneTheme {
+            MusicScreen(isCar, MusicUiState.NotConfigured, MusicFeed(), {}, true, {}, {}, {})
+        } }
         compose.onNodeWithText("音乐服务暂未就绪").assertIsDisplayed()
         compose.onNodeWithTag("music_start").assertDoesNotExist()
-        compose.onNodeWithTag("music_configure").assertDoesNotExist()
-        assertEquals(0, configured)
+        compose.onNodeWithTag("music_current").assertDoesNotExist()
         capture("unconfigured")
     }
 
-    @Test fun loadingCanCancelAndRepeatedStartIsNotShown() {
-        val state = mutableStateOf<MusicUiState>(MusicUiState.Idle)
-        var started = 0
-        var cancelled = 0
-        compose.setContent { TuneTheme { MusicScreen(isCar, state.value, MusicFeed(), { started++; state.value = MusicUiState.Loading }, { cancelled++ }, {}, true, {}, {}, {}) } }
-        compose.onNodeWithTag("music_start").performClick()
-        compose.onNodeWithTag("music_loading").assertExists()
-        compose.onNodeWithTag("music_start").assertDoesNotExist()
-        compose.onNodeWithTag("music_cancel").performClick()
-        assertEquals(1, started)
-        assertEquals(1, cancelled)
-    }
-
-    @Test fun candidateIsShownWithoutPretendingToBePlaying() {
-        val track = MusicTrack("original-001", "睡醒就好了（测试片段）", listOf("qix"), "今天也不错")
-        compose.setContent { TuneTheme { MusicScreen(isCar, MusicUiState.Ready(track), MusicFeed(), {}, {}, {}, true, {}, {}, {}) } }
-        compose.onNodeWithTag("music_title").assertTextEquals(track.title)
-        compose.onNodeWithText("待播放").assertIsDisplayed()
-        capture("candidate")
-    }
-
-    @Test fun errorsAndEmptyStatesOfferAppropriateActions() {
-        val state = mutableStateOf<MusicUiState>(MusicUiState.Error(MusicFailure.RATE_LIMITED))
-        compose.setContent { TuneTheme { MusicScreen(isCar, state.value, MusicFeed(), {}, {}, {}, true, {}, {}, {}) } }
-        compose.onNodeWithText("请求较多，请稍后再试").assertExists()
-        compose.onNodeWithTag("music_start").assertIsEnabled()
-        compose.runOnIdle { state.value = MusicUiState.Empty }
-        compose.onNodeWithText("暂时没有可播放的音乐").assertExists()
-        compose.runOnIdle { state.value = MusicUiState.Error(MusicFailure.UNAUTHORIZED) }
-        compose.onNodeWithTag("music_configure").assertDoesNotExist()
-        compose.onNodeWithTag("music_start").assertDoesNotExist()
+    @Test fun listAndCardsDisplayTheSameTrack() {
+        val track = MusicTrack("original-001", "睡醒就好了（测试片段）", listOf("qix"))
+        compose.setContent { TuneTheme {
+            MusicScreen(isCar, MusicUiState.Idle, MusicFeed(tracks = listOf(track)), {}, true, {}, {}, {})
+        } }
+        compose.onNodeWithTag("music_feed_track_original-001").assertIsDisplayed()
+        compose.onNodeWithTag("layout_card").performClick()
+        compose.onNodeWithTag("music_feed_card_original-001").assertIsDisplayed()
+        compose.onNodeWithTag("layout_list").performClick()
+        compose.onNodeWithTag("music_feed_track_original-001").assertIsDisplayed()
     }
 
     private fun capture(name: String) {

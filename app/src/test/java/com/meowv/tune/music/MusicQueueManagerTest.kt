@@ -8,6 +8,23 @@ import org.junit.Test
 class MusicQueueManagerTest {
     private val tracks = (1..4).map { MusicTrack("$it", "Song $it", listOf("qix")) }
 
+    @Test fun shuffledQueueKeepsEarlierTracksAndThePreparedCandidate() = runBlocking {
+        val seed = MusicQueueSeed(tracks, null)
+        val queue = MusicQueueManager({ FakeMusicRepository(tracks) })
+        queue.reset(seed, startAt = tracks.last().id)
+        assertNull(queue.next())
+
+        queue.shuffle = true
+        queue.reset(seed, startAt = tracks.last().id)
+        val prepared = queue.nextTrack
+        assertNotNull(prepared)
+        assertEquals(prepared, queue.nextTrack)
+        assertEquals(prepared, queue.next()?.track)
+        val rest = List(2) { queue.next()?.track }
+        assertEquals(tracks.dropLast(1).toSet(), (listOf(prepared) + rest).toSet())
+        assertNull(queue.next())
+    }
+
     @Test fun onlyConfirmedPlaybackEntersHistoryAndOldSelectionsCannotCommit() = runBlocking {
         val queue = MusicQueueManager({ FakeMusicRepository(tracks) })
         val first = queue.next()!!

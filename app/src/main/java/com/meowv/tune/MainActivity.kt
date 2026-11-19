@@ -180,8 +180,6 @@ class MainActivity : ComponentActivity() {
                     musicBrowse = musicBrowse,
                     onEnterMusic = musicModel::enter,
                     onLoadMusic = musicModel::loadFeed,
-                    onStartMusic = { ensureNotificationPermission(); musicModel.startListening() },
-                    onCancelMusic = { musicModel.cancel(); dispatchPlayback(PlayerCommand.CancelMusic) },
                     onSearchMusic = musicSearchModel::open,
                     storageError = storageError,
                     radio = radioModel.radioState,

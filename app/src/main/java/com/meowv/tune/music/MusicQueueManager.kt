@@ -27,6 +27,12 @@ internal class MusicQueueManager(
     private var lastSkipAt: Long? = null
     private var lastSkippedId: String? = null
     private val load = Mutex()
+    private var randomNext: String? = null
+    var shuffle: Boolean = false
+        set(value) {
+            if (field != value) randomNext = null
+            field = value
+        }
     private var cursor: String? = null
     private var exhausted = false
     private var issued = 0L
@@ -71,6 +77,7 @@ internal class MusicQueueManager(
         currentCoroutineContext().ensureActive()
         val track = nextCandidate() ?: return null
         pending.remove(track)
+        randomNext = null
         return MusicSelection(++issued, track)
     }
 
@@ -121,11 +128,11 @@ internal class MusicQueueManager(
         invalidate()
         pending.clear(); history.clear(); considered.clear(); played.clear(); skipped.clear(); seenCursors.clear()
         clearSkipSignal()
-        cursor = null; exhausted = false; index = -1
+        cursor = null; exhausted = false; index = -1; randomNext = null
         if (seed != null) {
             val tracks = seed.tracks.filter { it.canStartPlayback }.distinctBy { it.id }
             val selected = tracks.indexOfFirst { it.id == startAt }
-            pending.addAll(tracks.drop(selected + 1))
+            pending.addAll(if (shuffle) tracks.filterNot { it.id == startAt } else tracks.drop(selected + 1))
             tracks.forEach { remember(it.id) }
             cursor = seed.nextCursor
             exhausted = cursor == null
@@ -143,13 +150,20 @@ internal class MusicQueueManager(
 
     private fun nextCandidate(): MusicTrack? {
         val shortWindow = lastSkipAt?.let { nowMillis() - it in 0..30000 } == true
-        if (!shortWindow || skipArtists.size < 2) return pending.firstOrNull()
+        if (!shortWindow || skipArtists.size < 2) return chooseNext(pending)
         val avoided = skipArtists.flatten().toSet()
         // 只在已有候选内调整顺序；没有其他歌手时保留原顺序，不额外追页。
-        return pending.firstOrNull { track ->
+        val candidates = pending.filter { track ->
             val names = artists(track)
             names.isNotEmpty() && names.none { it in avoided }
-        } ?: pending.firstOrNull()
+        }
+        return chooseNext(candidates.ifEmpty { pending })
+    }
+
+    private fun chooseNext(tracks: List<MusicTrack>): MusicTrack? {
+        if (!shuffle) return tracks.firstOrNull()
+        return tracks.firstOrNull { it.id == randomNext }
+            ?: tracks.randomOrNull()?.also { randomNext = it.id }
     }
 
     private fun artists(track: MusicTrack): Set<String> = track.artists.map {
