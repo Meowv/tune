@@ -112,6 +112,10 @@ internal fun CircularPlayerEntry(
         CircularPlayerVisual.Disconnected -> R.string.playback_service_disconnected
     })
     val openLabel = stringResource(R.string.now_playing_open)
+    val currentTitle = state.music?.title
+    val entryState = if (visual != CircularPlayerVisual.Default && !currentTitle.isNullOrBlank()) {
+        stringResource(R.string.now_playing_current_state, currentTitle, label)
+    } else label
     var focused by remember { mutableStateOf(false) }
     val diameter = if (isCar) 64.dp else 56.dp
     val accent = when (visual) {
@@ -127,7 +131,7 @@ internal fun CircularPlayerEntry(
             .testTag("circular_player_entry")
             .semantics {
                 contentDescription = openLabel
-                stateDescription = label
+                stateDescription = entryState
             },
         contentAlignment = Alignment.Center
     ) {

@@ -22,11 +22,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.meowv.tune.R
 import com.meowv.tune.domain.music.MusicFailure
 import com.meowv.tune.domain.music.MusicTrack
 import com.meowv.tune.domain.music.canStartPlayback
+import com.meowv.tune.music.MusicSearchRequest
 import com.meowv.tune.music.MusicSearchState
 import com.meowv.tune.music.MusicSearchWarning
 import com.meowv.tune.ui.theme.TuneColors
@@ -59,7 +61,7 @@ internal fun MusicSearchScreen(
         }
     }
     val visibleTracks = remember(state.items) { state.items.filter { it.canStartPlayback } }
-    val searchFailure = state.failure.takeIf { state.selectedId == null }
+    val searchFailure = state.failure
     LaunchedEffect(Unit) { if (!isCar && !state.searched) requester.requestFocus() }
 
     Surface(color = TuneColors.Background, modifier = Modifier.fillMaxSize().testTag("music_search_page")) {
@@ -94,13 +96,18 @@ internal fun MusicSearchScreen(
                             unfocusedContainerColor = TuneColors.Surface,
                             unfocusedBorderColor = TuneColors.BorderSoft
                         ),
-                        modifier = Modifier.weight(1f).focusRequester(requester).testTag("music_search_query")
+                        modifier = Modifier.weight(1f).heightIn(min = 56.dp).focusRequester(requester).testTag("music_search_query")
                     )
                     FilledTonalIconButton(
                         onClick = submit,
                         enabled = submitEnabled,
-                        modifier = Modifier.size(touch).testTag("music_search_submit"),
-                        shape = TuneShapes.Control
+                        modifier = Modifier.size(56.dp).testTag("music_search_submit"),
+                        shape = TuneShapes.Chip,
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(
+                            containerColor = TuneColors.Surface, contentColor = TuneColors.PrimaryLight,
+                            disabledContainerColor = TuneColors.Surface,
+                            disabledContentColor = TuneColors.Muted.copy(alpha = TuneColors.DisabledAlpha)
+                        )
                     ) {
                         Icon(painterResource(R.drawable.ic_ui_search), stringResource(R.string.music_search))
                     }
@@ -109,12 +116,9 @@ internal fun MusicSearchScreen(
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     LazyColumn(Modifier.fillMaxSize().testTag("music_search_results"), state = list,
                         contentPadding = PaddingValues(horizontal = horizontal, vertical = TuneSpacing.Hairline)) {
-                        if (searchFailure != null && (visibleTracks.isNotEmpty() || state.nextCursor != null)) item(key = "search_error") {
-                            DirectoryFeedback(searchFailureMessage(searchFailure))
-                        }
                         itemsIndexed(visibleTracks, key = { _, track -> track.id }) { index, track ->
                             val selected = state.selectedId == track.id
-                            val error = state.failure.takeIf { selected }?.let { stringResource(musicPlaybackFailureMessage(it)) }
+                            val error = state.selectionFailure.takeIf { selected }?.let { stringResource(musicPlaybackFailureMessage(it)) }
                             MusicTrackRow(track, isCar,
                                 visual = when {
                                     selected && state.selecting -> StationPlaybackVisual.Connecting
@@ -127,18 +131,9 @@ internal fun MusicSearchScreen(
                             }
                             if (index < visibleTracks.lastIndex) MusicTrackDivider()
                         }
-                        if (state.loading && visibleTracks.isNotEmpty()) item(key = "search_loading") {
-                            DirectoryLoading(Modifier.fillMaxWidth().padding(vertical = TuneSpacing.Medium),
-                                size = 22.dp, tag = "music_search_loading")
-                        } else if (state.nextCursor != null && !state.loading) {
-                            item(key = "search_more") {
-                                TextButton(
-                                    onClick = onMore,
-                                    enabled = !state.loading && !state.selecting,
-                                    modifier = Modifier.fillMaxWidth().heightIn(min = touch).testTag("music_search_more")
-                                ) {
-                                    Text(stringResource(if (searchFailure != null) R.string.music_retry else R.string.music_search_more))
-                                }
+                        if (state.request == MusicSearchRequest.APPEND || state.nextCursor != null) {
+                            item(key = "search_footer") {
+                                SearchPagination(state, touch, onMore)
                             }
                         }
                     }
@@ -154,17 +149,52 @@ internal fun MusicSearchScreen(
                             state.searched && state.nextCursor == null -> R.string.music_search_empty
                             else -> null
                         }
-                        if (state.loading) {
+                        if (state.request == MusicSearchRequest.INITIAL) {
                             DirectoryLoading(Modifier.fillMaxSize(), tag = "music_search_loading")
                         } else if (message != null && state.nextCursor == null) {
                             DirectoryMessage(
                                 if (message == R.string.music_search_empty) R.drawable.ic_ui_search else R.drawable.ic_ui_info,
-                                TuneColors.Muted, message, Modifier.fillMaxSize().testTag("music_search_empty")
+                                if (message == R.string.music_search_empty) TuneColors.Muted else TuneColors.Error,
+                                message, Modifier.fillMaxSize().testTag("music_search_empty"),
+                                action = if (message != R.string.music_search_empty && submitEnabled) {
+                                    {
+                                        TextButton(onClick = submit, modifier = Modifier.testTag("music_search_retry")) {
+                                            Text(stringResource(R.string.music_retry))
+                                        }
+                                    }
+                                } else null
                             )
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SearchPagination(state: MusicSearchState, touch: Dp, onMore: () -> Unit) {
+    when {
+        state.request == MusicSearchRequest.APPEND -> DirectoryLoading(
+            Modifier.fillMaxWidth().heightIn(min = touch), size = 22.dp, tag = "music_search_loading"
+        )
+        state.appendFailure != null -> Row(
+            Modifier.fillMaxWidth().padding(horizontal = TuneSpacing.Small),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val reason = searchFailureMessage(state.appendFailure)
+            Text(
+                stringResource(if (reason == R.string.music_search_failed) R.string.music_search_more_failed else reason),
+                modifier = Modifier.weight(1f), color = TuneColors.Error, style = TuneTextStyle
+            )
+            TextButton(onClick = onMore, enabled = !state.selecting,
+                modifier = Modifier.heightIn(min = touch).testTag("music_search_more")) {
+                Text(stringResource(R.string.music_retry))
+            }
+        }
+        else -> TextButton(onClick = onMore, enabled = !state.selecting,
+            modifier = Modifier.fillMaxWidth().heightIn(min = touch).testTag("music_search_more")) {
+            Text(stringResource(R.string.music_search_more))
         }
     }
 }

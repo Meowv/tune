@@ -181,6 +181,7 @@ class MainActivity : ComponentActivity() {
                     onEnterMusic = musicModel::enter,
                     onLoadMusic = musicModel::loadFeed,
                     onSearchMusic = musicSearchModel::open,
+                    musicSearchOpen = musicSearch.visible,
                     storageError = storageError,
                     radio = radioModel.radioState,
                     playback = tuneApp.playerController.state,

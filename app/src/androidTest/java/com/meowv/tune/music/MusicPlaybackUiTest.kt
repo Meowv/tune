@@ -1,7 +1,12 @@
 package com.meowv.tune.music
 
 import android.graphics.Bitmap
+import android.os.SystemClock
+import android.view.KeyEvent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ActivityScenario
@@ -13,6 +18,7 @@ import com.meowv.tune.domain.music.*
 import java.io.File
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -20,6 +26,7 @@ import org.junit.Test
 class MusicPlaybackUiTest {
     @get:Rule val compose = createEmptyComposeRule()
 
+    @OptIn(ExperimentalTestApi::class)
     @Test fun musicPageAndImmersiveControlsFollowTheActiveSource() = runBlocking<Unit> {
         val app = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as TuneTestApplication
         val originals = InstrumentationRegistry.getArguments().getString("musicOriginals") == "true"
@@ -37,8 +44,12 @@ class MusicPlaybackUiTest {
         }
         app.mockNetwork.value = NetworkState(NetworkType.WIFI)
         app.userSettings.update { it.copy(autoPlay = false, playbackOrder = PlaybackOrder.SEQUENTIAL) }
-        ActivityScenario.launch(MainActivity::class.java).use {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             val connection = app.playerController
+            val musicPage = hasAnyAncestor(hasTestTag("page_music"))
+            val listMode = compose.onNode(hasTestTag("layout_list") and musicPage)
+            val cardMode = compose.onNode(hasTestTag("layout_card") and musicPage)
+            val feed = compose.onNodeWithTag("music_feed")
             withTimeout(5000) { connection.connected.first { ready -> ready } }
             try {
                 compose.onNodeWithTag("nav_music").performClick()
@@ -65,25 +76,76 @@ class MusicPlaybackUiTest {
                 rowControl.performTouchInput { click() }
                 withTimeout(6000) { connection.state.first { it.phase == PlaybackPhase.PLAYING && it.music?.id == "ui-2" } }
                 compose.onNodeWithTag("now_playing_screen").assertDoesNotExist()
-                compose.onNodeWithTag("layout_card").performClick()
+                cardMode.performClick()
                 compose.onNodeWithTag("music_cards").assertIsDisplayed()
+                val currentCard = compose.onNodeWithTag("music_feed_card_ui-2")
+                currentCard.assertIsSelected()
+                currentCard.performTouchInput { swipeLeft() }
+                compose.onNodeWithTag("music_feed_card_ui-3").assertIsSelected()
+                assertEquals("ui-2", connection.state.value.music?.id)
+                assertEquals(PlaybackPhase.PLAYING, connection.state.value.phase)
+
+                listMode.performClick()
+                cardMode.performClick()
+                compose.onNodeWithTag("music_feed_card_ui-3").assertIsSelected()
+                compose.onNodeWithTag("circular_player_entry").performClick()
+                compose.onNodeWithTag("now_playing_collapse").performClick()
+                compose.onNodeWithTag("music_feed_card_ui-3").assertIsSelected()
+                assertEquals("ui-2", connection.state.value.music?.id)
+
+                compose.onNodeWithTag("music_feed_card_ui-3").performTouchInput { swipeRight() }
+                currentCard.assertIsSelected().performClick()
+                withTimeout(3000) { connection.state.first { it.phase == PlaybackPhase.PAUSED && it.music?.id == "ui-2" } }
+                compose.onNodeWithTag("now_playing_screen").assertDoesNotExist()
+                currentCard.performClick()
+                withTimeout(6000) { connection.state.first { it.phase == PlaybackPhase.PLAYING && it.music?.id == "ui-2" } }
                 capture("cards")
-                compose.onNodeWithTag("layout_list").performClick()
+                listMode.performClick()
                 capture("page")
                 compose.onNodeWithTag("circular_player_entry").performClick()
                 compose.onNodeWithTag("now_playing_screen").assertExists()
-                compose.onNodeWithTag("music_toggle").performScrollTo().performClick()
+                val toggle = compose.onNodeWithTag("music_toggle")
+                val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+                val keyTime = SystemClock.uptimeMillis()
+                assertTrue(automation.injectInputEvent(KeyEvent(keyTime, keyTime, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_TAB, 0), true))
+                assertTrue(automation.injectInputEvent(KeyEvent(keyTime, keyTime, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_TAB, 0), true))
+                compose.waitForIdle()
+                toggle.performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+                toggle.assertIsFocused().performKeyInput { pressKey(Key.DirectionRight) }
+                compose.onNodeWithTag("music_next").assertIsFocused()
+                toggle.assertIsDisplayed().performClick()
                 withTimeout(3000) { connection.state.first { state -> state.phase == PlaybackPhase.PAUSED } }
-                compose.onNodeWithTag("music_seek").performScrollTo().performTouchInput { swipe(centerLeft, centerRight, 200) }
+                compose.onNodeWithTag("music_seek").performScrollTo().performTouchInput {
+                    swipe(Offset(width * .25f, center.y), Offset(width * .75f, center.y), 200)
+                }
                 assertTrue(connection.state.value.canSeek)
                 compose.onNodeWithTag("now_playing_sleep").assertIsEnabled()
-                compose.onNodeWithTag("music_next").performScrollTo().performClick()
+                val orderLabel = hasTestTag("now_playing_shuffle_label")
+                compose.onNodeWithTag("now_playing_shuffle").assertIsDisplayed().performClick()
+                compose.waitUntil(5000) { compose.onNode(orderLabel and hasText("随机播放"), useUnmergedTree = true).isDisplayed() }
+                compose.onNodeWithTag("now_playing_shuffle").performClick()
+                compose.waitUntil(5000) { compose.onNode(orderLabel and hasText("顺序播放"), useUnmergedTree = true).isDisplayed() }
+                compose.onNodeWithTag("music_next").assertIsDisplayed().performClick()
                 withTimeout(6000) { connection.state.first { state -> state.phase == PlaybackPhase.PLAYING && state.music?.id == "ui-3" } }
-                compose.onNodeWithTag("music_toggle").performScrollTo().performClick()
+                compose.onNodeWithTag("music_toggle").assertIsDisplayed().performClick()
                 withTimeout(3000) { connection.state.first { state -> state.phase == PlaybackPhase.PAUSED } }
                 capture("immersive")
-                compose.onNodeWithTag("now_playing_collapse").performClick()
-                compose.onNodeWithTag("music_feed").assertIsDisplayed()
+                compose.onNodeWithTag("now_playing_collapse").assertIsDisplayed().performClick()
+                try {
+                    compose.waitUntil(5000) {
+                        compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isEmpty() && feed.isDisplayed()
+                    }
+                } catch (timeout: ComposeTimeoutException) {
+                    throw AssertionError(compose.onRoot().printToString(), timeout)
+                }
+                compose.onNodeWithTag("nav_radio").performClick()
+                compose.waitUntil(5000) { compose.onNodeWithTag("page_radio").isDisplayed() }
+                compose.onNodeWithTag("nav_music").performClick()
+                compose.waitUntil(5000) { feed.isDisplayed() }
+                scenario.recreate()
+                compose.waitUntil(5000) { feed.isDisplayed() }
+                assertEquals("ui-3", connection.state.value.music?.id)
+                assertEquals(PlaybackPhase.PAUSED, connection.state.value.phase)
             } finally {
                 connection.dispatch(PlayerCommand.Stop)
                 app.testMusicRepository = null

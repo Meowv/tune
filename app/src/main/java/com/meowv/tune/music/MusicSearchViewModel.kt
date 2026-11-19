@@ -14,13 +14,19 @@ internal data class MusicSearchState(
     val searched: Boolean = false,
     val items: List<MusicTrack> = emptyList(),
     val nextCursor: String? = null,
-    val loading: Boolean = false,
+    val request: MusicSearchRequest? = null,
     val partial: Boolean = false,
     val sourceWarnings: Map<String, MusicSearchWarning> = emptyMap(),
     val failure: MusicFailure? = null,
+    val appendFailure: MusicFailure? = null,
+    val selectionFailure: MusicFailure? = null,
     val selecting: Boolean = false,
     val selectedId: String? = null
-)
+) {
+    val loading: Boolean get() = request != null
+}
+
+internal enum class MusicSearchRequest { INITIAL, APPEND }
 
 internal enum class MusicSearchWarning { DEFERRED, TIMEOUT, RATE_LIMITED, UNAVAILABLE }
 
@@ -41,8 +47,9 @@ internal class MusicSearchViewModel(
         generation++
         pending?.cancel(); selection?.cancel()
         val old = mutable.value
-        mutable.value = old.copy(visible = false, loading = false, selecting = false,
-            searched = old.searched && !(old.loading && old.items.isEmpty()))
+        mutable.value = old.copy(visible = false, request = null, selecting = false,
+            selectedId = null, selectionFailure = null,
+            searched = old.searched && old.request != MusicSearchRequest.INITIAL)
     }
 
     fun queryChanged(value: String) {
@@ -58,19 +65,24 @@ internal class MusicSearchViewModel(
     private fun load(more: Boolean) {
         val old = mutable.value
         if (old.loading || old.selecting || !old.visible) return
+        val cursor = if (more) old.nextCursor ?: return else null
+        if (more && old.items.size >= 200) return
         val source = repository ?: run {
-            mutable.value = old.copy(failure = MusicFailure.NOT_CONFIGURED); return
+            mutable.value = old.withLoadFailure(more, MusicFailure.NOT_CONFIGURED)
+            return
         }
         val query = old.query.trim()
         if (query.length !in 1..100 || query.any(Char::isISOControl)) {
-            mutable.value = old.copy(failure = MusicFailure.INVALID_REQUEST); return
+            mutable.value = old.withLoadFailure(more, MusicFailure.INVALID_REQUEST)
+            return
         }
-        val cursor = if (more) old.nextCursor ?: return else null
-        if (more && old.items.size >= 200) return
         val id = ++generation
-        mutable.value = old.copy(loading = true, failure = null, selectedId = null, searched = true,
+        mutable.value = old.copy(
+            request = if (more) MusicSearchRequest.APPEND else MusicSearchRequest.INITIAL,
+            failure = null, appendFailure = null, selectionFailure = null, selectedId = null, searched = true,
             partial = more && old.partial, sourceWarnings = if (more) old.sourceWarnings else emptyMap(),
-            items = if (more) old.items else emptyList(), nextCursor = if (more) cursor else null)
+            items = if (more) old.items else emptyList(), nextCursor = cursor
+        )
         pending = viewModelScope.launch {
             try {
                 val page = source.search(query, 20, cursor)
@@ -90,17 +102,21 @@ internal class MusicSearchViewModel(
                         else -> continue
                     }
                 }
-                mutable.value = mutable.value.copy(items = items, loading = false,
+                mutable.value = mutable.value.copy(items = items, request = null,
                     nextCursor = page.nextCursor?.takeUnless { it == cursor || items.size >= 200 },
                     sourceWarnings = warnings, partial = page.partial || warnings.isNotEmpty() ||
                         more && old.partial && old.sourceWarnings.isEmpty())
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: MusicException) {
                 ensureActive()
-                if (id == generation) mutable.value = mutable.value.copy(loading = false, failure = failure.failure)
+                if (id == generation) mutable.value = mutable.value.withLoadFailure(more, failure.failure)
             }
         }
     }
+
+    private fun MusicSearchState.withLoadFailure(more: Boolean, reason: MusicFailure): MusicSearchState =
+        if (more) copy(request = null, appendFailure = reason)
+        else copy(request = null, failure = reason)
 
     private fun mergeResults(previous: List<MusicTrack>, incoming: List<MusicTrack>): List<MusicTrack> {
         val merged = previous.toMutableList()
@@ -118,19 +134,21 @@ internal class MusicSearchViewModel(
     fun select(track: MusicTrack) {
         if (!mutable.value.visible || mutable.value.selecting ||
             mutable.value.items.none { it.id == track.id && it.canStartPlayback }) return
+        mutable.value = mutable.value.copy(selecting = true, selectedId = track.id, selectionFailure = null)
         selection = viewModelScope.launch {
-            mutable.value = mutable.value.copy(selecting = true, selectedId = track.id, failure = null)
             try {
                 play(track)
                 ensureActive()
                 generation++
                 pending?.cancel()
-                mutable.value = mutable.value.copy(visible = false, loading = false, selecting = false, selectedId = null)
+                mutable.value = mutable.value.copy(visible = false, request = null, selecting = false, selectedId = null)
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: TuneFailure) {
-                mutable.value = mutable.value.copy(selecting = false, failure = MusicFailure.PLAYBACK_UNAVAILABLE)
+                ensureActive()
+                mutable.value = mutable.value.copy(selecting = false, selectionFailure = MusicFailure.PLAYBACK_UNAVAILABLE)
             } catch (failure: MusicException) {
-                mutable.value = mutable.value.copy(selecting = false, failure = failure.failure)
+                ensureActive()
+                mutable.value = mutable.value.copy(selecting = false, selectionFailure = failure.failure)
             }
         }
     }

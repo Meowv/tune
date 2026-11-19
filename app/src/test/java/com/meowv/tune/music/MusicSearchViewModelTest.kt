@@ -87,12 +87,47 @@ class MusicSearchViewModelTest {
             model.open(); model.queryChanged("qix"); model.search(); model.more()
             assertEquals(listOf(track), model.state.value.items)
             assertTrue(model.state.value.partial)
-            assertEquals(MusicFailure.RATE_LIMITED, model.state.value.failure)
+            assertEquals(MusicFailure.RATE_LIMITED, model.state.value.appendFailure)
             model.select(track)
             assertTrue(model.state.value.visible)
             assertFalse(model.state.value.selecting)
-            assertEquals(MusicFailure.PLAYBACK_UNAVAILABLE, model.state.value.failure)
+            assertEquals(MusicFailure.PLAYBACK_UNAVAILABLE, model.state.value.selectionFailure)
         } finally { scope.cancel() }
+    }
+
+    @Test fun initialAndAppendRetriesUseTheirOwnTargetsAndSuppressDuplicateRequests() = runBlocking {
+        val requests = mutableListOf<String?>()
+        val append = CompletableDeferred<Unit>()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val model = MusicSearchViewModel(Repository { _, cursor ->
+                requests.add(cursor)
+                when (requests.size) {
+                    1, 3 -> throw MusicException(MusicFailure.CONNECTION)
+                    2 -> MusicPage(listOf(track), "next")
+                    else -> { append.await(); MusicPage(listOf(track.copy(id = "two"))) }
+                }
+            }, {}, scope)
+            model.open(); model.queryChanged("qix")
+            model.search()
+            assertEquals(MusicFailure.CONNECTION, model.state.value.failure)
+            assertNull(model.state.value.appendFailure)
+            model.search()
+            assertNull(model.state.value.failure)
+            model.more()
+            assertEquals(MusicFailure.CONNECTION, model.state.value.appendFailure)
+            assertNull(model.state.value.failure)
+            assertEquals(listOf(track), model.state.value.items)
+            assertEquals("next", model.state.value.nextCursor)
+
+            model.more(); model.more(); model.search()
+            assertEquals(MusicSearchRequest.APPEND, model.state.value.request)
+            assertEquals(listOf(null, null, "next", "next"), requests)
+            append.complete(Unit)
+            assertNull(model.state.value.appendFailure)
+            assertNull(model.state.value.nextCursor)
+            assertEquals(listOf("one", "two"), model.state.value.items.map { it.id })
+        } finally { append.complete(Unit); scope.cancel() }
     }
 
     @Test fun invalidQueryDoesNotRequestAndRepeatedSubmitDoesNotOverlap() = runBlocking {

@@ -22,6 +22,7 @@
   <string name="music_search_hint">歌名或歌手</string>
   <string name="music_search_close">返回</string>
   <string name="music_search_more">加载更多</string>
+  <string name="music_search_more_failed">加载更多失败</string>
   <string name="music_search_empty">没有找到相关歌曲</string>
   <string name="music_search_invalid">请输入 1–100 个字符的歌名或歌手</string>
   <string name="music_search_failed">搜索失败</string>
@@ -143,6 +144,7 @@
   <string name="playback_focus_lost">音频焦点已丢失</string>
   <string name="playback_disconnected">播放设备已断开</string>
   <string name="now_playing_open">打开全屏播放页</string>
+  <string name="now_playing_current_state">%1$s，%2$s</string>
   <string name="now_playing_collapse">收起播放页</string>
   <string name="now_playing_artwork">电台台标：%1$s</string>
   <string name="now_playing_pause_accessibility">暂停播放</string>

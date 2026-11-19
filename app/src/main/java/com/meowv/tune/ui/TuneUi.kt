@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
@@ -23,8 +24,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.hideFromAccessibility
@@ -85,6 +90,7 @@ internal fun TuneApp(
     onFirstLayout: () -> Unit,
     musicState: MusicUiState = MusicUiState.NotConfigured,
     onSearchMusic: () -> Unit = {},
+    musicSearchOpen: Boolean = false,
     musicBrowse: MusicFeed = MusicFeed(),
     onEnterMusic: () -> Unit = {},
     onLoadMusic: () -> Unit = {}
@@ -160,8 +166,13 @@ internal fun TuneApp(
     }
     val fullscreenOccupied = nowPlayingOpen ||
         !fullscreenTransition.isIdle || fullscreenTransition.currentState
+    val fullscreenFocus = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    LaunchedEffect(nowPlayingOpen) {
+        if (nowPlayingOpen) focusManager.clearFocus(force = true)
+    }
     val rotation = rememberSaveable(saver = PlayerRotationState.Saver) { PlayerRotationState() }
-    val shellEnabled = !fullscreenOccupied && !showUpdate && !showScopePicker
+    val shellEnabled = !fullscreenOccupied && !showUpdate && !showScopePicker && !musicSearchOpen
     BackHandler(enabled = nowPlayingOpen && !showUpdate && !showScopePicker) {
         nowPlayingOpen = false
     }
@@ -185,6 +196,15 @@ internal fun TuneApp(
                     .windowInsetsPadding(WindowInsets.safeDrawing)
                     .onGloballyPositioned { onFirstLayout() }
                     .testTag(if (isCar) "shell_car" else "shell_phone")
+                    .focusProperties {
+                        onEnter = {
+                            if (fullscreenOccupied &&
+                                (!fullscreenTransition.currentState || !fullscreenFocus.requestFocus())) {
+                                cancelFocusChange()
+                            }
+                        }
+                    }
+                    .focusGroup()
                     .then(
                         if (!shellEnabled) {
                             Modifier.semantics { hideFromAccessibility() }
@@ -208,8 +228,7 @@ internal fun TuneApp(
                             onClearDirectoryCache, { showUpdate = true }, { showScopePicker = true },
                             musicState = musicState, onSearchMusic = onSearchMusic,
                             musicBrowse = musicBrowse, onLoadMusic = onLoadMusic,
-                            onOpenMusicPlayer = { nowPlayingOpen = true },
-                            radioAnimationsEnabled = !fullscreenOccupied && !showUpdate && !showScopePicker
+                            directoryAnimationsEnabled = shellEnabled
                         )
                     }
                 } else {
@@ -221,8 +240,7 @@ internal fun TuneApp(
                         onClearDirectoryCache, { showUpdate = true }, { showScopePicker = true },
                         musicState = musicState, onSearchMusic = onSearchMusic,
                         musicBrowse = musicBrowse, onLoadMusic = onLoadMusic,
-                            onOpenMusicPlayer = { nowPlayingOpen = true },
-                        radioAnimationsEnabled = !fullscreenOccupied && !showUpdate && !showScopePicker
+                        directoryAnimationsEnabled = shellEnabled
                     )
                 }
                 if (!isCar) MeowvBottomDock(page, playerEntry) { page = it }
@@ -271,6 +289,7 @@ internal fun TuneApp(
                     onSeek = { onPlayback(PlayerCommand.Seek(it)) },
                     onSelectStation = { nowPlayingOpen = false; page = if (playbackState.source == PlaybackSource.MUSIC) TunePage.Music else TunePage.Radio },
                     modifier = Modifier.fillMaxSize().testTag("now_playing_screen")
+                        .focusRequester(fullscreenFocus).focusGroup()
                 )
             }
             // 版本页覆盖整个外壳（含播放器与导航），保持主菜单仍是三个。
@@ -374,8 +393,7 @@ private fun TunePager(
     onClearDirectoryCache: () -> Unit,
     onOpenUpdate: () -> Unit,
     onScopeClick: () -> Unit,
-    radioAnimationsEnabled: Boolean,
-    onOpenMusicPlayer: () -> Unit,
+    directoryAnimationsEnabled: Boolean,
     musicBrowse: MusicFeed,
     onLoadMusic: () -> Unit,
     musicState: MusicUiState,
@@ -390,8 +408,8 @@ private fun TunePager(
                 onDisplayModeChange, onSettingsChange, onRefreshRadio,
                 onRefreshFromSettings, onLoadMore, onClearDirectoryCache,
                 onOpenUpdate, onScopeClick,
-                radioAnimationsEnabled && index == state.settledPage && !state.isScrollInProgress,
-                onOpenMusicPlayer, musicBrowse, onLoadMusic, musicState, onSearchMusic
+                directoryAnimationsEnabled && index == state.settledPage && !state.isScrollInProgress,
+                musicBrowse, onLoadMusic, musicState, onSearchMusic
             )
         }
     }
@@ -418,8 +436,7 @@ private fun pageContent(
     onClearDirectoryCache: () -> Unit,
     onOpenUpdate: () -> Unit,
     onScopeClick: () -> Unit,
-    radioAnimationsEnabled: Boolean,
-    onOpenMusicPlayer: () -> Unit,
+    directoryAnimationsEnabled: Boolean,
     musicBrowse: MusicFeed,
     onLoadMusic: () -> Unit,
     musicState: MusicUiState,
@@ -439,10 +456,10 @@ private fun pageContent(
                 onSelectTarget = onSelectTarget,
                 onRefresh = onRefreshRadio,
                 onScopeClick = onScopeClick,
-                animationsEnabled = radioAnimationsEnabled
+                animationsEnabled = directoryAnimationsEnabled
             )
-            TunePage.Music -> MusicScreen(isCar, musicState, musicBrowse, onOpenMusicPlayer,
-                connected, onPlayback, onSearchMusic, onLoadMusic)
+            TunePage.Music -> MusicScreen(isCar, musicState, musicBrowse, connected, onPlayback, onSearchMusic, onLoadMusic,
+                animationsEnabled = directoryAnimationsEnabled)
             TunePage.Settings -> SettingsScreen(
                 isCar = isCar,
                 settings = settings,

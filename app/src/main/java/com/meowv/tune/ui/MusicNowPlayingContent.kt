@@ -1,9 +1,13 @@
 package com.meowv.tune.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -15,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -26,6 +31,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.meowv.tune.R
@@ -51,10 +57,11 @@ internal fun MusicNowPlayingContent(
     BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         val wide = maxWidth >= 560.dp && (isCar || maxWidth > maxHeight)
         val height = maxHeight
+        val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
         val coverSize = if (wide) {
-            minOf(maxWidth * .36f, height * .60f, if (isCar) 380.dp else 300.dp)
+            minOf(maxWidth * .36f, height * .60f / fontScale, if (isCar) 380.dp else 300.dp)
         } else {
-            minOf(maxWidth * .72f, height * .45f, 280.dp)
+            minOf(maxWidth * .72f, height * .45f / fontScale, 280.dp)
         }
         val artwork: @Composable () -> Unit = {
             Column(horizontalAlignment = Alignment.CenterHorizontally,
@@ -78,21 +85,19 @@ internal fun MusicNowPlayingContent(
         if (wide) {
             Row(Modifier.fillMaxSize().focusGroup(), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(if (isCar) 44.dp else 28.dp)) {
-                Column(Modifier.weight(1f).verticalScroll(rememberScrollState()),
-                    horizontalAlignment = Alignment.CenterHorizontally, content = { artwork() })
-                Column(Modifier.weight(1f).verticalScroll(rememberScrollState()),
-                    horizontalAlignment = Alignment.CenterHorizontally) {
-                    MusicPlaybackControls(isCar, state, connected, onCommand)
+                Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min = height),
+                        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                        artwork()
+                    }
                 }
+                val lowerSpace = ((height - 320.dp) * .35f / fontScale).coerceIn(0.dp, 104.dp)
+                MusicPlaybackControls(isCar, state, connected, onCommand, Modifier.weight(1f).fillMaxHeight(),
+                    lowerSpace = lowerSpace)
             }
         } else {
-            Column(Modifier.widthIn(max = 540.dp).fillMaxWidth().verticalScroll(rememberScrollState())
-                .heightIn(min = height).padding(vertical = TuneSpacing.Small).focusGroup(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(TuneSpacing.Medium, Alignment.CenterVertically)) {
-                artwork()
-                MusicPlaybackControls(isCar, state, connected, onCommand)
-            }
+            MusicPlaybackControls(isCar, state, connected, onCommand,
+                Modifier.widthIn(max = 540.dp).fillMaxSize().focusGroup(), artwork)
         }
     }
 }
@@ -102,31 +107,49 @@ private fun MusicPlaybackControls(
     isCar: Boolean,
     state: PlayerUiState,
     connected: Boolean,
-    onCommand: (PlayerCommand) -> Unit
+    onCommand: (PlayerCommand) -> Unit,
+    modifier: Modifier,
+    artwork: (@Composable () -> Unit)? = null,
+    lowerSpace: Dp = 0.dp
 ) {
     val animationMillis = if (rememberMotionEnabled()) 220 else 0
     val buffering = state.phase in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.BUFFERING, PlaybackPhase.RETRYING)
     val failure = musicPlaybackErrorText(state)
-    Column(Modifier.widthIn(max = if (isCar) 560.dp else 430.dp).fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(TuneSpacing.Small)) {
-        if (state.musicLyrics.isNotEmpty()) {
-            val index = MusicLyrics.activeLine(state.musicLyrics, state.positionMs ?: 0)
-            Column(Modifier.fillMaxWidth().testTag("music_lyrics"),
-                verticalArrangement = Arrangement.spacedBy(TuneSpacing.Hairline),
-                horizontalAlignment = Alignment.CenterHorizontally) {
-                state.musicLyrics.getOrNull(index)?.let {
-                    Text(it.text, color = TuneColors.Text, style = TuneTextStyle, fontSize = if (isCar) 22.sp else 17.sp,
-                        fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 2,
-                        overflow = TextOverflow.Ellipsis)
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            val contentHeight = maxHeight
+            Column(
+                Modifier.widthIn(max = if (isCar) 560.dp else 430.dp).fillMaxWidth()
+                    .verticalScroll(rememberScrollState()).heightIn(min = contentHeight)
+                    .padding(vertical = TuneSpacing.Hairline),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(TuneSpacing.Small, Alignment.Bottom)
+            ) {
+                artwork?.invoke()
+                if (state.musicLyrics.isNotEmpty()) {
+                    val index = MusicLyrics.activeLine(state.musicLyrics, state.positionMs ?: 0)
+                    Column(Modifier.fillMaxWidth().testTag("music_lyrics"),
+                        verticalArrangement = Arrangement.spacedBy(TuneSpacing.Hairline),
+                        horizontalAlignment = Alignment.CenterHorizontally) {
+                        state.musicLyrics.getOrNull(index)?.let {
+                            Text(it.text, color = TuneColors.Text, style = TuneTextStyle, fontSize = if (isCar) 22.sp else 17.sp,
+                                fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 2,
+                                overflow = TextOverflow.Ellipsis)
+                        }
+                        state.musicLyrics.getOrNull(index + 1)?.let {
+                            Text(it.text, color = TuneColors.Muted, style = TuneTextStyle, fontSize = if (isCar) 17.sp else 14.sp,
+                                textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
                 }
-                state.musicLyrics.getOrNull(index + 1)?.let {
-                    Text(it.text, color = TuneColors.Muted, style = TuneTextStyle, fontSize = if (isCar) 17.sp else 14.sp,
-                        textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                MusicSeek(state, connected, onCommand)
+                if (failure != null) {
+                    Text(failure, color = TuneColors.Error, style = TuneTextStyle, fontSize = if (isCar) 15.sp else 13.sp,
+                        textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite })
                 }
             }
         }
-        MusicSeek(state, connected, onCommand)
         Row(
             Modifier.widthIn(max = if (isCar) 430.dp else 350.dp).fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -172,13 +195,11 @@ private fun MusicPlaybackControls(
                 isCar, "music_next", animationMillis, if (isCar) 34.dp else 30.dp,
                 enabled = connected && state.canNext, onClick = { onCommand(PlayerCommand.Next) })
         }
-        if (failure != null) {
-            Text(failure, color = TuneColors.Error, style = TuneTextStyle, fontSize = if (isCar) 15.sp else 13.sp,
-                textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite })
-        }
+        if (lowerSpace > 0.dp) Spacer(Modifier.height(lowerSpace))
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MusicSeek(state: PlayerUiState, connected: Boolean, onCommand: (PlayerCommand) -> Unit) {
     val duration = state.durationMs?.takeIf { it > 0 } ?: return
@@ -189,17 +210,38 @@ private fun MusicSeek(state: PlayerUiState, connected: Boolean, onCommand: (Play
     val sliderModifier = Modifier.fillMaxWidth().semantics { stateDescription = description }
     Column(Modifier.fillMaxWidth().padding(horizontal = TuneSpacing.Small)) {
         if (state.canSeek) {
+            val interaction = remember { MutableInteractionSource() }
+            val focused by interaction.collectIsFocusedAsState()
             Slider(
                 value = position.toFloat(),
                 onValueChange = { drag = it },
                 onValueChangeFinished = { drag?.let { onCommand(PlayerCommand.Seek(it.toLong())) }; drag = null },
                 valueRange = 0f..duration.toFloat(),
                 enabled = connected,
-                modifier = sliderModifier.testTag("music_seek")
+                modifier = sliderModifier.heightIn(min = TuneSizes.Touch).testTag("music_seek"),
+                interactionSource = interaction,
+                thumb = {
+                    Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+                        Box(
+                            Modifier.size(if (drag != null) 16.dp else 12.dp)
+                                .background(if (connected) TuneColors.Primary else TuneColors.Muted, CircleShape)
+                                .then(if (focused) Modifier.border(2.dp, TuneColors.PrimaryLight, CircleShape) else Modifier)
+                        )
+                    }
+                },
+                track = { slider ->
+                    SliderDefaults.Track(
+                        sliderState = slider,
+                        modifier = Modifier.height(4.dp),
+                        enabled = connected,
+                        thumbTrackGapSize = 0.dp,
+                        drawStopIndicator = null
+                    )
+                }
             )
         } else {
             LinearProgressIndicator(progress = { position.toFloat() / duration },
-                modifier = sliderModifier.padding(vertical = TuneSpacing.Medium))
+                modifier = sliderModifier.padding(vertical = TuneSpacing.Medium).height(4.dp).testTag("music_progress"))
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(musicTime(position), color = TuneColors.Text, fontSize = 13.sp, fontFamily = FontFamily.Monospace)

@@ -21,6 +21,7 @@ import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -170,10 +171,12 @@ internal fun NowPlayingScreen(
                             else -> Unit
                         }
                     }, Modifier.weight(1f))
+                    Spacer(Modifier.height(if (availableHeight < 360.dp) TuneSpacing.Hairline else TuneSpacing.Small))
                     NowPlayingTools(isCar, shuffle, sleepTimer, animationMillis, onToggleShuffle,
                         { sleepPanelOpen = true },
                         Modifier.align(Alignment.CenterHorizontally).widthIn(max = if (isCar) 560.dp else 540.dp)
-                            .fillMaxWidth().padding(bottom = TuneSpacing.Small))
+                            .fillMaxWidth().padding(bottom = TuneSpacing.Small),
+                        compact = true)
                 } else if (station == null) {
                     Column(
                         Modifier.weight(1f).fillMaxWidth().testTag("now_playing_empty"),
@@ -1131,6 +1134,7 @@ internal fun NowPlayingIconButton(
                 if (focused) Modifier.border(2.dp, TuneColors.Primary, shape)
                 else Modifier
             )
+            .onFocusChanged { focused = it.isFocused }
             .clickable(
                 enabled = enabled,
                 role = Role.Button,
@@ -1138,7 +1142,6 @@ internal fun NowPlayingIconButton(
                 indication = null,
                 onClick = onClick
             )
-            .onFocusChanged { focused = it.isFocused }
             .testTag(tag)
             .semantics {
                 role = Role.Button
@@ -1189,7 +1192,8 @@ private fun NowPlayingTools(
     animationMillis: Int,
     onToggleShuffle: () -> Unit,
     onSleepTimer: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    compact: Boolean = false
 ) {
     val shape = RoundedCornerShape(if (isCar) 34.dp else 28.dp)
     // 播放顺序按钮展示"当前生效的模式"，点击切换到另一种；图标、文字、读屏描述共用同一状态。
@@ -1211,28 +1215,18 @@ private fun NowPlayingTools(
     val sleepDescription = remaining?.let {
         stringResource(R.string.now_playing_sleep_accessibility_active, it)
     } ?: stringResource(R.string.now_playing_sleep_accessibility)
+    val shell = if (compact) {
+        Modifier.heightIn(min = if (isCar) 64.dp else 60.dp).height(IntrinsicSize.Min)
+            .clip(shape).background(TuneColors.Surface.copy(alpha = .82f))
+            .border(1.dp, TuneColors.BorderSoft, shape)
+    } else {
+        Modifier.height(if (isCar) 80.dp else 76.dp).clip(shape)
+            .background(Brush.verticalGradient(listOf(TuneColors.Surface.copy(alpha = .88f), TuneColors.Player.copy(alpha = .72f))))
+            .border(1.dp, Brush.linearGradient(listOf(TuneColors.PrimaryLight.copy(alpha = .3f),
+                TuneColors.BorderSoft.copy(alpha = .78f), TuneColors.Accent.copy(alpha = .12f))), shape)
+    }
     Row(
-        modifier.height(if (isCar) 80.dp else 76.dp)
-            .clip(shape)
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        TuneColors.Surface.copy(alpha = .88f),
-                        TuneColors.Player.copy(alpha = .72f)
-                    )
-                )
-            )
-            .border(
-                width = 1.dp,
-                brush = Brush.linearGradient(
-                    listOf(
-                        TuneColors.PrimaryLight.copy(alpha = .3f),
-                        TuneColors.BorderSoft.copy(alpha = .78f),
-                        TuneColors.Accent.copy(alpha = .12f)
-                    )
-                ),
-                shape = shape
-            )
+        modifier.then(shell)
             .focusGroup()
             .testTag("now_playing_tools"),
         verticalAlignment = Alignment.CenterVertically
@@ -1246,12 +1240,13 @@ private fun NowPlayingTools(
             description = orderDescription,
             isCar = isCar,
             animationMillis = animationMillis,
+            compact = compact,
             announceSelected = false,
             modifier = Modifier.weight(1f),
             onClick = onToggleShuffle
         )
         Box(
-            Modifier.width(1.dp).height(if (isCar) 42.dp else 36.dp)
+            Modifier.width(1.dp).height(if (compact) 28.dp else if (isCar) 42.dp else 36.dp)
                 .background(TuneColors.Muted.copy(alpha = .24f))
         )
         ToolbarAction(
@@ -1263,6 +1258,7 @@ private fun NowPlayingTools(
             description = sleepDescription,
             isCar = isCar,
             animationMillis = animationMillis,
+            compact = compact,
             modifier = Modifier.weight(1f),
             onClick = onSleepTimer
         )
@@ -1281,6 +1277,7 @@ private fun ToolbarAction(
     animationMillis: Int,
     announceSelected: Boolean = true,
     modifier: Modifier,
+    compact: Boolean,
     onClick: () -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -1297,8 +1294,8 @@ private fun ToolbarAction(
                 if (focused) Modifier.border(2.dp, TuneColors.Primary, shape)
                 else Modifier
             )
-            .clickable(role = Role.Button, onClick = onClick)
             .onFocusChanged { focused = it.isFocused }
+            .clickable(role = Role.Button, onClick = onClick)
             .testTag(tag)
             .semantics {
                 role = Role.Button
@@ -1306,7 +1303,8 @@ private fun ToolbarAction(
                 if (announceSelected) this.selected = selected
                 this.focused = focused
             }
-            .padding(horizontal = if (isCar) 18.dp else 12.dp),
+            .padding(horizontal = if (compact) 8.dp else if (isCar) 18.dp else 12.dp,
+                vertical = if (compact) 6.dp else 0.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
     ) {
@@ -1317,7 +1315,7 @@ private fun ToolbarAction(
         )
         Spacer(Modifier.width(if (isCar) 10.dp else 8.dp))
         Column(
-            Modifier.animateContentSize(
+            (if (compact) Modifier.weight(1f, fill = false) else Modifier).animateContentSize(
                 animationSpec = tween(if (animationMillis > 0) 160 else 0)
             ),
             horizontalAlignment = Alignment.Start,
@@ -1329,13 +1327,13 @@ private fun ToolbarAction(
                 color = if (selected) TuneColors.Text else contentColor,
                 fontSize = if (isCar) 16.sp else 15.sp,
                 fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-                maxLines = 1,
+                maxLines = if (compact) 2 else 1,
                 overflow = TextOverflow.Ellipsis,
                 style = TuneTextStyle
             )
             if (detail != null) {
                 Box(
-                    Modifier.height(16.dp),
+                    if (compact) Modifier.heightIn(min = 16.dp) else Modifier.height(16.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {
                     Crossfade(

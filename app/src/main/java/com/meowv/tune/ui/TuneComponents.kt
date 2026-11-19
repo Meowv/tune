@@ -63,6 +63,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.currentStateAsState
 import coil3.compose.AsyncImage
 import com.meowv.tune.R
 import com.meowv.tune.domain.Station
@@ -86,9 +89,16 @@ internal fun BrandLogo(modifier: Modifier = Modifier) {
  * 系统关闭动画（Animator duration scale = 0）时退化为静态条，避免无谓消耗。
  */
 @Composable
-internal fun PlayingWaveBars(modifier: Modifier = Modifier, color: Color = TuneColors.Primary) {
+internal fun PlayingWaveBars(
+    modifier: Modifier = Modifier,
+    color: Color = TuneColors.Primary,
+    animationsEnabled: Boolean = true
+) {
+    val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
     val motionEnabled = rememberMotionEnabled()
-    val fractions: List<androidx.compose.runtime.State<Float>> = if (motionEnabled) {
+    val fractions: List<androidx.compose.runtime.State<Float>> = if (
+        animationsEnabled && motionEnabled && lifecycle.isAtLeast(Lifecycle.State.RESUMED)
+    ) {
         val transition = rememberInfiniteTransition(label = "playing_wave")
         List(WAVE_BAR_COUNT) { index ->
             transition.animateFloat(
