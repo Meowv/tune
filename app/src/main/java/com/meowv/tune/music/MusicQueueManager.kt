@@ -35,6 +35,7 @@ internal class MusicQueueManager(
         }
     private var cursor: String? = null
     private var exhausted = false
+    private var radioExhausted = false
     private var issued = 0L
     private var committed = -1L
     private var index = -1
@@ -42,7 +43,7 @@ internal class MusicQueueManager(
 
     init { require(batchSize in 1..50 && lowWater >= 1 && historyLimit >= 2) }
     val canPrevious: Boolean get() = index > 0
-    val canNext: Boolean get() = index < history.lastIndex || pending.isNotEmpty() || !exhausted
+    val canNext: Boolean get() = index < history.lastIndex || pending.isNotEmpty() || !exhausted || !radioExhausted
     val nextTrack: MusicTrack? get() = if (index < history.lastIndex) history[index + 1] else nextCandidate()
     val needsReplenish: Boolean get() = pending.size + (history.lastIndex - index).coerceAtLeast(0) < lowWater && !exhausted
     val sessionVersion: Long get() = revision
@@ -74,6 +75,7 @@ internal class MusicQueueManager(
     suspend fun next(): MusicSelection? {
         if (index < history.lastIndex) return MusicSelection(++issued, history[index + 1], index + 1)
         if (pending.isEmpty()) replenish(minimumOnly = true)
+        if (pending.isEmpty() && exhausted && !radioExhausted) replenishRadio()
         currentCoroutineContext().ensureActive()
         val track = nextCandidate() ?: return null
         pending.remove(track)
@@ -108,6 +110,21 @@ internal class MusicQueueManager(
         if (added == 0) { exhausted = true; cursor = null }
     }
 
+    private suspend fun replenishRadio() = load.withLock {
+        if (pending.isNotEmpty() || !exhausted || radioExhausted) return@withLock
+        val owner = revision
+        val page = repository().radioRecommendations()
+        currentCoroutineContext().ensureActive()
+        if (owner != revision) return@withLock
+        val known = considered + played + skipped + history.map { it.id }
+        val fresh = page.filter { it.canStartPlayback && it.id !in known }.distinctBy { it.id }
+        radioExhausted = fresh.isEmpty()
+        fresh.forEach { track ->
+            pending.addLast(track)
+            remember(track.id)
+        }
+    }
+
     fun recordSuccessfulPlayback(selection: MusicSelection): Boolean {
         if (selection.token != issued || committed == selection.token) return false
         committed = selection.token
@@ -128,7 +145,7 @@ internal class MusicQueueManager(
         invalidate()
         pending.clear(); history.clear(); considered.clear(); played.clear(); skipped.clear(); seenCursors.clear()
         clearSkipSignal()
-        cursor = null; exhausted = false; index = -1; randomNext = null
+        cursor = null; exhausted = false; radioExhausted = false; index = -1; randomNext = null
         if (seed != null) {
             val tracks = seed.tracks.filter { it.canStartPlayback }.distinctBy { it.id }
             val selected = tracks.indexOfFirst { it.id == startAt }

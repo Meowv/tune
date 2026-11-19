@@ -8,6 +8,24 @@ import org.junit.Test
 class MusicQueueManagerTest {
     private val tracks = (1..4).map { MusicTrack("$it", "Song $it", listOf("qix")) }
 
+    @Test fun radioOnlyFillsAnExhaustedQueueAndStopsOnRepeats() = runBlocking {
+        var calls = 0
+        val source = object : MusicRepository by FakeMusicRepository(tracks.take(2)) {
+            override suspend fun radioRecommendations(): List<MusicTrack> {
+                calls++
+                return listOf(tracks[0], tracks[2], tracks[3].copy(availability = "unavailable"))
+            }
+        }
+        val queue = MusicQueueManager({ source })
+        repeat(2) { index -> assertEquals(tracks[index], queue.next()?.track) }
+        assertEquals(0, calls)
+        assertEquals(tracks[2], queue.next()?.track)
+        assertEquals(1, calls)
+        assertNull(queue.next())
+        assertFalse(queue.canNext)
+        assertEquals(2, calls)
+    }
+
     @Test fun shuffledQueueKeepsEarlierTracksAndThePreparedCandidate() = runBlocking {
         val seed = MusicQueueSeed(tracks, null)
         val queue = MusicQueueManager({ FakeMusicRepository(tracks) })

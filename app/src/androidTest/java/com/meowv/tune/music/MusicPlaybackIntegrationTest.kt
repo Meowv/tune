@@ -40,10 +40,28 @@ class MusicPlaybackIntegrationTest {
     private var catalog = tracks
     private val resolves = ConcurrentHashMap<String, AtomicInteger>()
     private var resolveOverride: (suspend (String) -> Unit)? = null
+    private var radioOverride: (() -> List<MusicTrack>)? = null
     private var recommendationsOverride: (suspend (Int, String?) -> MusicPage)? = null
     private var audioOverride: (PlayableAudio, Int, String?) -> PlayableAudio = { audio, _, _ -> audio }
     private var alternateOverride: (suspend (String, String) -> PlayableAudio)? = null
     private var media: MediaController? = null
+
+    @Test fun endOfOrdinaryQueueContinuesWithRadioFallback() = runBlocking {
+        val calls = AtomicInteger()
+        recommendationsOverride = { _, _ -> MusicPage(listOf(tracks[0])) }
+        radioOverride = {
+            calls.incrementAndGet()
+            listOf(tracks[0], tracks[1])
+        }
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            assertEquals(0, calls.get())
+            connection.dispatch(PlayerCommand.Seek(11_500))
+            awaitMusic(2)
+            assertEquals(1, calls.get())
+        }
+    }
 
     @Test fun musicSeeksContinuesAtEofAndPreviousUsesConfirmedHistory() = runBlocking {
         withMusic {
@@ -877,6 +895,7 @@ class MusicPlaybackIntegrationTest {
         val fake = FakeMusicRepository(catalog)
         app.testMusicRepository = object : MusicRepository {
             override suspend fun search(query: String, limit: Int, cursor: String?) = fake.search(query, limit, cursor)
+            override suspend fun radioRecommendations() = radioOverride?.invoke().orEmpty()
             override suspend fun recommendations(limit: Int, cursor: String?) =
                 recommendationsOverride?.invoke(limit, cursor) ?: fake.recommendations(limit, cursor)
             override suspend fun resolve(trackId: String, preferredProviderId: String?): PlayableAudio {

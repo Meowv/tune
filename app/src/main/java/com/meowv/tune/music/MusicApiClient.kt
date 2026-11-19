@@ -49,6 +49,12 @@ internal class MusicApiClient(
         return MusicJson.page(request("search", limit, cursor, query))
     }
     override suspend fun recommendations(limit: Int, cursor: String?) = MusicJson.page(request("recommendations", limit, cursor), recommendation = true)
+    override suspend fun radioRecommendations(): List<MusicTrack> = try {
+        MusicJson.page(request("recommendations/radio", 20, null), recommendation = true).items
+    } catch (failure: MusicException) {
+        if (failure.failure == MusicFailure.TRACK_NOT_FOUND) emptyList() else throw failure
+    }
+
     override suspend fun lyrics(trackId: String, providerId: String): List<MusicLyricLine> {
         val url = baseUrl.newBuilder().addPathSegment("lyrics").addQueryParameter("trackId", trackId)
             .addQueryParameter("providerId", providerId).build()
@@ -79,7 +85,7 @@ internal class MusicApiClient(
 
     private suspend fun request(path: String, limit: Int, cursor: String?, query: String? = null): String {
         if (limit !in 1..50 || cursor != null && cursor.length !in 1..128) throw MusicException(MusicFailure.INVALID_REQUEST)
-        val url = baseUrl.newBuilder().addPathSegment(path).addQueryParameter("limit", limit.toString()).apply {
+        val url = baseUrl.newBuilder().addPathSegments(path).addQueryParameter("limit", limit.toString()).apply {
             query?.let { addQueryParameter("q", it) }; cursor?.let { addQueryParameter("cursor", it) }
         }.build()
         return execute(Request.Builder().url(url).get())
