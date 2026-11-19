@@ -1,14 +1,16 @@
 package com.meowv.tune.music
 
 import com.meowv.tune.domain.music.*
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.text.Normalizer
+import java.time.Instant
 import java.util.Locale
 
 internal data class MusicSelection(val token: Long, val track: MusicTrack, internal val historyIndex: Int? = null)
@@ -18,7 +20,8 @@ internal class MusicQueueManager(
     private val batchSize: Int = 20,
     private val lowWater: Int = 8,
     private val historyLimit: Int = 100,
-    private val nowMillis: () -> Long = { System.nanoTime() / 1_000_000 }
+    private val nowMillis: () -> Long = { System.nanoTime() / 1_000_000 },
+    private val epochSeconds: () -> Long = { Instant.now().epochSecond }
 ) {
     private val pending = ArrayDeque<MusicTrack>()
     private val history = mutableListOf<MusicTrack>()
@@ -38,8 +41,15 @@ internal class MusicQueueManager(
         }
     private var cursor: String? = null
     private var exhausted = false
-    private var radioExhausted = false
-    private var searchExhausted = false
+    private data class SearchPosition(
+        val hour: Long, val query: String, val cursor: String? = null,
+        val done: Boolean = false, val seen: Set<String> = emptySet()
+    )
+    private var searchPosition: SearchPosition? = null
+    private val radioBuffer = ArrayDeque<MusicTrack>()
+    private val searchBuffer = ArrayDeque<MusicTrack>()
+    private var lastRadioLoad: Long? = null
+    private var fallbackFailure: MusicException? = null
     private var emptyCycles = 0
     private var issued = 0L
     private var committed = -1L
@@ -48,11 +58,13 @@ internal class MusicQueueManager(
 
     init { require(batchSize in 1..50 && lowWater >= 1 && historyLimit >= 2) }
     val canPrevious: Boolean get() = index > 0
-    val sourcesExhausted: Boolean get() = exhausted && radioExhausted && searchExhausted
-    val canCycle: Boolean get() = sourcesExhausted && emptyCycles < MAX_EMPTY_CYCLES
-    val canNext: Boolean get() = index < history.lastIndex || pending.isNotEmpty() || !sourcesExhausted || canCycle
+    val canNext: Boolean get() = index < history.lastIndex || pending.isNotEmpty() ||
+        !exhausted || fallbackFailure == null && emptyCycles < MAX_EMPTY_CYCLES
     val nextTrack: MusicTrack? get() = if (index < history.lastIndex) history[index + 1] else nextCandidate()
-    val needsReplenish: Boolean get() = pending.size + (history.lastIndex - index).coerceAtLeast(0) < lowWater && !exhausted
+    private val remaining: Int get() = pending.size + (history.lastIndex - index).coerceAtLeast(0)
+    val needsReplenish: Boolean get() = remaining < lowWater && !exhausted
+    val needsFallbackPrefetch: Boolean get() = exhausted && remaining in 1..2 &&
+        fallbackFailure == null && emptyCycles < MAX_EMPTY_CYCLES
     val sessionVersion: Long get() = revision
 
     fun invalidate() { issued++ }
@@ -81,9 +93,18 @@ internal class MusicQueueManager(
 
     suspend fun next(): MusicSelection? {
         if (index < history.lastIndex) return MusicSelection(++issued, history[index + 1], index + 1)
-        if (pending.isEmpty()) replenish(minimumOnly = true)
-        if (pending.isEmpty() && exhausted && (!radioExhausted || !searchExhausted || canCycle)) replenishFallbacks()
+        val owner = revision
+        if (pending.isEmpty() && !exhausted) replenish(minimumOnly = true)
+        if (pending.isEmpty() && exhausted && owner == revision) load.withLock {
+            if (owner != revision) return@withLock
+            fallbackFailure?.let { throw it }
+            repeat(MAX_EMPTY_CYCLES) {
+                if (owner != revision || pending.isNotEmpty() || emptyCycles >= MAX_EMPTY_CYCLES) return@withLock
+                refillRound()
+            }
+        }
         currentCoroutineContext().ensureActive()
+        if (owner != revision) return null
         val track = nextCandidate() ?: return null
         pending.remove(track)
         randomNext = null
@@ -117,51 +138,118 @@ internal class MusicQueueManager(
         if (added == 0) { exhausted = true; cursor = null }
     }
 
-    private suspend fun replenishFallbacks() = load.withLock {
-        val owner = revision
-        if (pending.isNotEmpty()) return@withLock
-        if (sourcesExhausted) {
-            if (!canCycle) return@withLock
-            radioExhausted = false
-            searchExhausted = false
-        }
-
-        val last = history.lastOrNull()
-        val (radio, search) = coroutineScope {
-            val radioCall = async {
-                if (radioExhausted) emptyList() else safe { repository().radioRecommendations() }.orEmpty()
-            }
-            val searchCall = async {
-                if (searchExhausted) emptyList<MusicTrack>() else {
-                    val queries = safe { repository().fallbackSearchQueries(last) }.orEmpty()
-                    queries.flatMap { query -> safe { searchAll(query) }.orEmpty() }
-                }
-            }
-            radioCall.await() to searchCall.await()
-        }
-        currentCoroutineContext().ensureActive()
-        if (owner != revision) return@withLock
-
-        val known = HashSet(considered + played + skipped + pending.map { it.id } + history.map { it.id })
-        val before = HashSet(known)
-        var added = 0
-        radio.filter { it.canStartPlayback && it.id !in before }.forEach { track ->
-            if (known.add(track.id)) { pending.addLast(track); remember(track.id); added++ }
-        }
-        search.filter { it.canStartPlayback && it.id !in before }.forEach { track ->
-            if (known.add(track.id)) { pending.addLast(track); remember(track.id); added++ }
-        }
-        radioExhausted = radio.none { it.canStartPlayback && it.id !in before }
-        searchExhausted = search.none { it.canStartPlayback && it.id !in before }
-        emptyCycles = if (added == 0) emptyCycles + 1 else 0
+    suspend fun prefetchFallback() = load.withLock {
+        if (needsFallbackPrefetch) refillRound(countEmpty = false)
     }
 
-    private suspend fun <T> safe(call: suspend () -> T): T? = try {
-        call()
-    } catch (cancelled: CancellationException) {
-        throw cancelled
-    } catch (_: Exception) {
-        null
+    private suspend fun refillRound(countEmpty: Boolean = true) {
+        val owner = revision
+        val source = repository()
+        val context = history.getOrNull(index)
+        var hour = Math.floorDiv(epochSeconds(), 3600L)
+        var query = source.fallbackSearchQueries(context).firstOrNull()?.trim().orEmpty()
+        val currentHour = Math.floorDiv(epochSeconds(), 3600L)
+        if (hour != currentHour) {
+            hour = currentHour
+            query = source.fallbackSearchQueries(context).firstOrNull()?.trim().orEmpty()
+        }
+        if (searchPosition?.let { it.hour == hour && it.query == query } != true) {
+            searchBuffer.clear()
+            searchPosition = SearchPosition(hour, query)
+        }
+        var position = checkNotNull(searchPosition)
+        val known = considered + played + skipped + pending.map { it.id } + history.map { it.id }
+        fun fresh(track: MusicTrack) = track.canStartPlayback && track.id !in known
+
+        val radio = mutableListOf<MusicTrack>()
+        val search = mutableListOf<MusicTrack>()
+        var radioFetched = false
+        var radioError: MusicException? = null
+        var searchError: MusicException? = null
+        val fetchRadio = radioBuffer.none(::fresh) &&
+            lastRadioLoad?.let { nowMillis() - it < RADIO_REUSE_MS } != true
+        val buffered = searchBuffer.count(::fresh) + radioBuffer.count(::fresh)
+        val fetchSearch = !position.done && buffered < FALLBACK_BATCH &&
+            query.length in 1..100 && query.none(Char::isISOControl)
+        var timedOut = false
+        try {
+            coroutineScope {
+                val radioRequest = async {
+                    if (fetchRadio) try {
+                        radio += source.radioRecommendations()
+                        radioFetched = true
+                    } catch (failure: MusicException) {
+                        if (failure.failure in STOP_FALLBACK) throw failure
+                        radioError = failure
+                    }
+                }
+                val searchRequest = async {
+                    if (fetchSearch) try {
+                        repeat(SEARCH_PAGES_PER_ROUND) {
+                            if (position.done || search.asSequence().filter(::fresh).distinctBy { it.id }
+                                    .take(FALLBACK_BATCH).count() + buffered >= FALLBACK_BATCH) return@async
+                            val page = source.search(query, SEARCH_PAGE_SIZE, position.cursor)
+                            currentCoroutineContext().ensureActive()
+                            search += page.items
+                            val cursor = page.nextCursor?.takeUnless { it == position.cursor || it in position.seen }
+                            position = position.copy(cursor = cursor, done = cursor == null,
+                                seen = position.seen + listOfNotNull(cursor))
+                            if (cursor == null && page.partial && search.none(::fresh)) {
+                                searchError = MusicException(MusicFailure.SOURCE_UNAVAILABLE)
+                                position = position.copy(done = false)
+                                return@async
+                            }
+                        }
+                    } catch (failure: MusicException) {
+                        if (failure.failure in STOP_FALLBACK) throw failure
+                        if (failure.failure == MusicFailure.INVALID_REQUEST && position.cursor != null) {
+                            // 服务重启或游标过期后，下一轮从同一关键词的第一页继续。
+                            position = SearchPosition(hour, query)
+                        } else {
+                            searchError = failure
+                        }
+                    }
+                }
+                timedOut = withTimeoutOrNull(FALLBACK_ROUND_MS) {
+                    radioRequest.await()
+                    if (radio.any(::fresh) || radioBuffer.any(::fresh)) {
+                        withTimeoutOrNull(SEARCH_GRACE_MS) { searchRequest.await() }
+                    } else searchRequest.await()
+                    false
+                } ?: true
+                searchRequest.cancelAndJoin()
+                radioRequest.cancelAndJoin()
+            }
+        } catch (failure: MusicException) {
+            if (owner == revision && failure.failure in STOP_FALLBACK) fallbackFailure = failure
+            throw failure
+        }
+
+        currentCoroutineContext().ensureActive()
+        if (owner != revision) return
+        if (radioFetched) lastRadioLoad = nowMillis()
+        searchPosition = position
+        radioBuffer.addAll(radio.filter(::fresh))
+        searchBuffer.addAll(search.filter(::fresh))
+
+        var added = 0
+        for (buffer in listOf(radioBuffer, searchBuffer)) {
+            while (added < FALLBACK_BATCH && buffer.isNotEmpty()) {
+                val track = buffer.removeFirst()
+                if (!fresh(track) || track.id in considered) continue
+                pending.addLast(track)
+                remember(track.id)
+                added++
+            }
+        }
+        if (added > 0) {
+            emptyCycles = 0
+            return
+        }
+        if (timedOut || radioError != null || searchError != null) {
+            throw radioError ?: searchError ?: MusicException(MusicFailure.SOURCE_TIMEOUT)
+        }
+        if (countEmpty) emptyCycles++
     }
 
     fun recordSuccessfulPlayback(selection: MusicSelection): Boolean {
@@ -184,7 +272,9 @@ internal class MusicQueueManager(
         invalidate()
         pending.clear(); history.clear(); considered.clear(); played.clear(); skipped.clear(); seenCursors.clear()
         clearSkipSignal()
-        cursor = null; exhausted = false; radioExhausted = false; searchExhausted = false; emptyCycles = 0
+        cursor = null; exhausted = false; emptyCycles = 0
+        searchPosition = null; lastRadioLoad = null; fallbackFailure = null
+        radioBuffer.clear(); searchBuffer.clear()
         index = -1; randomNext = null
         if (seed != null) {
             val tracks = seed.tracks.filter { it.canStartPlayback }.distinctBy { it.id }
@@ -197,7 +287,7 @@ internal class MusicQueueManager(
     }
 
     private fun remember(id: String) {
-        remember(considered, id)
+        considered.add(id)
     }
 
     private fun remember(window: LinkedHashSet<String>, id: String) {
@@ -227,23 +317,15 @@ internal class MusicQueueManager(
         Normalizer.normalize(it.trim(), Normalizer.Form.NFKC).lowercase(Locale.ROOT)
     }.filter { it.isNotEmpty() }.toSet()
 
-    private suspend fun searchAll(query: String): List<MusicTrack> {
-        if (query.trim().length !in 1..100 || query.any(Char::isISOControl)) return emptyList()
-        val items = mutableListOf<MusicTrack>()
-        val seenCursors = HashSet<String>()
-        var cursor: String? = null
-        for (ignored in 0 until MAX_SEARCH_PAGES) {
-            val page = repository().search(query, 50, cursor)
-            items += page.items
-            val next = page.nextCursor?.takeUnless { it == cursor }
-            if (next == null || !seenCursors.add(next)) break
-            cursor = next
-        }
-        return items.distinctBy { it.id }
-    }
-
     private companion object {
         const val MAX_EMPTY_CYCLES = 2
-        const val MAX_SEARCH_PAGES = 20
+        const val SEARCH_PAGES_PER_ROUND = 2
+        const val SEARCH_PAGE_SIZE = 20
+        const val FALLBACK_BATCH = 12
+        const val FALLBACK_ROUND_MS = 2_500L
+        const val SEARCH_GRACE_MS = 250L
+        const val RADIO_REUSE_MS = 15_000L
+        val STOP_FALLBACK = setOf(MusicFailure.RATE_LIMITED, MusicFailure.CONNECTION, MusicFailure.TLS,
+            MusicFailure.UNAUTHORIZED, MusicFailure.FORBIDDEN, MusicFailure.NOT_CONFIGURED)
     }
 }

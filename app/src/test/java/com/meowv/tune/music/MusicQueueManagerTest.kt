@@ -30,33 +30,149 @@ class MusicQueueManagerTest {
         assertEquals(1, radio)
     }
 
-    @Test fun radioThenSearchFillAnExhaustedQueueAndCycleAgain() = runBlocking {
+    @Test fun radioThenSearchFillAnExhaustedQueueAndStopAfterTwoEmptyRounds() = runBlocking {
         var radioCalls = 0
-        var searchCalls = 0
+        val searchCursors = mutableListOf<String?>()
         val source = object : MusicRepository by FakeMusicRepository(tracks.take(2)) {
             override suspend fun radioRecommendations(): List<MusicTrack> {
                 radioCalls++
                 return listOf(tracks[2], tracks[3].copy(availability = "unavailable"), tracks[0], tracks[1])
             }
             override suspend fun search(query: String, limit: Int, cursor: String?): MusicPage {
-                searchCalls++
-                return MusicPage(listOf(tracks[3]))
+                assertEquals(20, limit)
+                searchCursors += cursor
+                return when (cursor) {
+                    null -> MusicPage(listOf(tracks[3]), "first")
+                    "first" -> MusicPage(emptyList(), "second")
+                    "second" -> MusicPage(emptyList(), "third")
+                    "third" -> MusicPage(emptyList(), "fourth")
+                    else -> MusicPage(emptyList())
+                }
+            }
+        }
+        val queue = MusicQueueManager({ source }, epochSeconds = { 0 })
+        repeat(2) { index -> assertEquals(tracks[index], queue.next()?.track) }
+        assertEquals(0, radioCalls)
+        assertTrue(searchCursors.isEmpty())
+        assertEquals(tracks[2], queue.next()?.track)
+        assertEquals(tracks[3], queue.next()?.track)
+        assertNull(queue.next())
+        assertFalse(queue.canNext)
+        assertEquals(1, radioCalls)
+        assertEquals(listOf(null, "first", "second", "third", "fourth"), searchCursors)
+    }
+
+    @Test fun radioReturnsWhileSearchIsStillWaiting() = runBlocking {
+        val searchStarted = CompletableDeferred<Unit>()
+        val searchCancelled = CompletableDeferred<Unit>()
+        val source = object : MusicRepository by FakeMusicRepository(emptyList()) {
+            override suspend fun radioRecommendations(): List<MusicTrack> {
+                searchStarted.await()
+                return listOf(tracks[0])
+            }
+            override suspend fun search(query: String, limit: Int, cursor: String?): MusicPage {
+                searchStarted.complete(Unit)
+                try { awaitCancellation() } finally { searchCancelled.complete(Unit) }
             }
         }
         val queue = MusicQueueManager({ source })
-        repeat(2) { index -> assertEquals(tracks[index], queue.next()?.track) }
-        assertEquals(0, radioCalls)
-        assertEquals(0, searchCalls)
-        assertEquals(tracks[2], queue.next()?.track)
-        assertEquals(1, radioCalls)
-        assertEquals(1, searchCalls)
-        assertEquals(tracks[3], queue.next()?.track)
-        assertNull(queue.next())
-        assertTrue(queue.canNext)
-        assertNull(queue.next())
-        assertFalse(queue.canNext)
-        assertEquals(3, radioCalls)
-        assertEquals(3, searchCalls)
+        assertEquals(tracks[0], withTimeout(1500) { queue.next()?.track })
+        assertTrue(searchCancelled.isCompleted)
+    }
+
+    @Test fun foregroundJoinsPrefetchWithoutAnotherRequest() = runBlocking {
+        var calls = 0
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val source = object : MusicRepository by FakeMusicRepository(emptyList()) {
+            override suspend fun radioRecommendations(): List<MusicTrack> {
+                calls++
+                started.complete(Unit)
+                release.await()
+                return listOf(tracks[1])
+            }
+        }
+        val queue = MusicQueueManager({ source })
+        queue.reset(MusicQueueSeed(listOf(tracks[0]), null))
+        val background = launch { queue.prefetchFallback() }
+        started.await()
+        assertEquals(tracks[0], queue.next()?.track)
+        val foreground = async { queue.next()?.track }
+        yield()
+        release.complete(Unit)
+        assertEquals(tracks[1], foreground.await())
+        background.join()
+        assertEquals(1, calls)
+    }
+
+    @Test fun lateFallbackCannotBeAddedToTheNewSession() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val source = object : MusicRepository by FakeMusicRepository(emptyList()) {
+            override suspend fun radioRecommendations(): List<MusicTrack> {
+                started.complete(Unit)
+                release.await()
+                return listOf(tracks[0])
+            }
+        }
+        val queue = MusicQueueManager({ source })
+        queue.reset(MusicQueueSeed(emptyList(), null))
+        val old = async { queue.next() }
+        started.await()
+        queue.reset(MusicQueueSeed(listOf(tracks[1]), null))
+        release.complete(Unit)
+        assertNull(old.await())
+        assertEquals(tracks[1], queue.next()?.track)
+    }
+
+    @Test fun fatalFallbackErrorsStopTheRoundWithTheirOriginalReason() = runBlocking {
+        for (reason in listOf(MusicFailure.RATE_LIMITED, MusicFailure.CONNECTION, MusicFailure.UNAUTHORIZED)) {
+            var calls = 0
+            val source = object : MusicRepository by FakeMusicRepository(emptyList()) {
+                override suspend fun radioRecommendations(): List<MusicTrack> {
+                    calls++
+                    throw MusicException(reason, 27)
+                }
+            }
+            val queue = MusicQueueManager({ source })
+            repeat(2) {
+                val failure = runCatching { queue.next() }.exceptionOrNull() as MusicException
+                assertEquals(reason, failure.failure)
+                assertEquals(27L, failure.retryAfterSeconds)
+            }
+            assertEquals(1, calls)
+            assertFalse(queue.canNext)
+        }
+    }
+
+    @Test fun hourlyRotationDiscardsUnqueuedSearchTracksAndRetainsSessionDedupe() = runBlocking {
+        var epoch = 28_799L
+        val queries = mutableListOf<Pair<String, String?>>()
+        val old = (1..13).map { MusicTrack("old-$it", "Old $it", listOf("qix")) }
+        val source = object : MusicRepository by FakeMusicRepository(emptyList()) {
+            override fun fallbackSearchQueries(context: MusicTrack?) = listOf(fallbackQuery(epoch))
+            override suspend fun search(query: String, limit: Int, cursor: String?): MusicPage {
+                queries += query to cursor
+                return if (query == "爵士") MusicPage(old, "old-cursor")
+                    else MusicPage(listOf(old.first(), tracks[0]))
+            }
+        }
+        val queue = MusicQueueManager({ source }, epochSeconds = { epoch })
+        old.take(12).forEach { assertEquals(it, queue.next()?.track) }
+        epoch++
+        assertEquals(tracks[0], queue.next()?.track)
+        assertEquals(listOf("爵士" to null, "华语流行" to null), queries)
+    }
+
+    @Test fun eightStylesUseShanghaiHourBoundariesIncludingNegativeEpoch() {
+        val start = java.time.OffsetDateTime.parse("2026-11-19T00:00:00+08:00").toEpochSecond()
+        val styles = listOf("华语流行", "摇滚", "民谣", "电子", "说唱", "轻音乐", "ACG", "爵士")
+        for (hour in 0 until 24) {
+            val boundary = start + hour * 3600
+            assertEquals(styles[hour % 8], fallbackQuery(boundary))
+            assertEquals(styles[(hour + 7) % 8], fallbackQuery(boundary - 1))
+        }
+        assertEquals("爵士", fallbackQuery(-1))
     }
 
     @Test fun fallbackSearchQueriesUseRepositoryExtensionPoint() = runBlocking {
@@ -111,15 +227,14 @@ class MusicQueueManagerTest {
         val queue = MusicQueueManager({ FakeMusicRepository(tracks.take(2)) })
         repeat(2) { assertTrue(queue.recordSuccessfulPlayback(queue.next()!!)) }
         assertNull(queue.next())
-        assertTrue(queue.canNext)
-        assertNull(queue.next())
         assertFalse(queue.canNext)
+        assertNull(queue.next())
         var requests = 0
         val repeating = object : MusicRepository {
             override suspend fun recommendations(limit: Int, cursor: String?): MusicPage {
                 requests++; return MusicPage(listOf(tracks[0], tracks[0]), "same")
             }
-            override suspend fun search(query: String, limit: Int, cursor: String?) = error("unused")
+            override suspend fun search(query: String, limit: Int, cursor: String?) = MusicPage(emptyList())
             override suspend fun resolve(trackId: String, preferredProviderId: String?) = error("unused")
         }
         val deduped = MusicQueueManager({ repeating })
@@ -262,7 +377,7 @@ class MusicQueueManagerTest {
                 requests++
                 return MusicPage(listOf(tracks[0]), if (cursor == "a") "b" else "a")
             }
-            override suspend fun search(query: String, limit: Int, cursor: String?) = error("unused")
+            override suspend fun search(query: String, limit: Int, cursor: String?) = MusicPage(emptyList())
             override suspend fun resolve(trackId: String, preferredProviderId: String?) = error("unused")
         }
         val queue = MusicQueueManager({ repo })

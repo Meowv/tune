@@ -194,11 +194,13 @@ internal class MusicPlaybackEngine(
         val job = scope.launch(start = CoroutineStart.LAZY) {
             var selected = false
             try {
+                val selectedTrack = withTimeout(8000) { select() }
+                    ?: throw MusicException(MusicFailure.NO_PLAYABLE_MATCH)
+                ensureActive()
+                selected = true
+                if (!preserveCurrent) publishState(state.copy(music = selectedTrack.track))
                 val result = withTimeout(8000) {
-                    var selection = select() ?: throw MusicException(MusicFailure.NO_PLAYABLE_MATCH)
-                    ensureActive()
-                    selected = true
-                    if (!preserveCurrent) publishState(state.copy(music = selection.track))
+                    var selection = selectedTrack
                     val source = repository() ?: throw MusicException(MusicFailure.NOT_CONFIGURED)
                     val ahead = prepared?.await()?.getOrThrow()
                     ensureActive()
@@ -480,12 +482,15 @@ internal class MusicPlaybackEngine(
         if (!active || loading || !desiredPlay || !confirmed || !itemMatches() || !player.isPlaying ||
             NetworkPolicy.evaluate(network.value) != NetworkDecision.ALLOWED) return
         try { requestGate.check() } catch (_: MusicException) { return }
-        if (!refillSuppressed && queue.needsReplenish && refill?.isActive != true) {
+        if (!refillSuppressed && (queue.needsReplenish || queue.needsFallbackPrefetch) && refill?.isActive != true) {
             val owner = queue.sessionVersion
             refillSuppressed = true
             refill = scope.launch {
                 try {
-                    withTimeout(8000) { queue.replenish() }
+                    withTimeout(8000) {
+                        if (queue.needsReplenish) queue.replenish()
+                        else queue.prefetchFallback()
+                    }
                     ensureActive()
                     if (active && owner == queue.sessionVersion) {
                         refillSuppressed = true

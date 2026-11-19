@@ -40,6 +40,7 @@ class MusicPlaybackIntegrationTest {
     private var catalog = tracks
     private val resolves = ConcurrentHashMap<String, AtomicInteger>()
     private var resolveOverride: (suspend (String) -> Unit)? = null
+    private var searchOverride: (suspend (String, String?) -> MusicPage)? = null
     private var radioOverride: (() -> List<MusicTrack>)? = null
     private var recommendationsOverride: (suspend (Int, String?) -> MusicPage)? = null
     private var audioOverride: (PlayableAudio, Int, String?) -> PlayableAudio = { audio, _, _ -> audio }
@@ -60,6 +61,31 @@ class MusicPlaybackIntegrationTest {
             connection.dispatch(PlayerCommand.Seek(11_500))
             awaitMusic(2)
             assertEquals(1, calls.get())
+        }
+    }
+
+    @Test fun playbackRefillsAgainFromSearchCursorAfterRadioBatchEnds() = runBlocking {
+        val radioCalls = AtomicInteger()
+        val searchCalls = AtomicInteger()
+        recommendationsOverride = { _, _ -> MusicPage(listOf(tracks[0])) }
+        radioOverride = { radioCalls.incrementAndGet(); listOf(tracks[1]) }
+        searchOverride = { _, cursor ->
+            searchCalls.incrementAndGet()
+            when (cursor) {
+                null -> MusicPage(emptyList(), "search-2")
+                "search-2" -> MusicPage(emptyList(), "search-3")
+                else -> MusicPage(listOf(tracks[2]))
+            }
+        }
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic())
+            awaitMusic(1)
+            connection.dispatch(PlayerCommand.Seek(11_500))
+            awaitMusic(2)
+            connection.dispatch(PlayerCommand.Seek(11_500))
+            awaitMusic(3)
+            assertEquals(1, radioCalls.get())
+            assertEquals(3, searchCalls.get())
         }
     }
 
@@ -894,7 +920,8 @@ class MusicPlaybackIntegrationTest {
         app.musicMediaRequests.clear()
         val fake = FakeMusicRepository(catalog)
         app.testMusicRepository = object : MusicRepository {
-            override suspend fun search(query: String, limit: Int, cursor: String?) = fake.search(query, limit, cursor)
+            override suspend fun search(query: String, limit: Int, cursor: String?) =
+                searchOverride?.invoke(query, cursor) ?: fake.search(query, limit, cursor)
             override suspend fun radioRecommendations() = radioOverride?.invoke().orEmpty()
             override suspend fun recommendations(limit: Int, cursor: String?) =
                 recommendationsOverride?.invoke(limit, cursor) ?: fake.recommendations(limit, cursor)
