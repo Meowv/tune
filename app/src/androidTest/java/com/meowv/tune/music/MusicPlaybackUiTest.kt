@@ -56,6 +56,15 @@ class MusicPlaybackUiTest {
                 compose.onNodeWithText("不存在的曲目").assertDoesNotExist()
                 compose.onNodeWithTag("music_feed_track_ui-2").performClick()
                 withTimeout(6000) { connection.state.first { it.phase == PlaybackPhase.PLAYING && it.music?.id == "ui-2" } }
+                val rowControl = compose.onNodeWithTag("music_track_action_ui-2", useUnmergedTree = true)
+                rowControl.performTouchInput { click() }
+                withTimeout(3000) { connection.state.first { it.phase == PlaybackPhase.PAUSED && it.music?.id == "ui-2" } }
+                compose.onNodeWithTag("now_playing_screen").assertDoesNotExist()
+                compose.onNodeWithTag("music_feed").assertIsDisplayed()
+
+                rowControl.performTouchInput { click() }
+                withTimeout(6000) { connection.state.first { it.phase == PlaybackPhase.PLAYING && it.music?.id == "ui-2" } }
+                compose.onNodeWithTag("now_playing_screen").assertDoesNotExist()
                 compose.onNodeWithTag("layout_card").performClick()
                 compose.onNodeWithTag("music_cards").assertIsDisplayed()
                 capture("cards")

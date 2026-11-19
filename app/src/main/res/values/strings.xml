@@ -176,7 +176,6 @@
     <string name="update_value_unknown">暂无信息</string>
     <string name="update_notes_expand">查看完整更新日志 ↓</string>
     <string name="update_notes_collapse">收起更新日志 ↑</string>
-  <string name="music_open_player">打开播放页</string>
   <string name="music_clear_query">清空搜索</string>
   <string name="music_seek_description">%1$d 分 %2$d 秒，共 %3$d 分 %4$d 秒</string>
 </resources>

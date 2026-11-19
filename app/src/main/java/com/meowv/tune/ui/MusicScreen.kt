@@ -116,16 +116,18 @@ internal fun MusicScreen(
                 return@Column
             }
 
-            val play: (MusicTrack) -> Unit = { song ->
-                if (song.id == currentId && playback?.phase != PlaybackPhase.ERROR) onOpenPlayer()
-                else onCommand(PlayerCommand.PlayMusic(song, MusicQueueSeed(browse.tracks, null)))
+            val startTrack: (MusicTrack) -> Unit = { song ->
+                onCommand(PlayerCommand.PlayMusic(song, MusicQueueSeed(browse.tracks, null)))
             }
             if (browse.failure != null) {
                 DirectoryFeedback(musicPlaybackFailureMessage(browse.failure), onLoad)
             }
 
             if (mode == RadioDisplayMode.CARD) {
-                MusicCards(browse.tracks, currentId, visual, playbackError, connected, isCar, statusModifier, play)
+                MusicCards(browse.tracks, currentId, visual, playbackError, connected, isCar, statusModifier) { song ->
+                    if (song.id == currentId && playback?.phase != PlaybackPhase.ERROR) onOpenPlayer()
+                    else startTrack(song)
+                }
                 if (browse.loading) DirectoryLoading(Modifier.fillMaxWidth().padding(bottom = TuneSpacing.Small),
                     size = 22.dp, tag = "music_feed_loading")
             } else {
@@ -134,10 +136,16 @@ internal fun MusicScreen(
                     contentPadding = PaddingValues(start = horizontal, end = horizontal, bottom = 12.dp)) {
                     itemsIndexed(browse.tracks, key = { _, track -> track.id }) { index, track ->
                         val current = track.id == currentId
-                        MusicTrackRow(track, isCar, current, if (current) visual else StationPlaybackVisual.None,
-                            enabled = connected, error = playbackError.takeIf { current },
+                        val togglesPlayback = current && playback?.phase in setOf(PlaybackPhase.PLAYING, PlaybackPhase.PAUSED)
+                        val rowVisual = if (current) visual else StationPlaybackVisual.None
+                        val connecting = rowVisual in setOf(
+                            StationPlaybackVisual.Connecting, StationPlaybackVisual.Buffering, StationPlaybackVisual.Retrying
+                        )
+                        MusicTrackRow(track, isCar, current, rowVisual,
+                            enabled = connected && !connecting, error = playbackError.takeIf { current },
                             modifier = Modifier.testTag("music_feed_track_${track.id}")) {
-                            play(track)
+                            if (togglesPlayback) onCommand(PlayerCommand.TogglePause)
+                            else startTrack(track)
                         }
                         if (index < browse.tracks.lastIndex) MusicTrackDivider()
                     }
@@ -272,7 +280,8 @@ internal fun MusicTrackRow(
     val status = playbackVisualLabel(visual)
     val action = stringResource(when {
         visual == StationPlaybackVisual.Error -> R.string.music_retry
-        current -> R.string.music_open_player
+        visual == StationPlaybackVisual.Playing -> R.string.action_pause
+        visual == StationPlaybackVisual.Paused -> R.string.now_playing_resume_accessibility
         else -> R.string.action_play
     })
     Row(
@@ -303,7 +312,10 @@ internal fun MusicTrackRow(
                 fontSize = if (isCar) 15.sp else 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (error != null) Text(error, color = TuneColors.Error, fontSize = if (isCar) 14.sp else 12.sp, style = TuneTextStyle)
         }
-        Box(Modifier.size(if (isCar) TuneSizes.TouchCar else TuneSizes.Touch), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.size(if (isCar) TuneSizes.TouchCar else TuneSizes.Touch).testTag("music_track_action_${track.id}"),
+            contentAlignment = Alignment.Center
+        ) {
             when (visual) {
                 StationPlaybackVisual.Connecting, StationPlaybackVisual.Buffering, StationPlaybackVisual.Retrying ->
                     CircularProgressIndicator(Modifier.size(TuneSizes.IconSm), color = TuneColors.Primary,
