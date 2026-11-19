@@ -27,8 +27,21 @@ class MusicViewModelTest {
             assertEquals((1..75).map(Int::toString), feed.tracks.map { it.id })
             assertTrue(feed.loaded)
             assertFalse(feed.loading)
-            assertTrue(feed.partial)
             assertEquals(1, requests)
+        } finally { scope.cancel() }
+    }
+
+    @Test fun emptyPartialFeedKeepsTheActionableFailure() = runBlocking {
+        val repo = object : MusicRepository by FakeMusicRepository(emptyList()) {
+            override suspend fun recommendations(limit: Int, cursor: String?) =
+                MusicPage(emptyList(), partial = true, warnings = listOf("qqmusic:rate_limited"))
+        }
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val model = MusicViewModel(repo, scope = scope)
+            model.enter()
+            assertTrue(model.browse.value.tracks.isEmpty())
+            assertEquals(MusicFailure.RATE_LIMITED, model.browse.value.failure)
         } finally { scope.cancel() }
     }
 

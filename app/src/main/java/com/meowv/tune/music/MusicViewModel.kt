@@ -26,7 +26,6 @@ internal data class MusicFeed(
     val tracks: List<MusicTrack> = emptyList(),
     val loaded: Boolean = false,
     val loading: Boolean = false,
-    val partial: Boolean = false,
     val failure: MusicFailure? = null
 )
 
@@ -70,7 +69,14 @@ internal class MusicViewModel(
             try {
                 val page = source.recommendations()
                 val tracks = page.items.filter { it.canStartPlayback }.distinctBy { it.id }
-                mutableBrowse.value = MusicFeed(tracks, loaded = true, partial = page.partial)
+                val failure = if (tracks.isEmpty() && page.partial) {
+                    when {
+                        page.warnings.any { it.endsWith(":rate_limited") } -> MusicFailure.RATE_LIMITED
+                        page.warnings.any { it.endsWith(":source_timeout") } -> MusicFailure.SOURCE_TIMEOUT
+                        else -> MusicFailure.SOURCE_UNAVAILABLE
+                    }
+                } else null
+                mutableBrowse.value = MusicFeed(tracks, loaded = true, failure = failure)
             } catch (failure: MusicException) {
                 mutableBrowse.value = previous.copy(loading = false, failure = failure.failure)
             }

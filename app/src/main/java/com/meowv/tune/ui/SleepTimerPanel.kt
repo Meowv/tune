@@ -228,39 +228,31 @@ internal fun CustomSleepTimerDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.sleep_timer_custom_title)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    stringResource(R.string.sleep_timer_custom_body),
-                    color = TuneColors.Muted,
-                    fontSize = 14.sp,
-                    style = TuneTextStyle
-                )
-                OutlinedTextField(
-                    value = value,
-                    onValueChange = { input ->
-                        value = input.filter(Char::isDigit).take(3)
-                    },
-                    label = { Text(stringResource(R.string.sleep_timer_minutes_label)) },
-                    singleLine = true,
-                    isError = value.isNotBlank() && !valid,
-                    supportingText = {
-                        Text(
-                            stringResource(
-                                if (value.isNotBlank() && !valid) {
-                                    R.string.sleep_timer_custom_invalid
-                                } else {
-                                    R.string.sleep_timer_custom_range
-                                }
-                            )
+            OutlinedTextField(
+                value = value,
+                onValueChange = { input ->
+                    value = input.filter(Char::isDigit).take(3)
+                },
+                label = { Text(stringResource(R.string.sleep_timer_minutes_label)) },
+                singleLine = true,
+                isError = value.isNotBlank() && !valid,
+                supportingText = {
+                    Text(
+                        stringResource(
+                            if (value.isNotBlank() && !valid) {
+                                R.string.sleep_timer_custom_invalid
+                            } else {
+                                R.string.sleep_timer_custom_range
+                            }
                         )
-                    },
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Number,
-                        imeAction = ImeAction.Done
-                    ),
-                    modifier = Modifier.fillMaxWidth().testTag("sleep_timer_custom_input")
-                )
-            }
+                    )
+                },
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number,
+                    imeAction = ImeAction.Done
+                ),
+                modifier = Modifier.fillMaxWidth().testTag("sleep_timer_custom_input")
+            )
         },
         confirmButton = {
             TextButton(

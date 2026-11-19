@@ -126,7 +126,7 @@ class MusicSearchIntegrationTest {
         app.testMusicRepository = object : MusicRepository by fake {
             override suspend fun search(query: String, limit: Int, cursor: String?) =
                 if (cursor == null) MusicPage(listOf(metadata), "later", partial = true, warnings = listOf("netease:deferred"))
-                else MusicPage(listOf(playable))
+                else MusicPage(listOf(playable), partial = true, warnings = listOf("qqmusic:source_timeout"))
             override suspend fun resolve(trackId: String, preferredProviderId: String?) = PlayableAudio(
                 trackId, "test", trackId, 1.0, "https://test.example/radio.mp3", "audio/mpeg", 12000, seekable = true)
         }
@@ -141,11 +141,13 @@ class MusicSearchIntegrationTest {
                 compose.onNodeWithTag("music_search_submit").performClick()
                 compose.waitUntil(4000) { compose.onAllNodesWithTag("music_search_more").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("music_search_result_metadata").assertDoesNotExist()
-                compose.onNodeWithText("网易云音乐 响应较慢，加载更多可继续搜索").assertIsDisplayed()
+                compose.onNodeWithText("QQ 音乐 响应超时").assertDoesNotExist()
+                compose.onNodeWithText("部分来源未能提供结果，已显示可用内容").assertDoesNotExist()
                 compose.onNodeWithTag("music_search_more").performScrollTo().performClick()
                 compose.waitUntil(4000) { compose.onAllNodesWithTag("music_search_result_original-001").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("music_search_result_metadata").assertDoesNotExist()
-                compose.onNodeWithText("网易云音乐 响应较慢，加载更多可继续搜索").assertDoesNotExist()
+                compose.onNodeWithText("QQ 音乐 响应超时").assertDoesNotExist()
+                compose.onNodeWithText("部分来源未能提供结果，已显示可用内容").assertDoesNotExist()
                 compose.onNodeWithTag("music_search_result_original-001").assertIsEnabled().performClick()
                 awaitTrack("original-001")
                 Unit
@@ -176,7 +178,7 @@ class MusicSearchIntegrationTest {
 
     private fun capture(name: String) {
         val mode = if (app.resources.configuration.screenWidthDp >= 600) "wide" else "phone"
-        val file = File(app.getExternalFilesDir(null), "music-evidence/$mode-search-$name.png")
+        val file = File(app.cacheDir, "music-evidence/$mode-search-$name.png")
         file.parentFile!!.mkdirs()
         file.outputStream().use { compose.onNodeWithTag("music_search_page").captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it) }
     }

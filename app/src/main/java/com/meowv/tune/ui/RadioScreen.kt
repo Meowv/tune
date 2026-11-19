@@ -104,16 +104,7 @@ private fun RadioDirectory(
     val locale = CountryLocale
     val selectedId = state.selectedStationUuid ?: playback.station?.uuid
     Column(Modifier.fillMaxSize().testTag("page_radio")) {
-        Row(
-            Modifier.fillMaxWidth().padding(
-                start = if (isCar) 24.dp else 16.dp,
-                end = if (isCar) 24.dp else 16.dp,
-                top = if (isCar) 16.dp else 12.dp,
-                bottom = 12.dp
-            ),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        DirectoryToolbar(isCar) {
             // 胶囊按内容宽度收缩，最多让出右侧切换控件的位置；长国家名在内部省略而不是挤压右边。
             RegionChip(
                 scopeName(state, locale), isCar,
@@ -512,10 +503,44 @@ private fun StationCard(
 }
 
 @Composable
+internal fun DirectoryToolbar(isCar: Boolean, content: @Composable RowScope.() -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(
+            start = if (isCar) 24.dp else 16.dp,
+            end = if (isCar) 24.dp else 16.dp,
+            top = if (isCar) 16.dp else 12.dp,
+            bottom = 12.dp
+        ),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+        content = content
+    )
+}
+
+@Composable
 private fun RegionChip(name: String, isCar: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    DirectoryActionChip(
+        name, stringResource(R.string.scope_picker_description, name), R.drawable.ic_region,
+        isCar, modifier, trailing = R.drawable.ic_chevron_down, onClick = onClick
+    )
+}
+
+@Composable
+internal fun DirectoryActionChip(
+    label: String,
+    description: String,
+    @DrawableRes icon: Int,
+    isCar: Boolean,
+    modifier: Modifier,
+    @DrawableRes trailing: Int? = null,
+    onClick: () -> Unit
+) {
     var focused by remember { mutableStateOf(false) }
-    val description = stringResource(R.string.scope_picker_description, name)
-    // 描边压到 BorderSoft：胶囊只是入口，不该比里面的国家名更显眼。
+    val endPadding = when {
+        trailing == null && isCar -> 16.dp
+        trailing == null || isCar -> 14.dp
+        else -> 10.dp
+    }
     Surface(
         onClick = onClick,
         color = TuneColors.Surface,
@@ -524,33 +549,24 @@ private fun RegionChip(name: String, isCar: Boolean, modifier: Modifier, onClick
             if (focused) 2.dp else 1.dp,
             if (focused) TuneColors.Primary else TuneColors.BorderSoft
         ),
-        modifier = modifier.height(if (isCar) 52.dp else 48.dp)
+        modifier = modifier.heightIn(min = if (isCar) 52.dp else 48.dp)
             .onFocusChanged { focused = it.isFocused }
             .semantics { contentDescription = description }
     ) {
         Row(
-            Modifier
-                .padding(start = if (isCar) 16.dp else 14.dp, end = if (isCar) 14.dp else 10.dp)
+            Modifier.padding(start = if (isCar) 16.dp else 14.dp,
+                end = endPadding)
                 .clearAndSetSemantics { },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(if (isCar) 8.dp else 6.dp)
         ) {
-            TuneIcon(
-                R.drawable.ic_region,
-                Modifier.size(if (isCar) TuneSizes.IconMd else TuneSizes.IconSm),
-                TuneColors.Primary
-            )
-            // fill=false：名字短时胶囊跟着收，名字长时让位给右侧箭头并省略，不挤压视图切换。
+            TuneIcon(icon, Modifier.size(if (isCar) TuneSizes.IconMd else TuneSizes.IconSm), TuneColors.Primary)
             Text(
-                name, color = TuneColors.Text, fontSize = if (isCar) 17.sp else 13.sp,
+                label, color = TuneColors.Text, fontSize = if (isCar) 17.sp else 13.sp,
                 fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 style = TuneTextStyle, modifier = Modifier.weight(1f, fill = false)
             )
-            TuneIcon(
-                R.drawable.ic_chevron_down,
-                Modifier.size(if (isCar) 18.dp else TuneSizes.IconXs),
-                TuneColors.Muted
-            )
+            if (trailing != null) TuneIcon(trailing, Modifier.size(if (isCar) 18.dp else TuneSizes.IconXs), TuneColors.Muted)
         }
     }
 }
@@ -609,8 +625,8 @@ internal fun LayoutSwitcher(mode: RadioDisplayMode, onChange: (RadioDisplayMode)
 
 /** 目录加载中：只给一个品牌紫加载环，由调用方决定铺满内容区还是作为列表底部的小环。 */
 @Composable
-private fun DirectoryLoading(modifier: Modifier = Modifier, size: Dp = 28.dp) {
-    Box(modifier.testTag("directory_loading"), contentAlignment = Alignment.Center) {
+internal fun DirectoryLoading(modifier: Modifier = Modifier, size: Dp = 28.dp, tag: String = "directory_loading") {
+    Box(modifier.testTag(tag), contentAlignment = Alignment.Center) {
         CircularProgressIndicator(
             Modifier.size(size),
             color = TuneColors.Primary,
@@ -623,7 +639,7 @@ private fun DirectoryLoading(modifier: Modifier = Modifier, size: Dp = 28.dp) {
 
 /** 内容区为空时的整屏状态位：图标 + 一句话 + 可选操作，垂直居中。 */
 @Composable
-private fun DirectoryMessage(
+internal fun DirectoryMessage(
     @DrawableRes icon: Int,
     tint: Color,
     @StringRes message: Int,
@@ -649,7 +665,7 @@ private fun DirectoryMessage(
 }
 
 @Composable
-private fun DirectoryFeedback(@StringRes message: Int, onRetry: (() -> Unit)? = null) {
+internal fun DirectoryFeedback(@StringRes message: Int, onRetry: (() -> Unit)? = null) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp)
             .semantics { liveRegion = LiveRegionMode.Polite },

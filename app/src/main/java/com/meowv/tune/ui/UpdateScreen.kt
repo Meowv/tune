@@ -150,14 +150,6 @@ private fun BrandHeader(isCar: Boolean) {
             style = TuneTextStyle,
             textAlign = TextAlign.Center
         )
-        Spacer(Modifier.height(TuneSpacing.Hairline))
-        Text(
-            stringResource(R.string.update_tagline),
-            color = TuneColors.Muted,
-            fontSize = if (isCar) 15.sp else 13.sp,
-            style = TuneTextStyle
-        )
-
     }
 }
 
@@ -187,14 +179,16 @@ private fun StatusCard(
                     fontWeight = FontWeight.SemiBold,
                     style = TuneTextStyle
                 )
-                Spacer(Modifier.height(TuneSpacing.Hairline))
-                Text(
-                    presentation.body,
-                    color = TuneColors.Muted,
-                    fontSize = if (isCar) 14.sp else 13.sp,
-                    lineHeight = if (isCar) 20.sp else 19.sp,
-                    style = TuneTextStyle
-                )
+                presentation.body?.let { body ->
+                    Spacer(Modifier.height(TuneSpacing.Hairline))
+                    Text(
+                        body,
+                        color = TuneColors.Muted,
+                        fontSize = if (isCar) 14.sp else 13.sp,
+                        lineHeight = if (isCar) 20.sp else 19.sp,
+                        style = TuneTextStyle
+                    )
+                }
             }
         }
         if (install is InstallState.Downloading) {
@@ -409,7 +403,7 @@ private fun StatusIcon(isCar: Boolean, state: UpdateUiState, install: InstallSta
     }
 }
 
-private data class StatusPresentation(val title: String, val body: String, val tint: Color)
+private data class StatusPresentation(val title: String, val body: String?, val tint: Color)
 
 @Composable
 private fun statusPresentation(
@@ -421,21 +415,17 @@ private fun statusPresentation(
     when (install) {
         is InstallState.Downloading -> return StatusPresentation(
             stringResource(R.string.update_status_downloading_title),
-            if (install.indeterminate) {
-                stringResource(R.string.update_status_downloading_unknown)
-            } else {
-                stringResource(R.string.update_status_downloading_body)
-            },
+            null,
             TuneColors.Text
         )
         is InstallState.Verifying -> return StatusPresentation(
             stringResource(R.string.update_status_verifying_title),
-            stringResource(R.string.update_status_verifying_body),
+            null,
             TuneColors.Text
         )
         is InstallState.Downloaded -> return StatusPresentation(
             stringResource(R.string.update_status_downloaded_title),
-            stringResource(R.string.update_status_downloaded_body),
+            null,
             TuneColors.Primary
         )
         is InstallState.InstallPermissionRequired -> return StatusPresentation(
@@ -455,7 +445,7 @@ private fun statusPresentation(
         )
         is InstallState.Cancelled -> return StatusPresentation(
             stringResource(R.string.update_status_cancelled_title),
-            stringResource(R.string.update_status_cancelled_body),
+            null,
             TuneColors.Muted
         )
         InstallState.Idle -> Unit
@@ -463,29 +453,29 @@ private fun statusPresentation(
     if (state is UpdateUiState.UpToDate && upgradedTo != null) {
         return StatusPresentation(
             stringResource(R.string.update_installed_title, upgradedTo),
-            stringResource(R.string.update_installed_body),
+            null,
             TuneColors.Primary
         )
     }
     return when (state) {
         UpdateUiState.Idle -> StatusPresentation(
             stringResource(R.string.update_status_idle_title),
-            stringResource(R.string.update_status_idle_body),
+            null,
             TuneColors.Text
         )
         UpdateUiState.Checking -> StatusPresentation(
             stringResource(R.string.update_status_checking_title),
-            stringResource(R.string.update_status_checking_body),
+            null,
             TuneColors.Text
         )
         is UpdateUiState.UpToDate -> StatusPresentation(
             stringResource(R.string.update_status_latest_title),
-            stringResource(R.string.update_status_latest_body),
+            null,
             TuneColors.Text
         )
         is UpdateUiState.UpdateAvailable -> StatusPresentation(
             stringResource(R.string.update_status_available_title, state.info.versionName),
-            stringResource(R.string.update_status_available_body),
+            null,
             TuneColors.Primary
         )
         is UpdateUiState.Error -> StatusPresentation(

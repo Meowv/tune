@@ -46,8 +46,12 @@ internal fun stationPlaybackVisual(
     if (playback.source != PlaybackSource.RADIO || playback.station?.uuid != stationId ||
         playback.phase == PlaybackPhase.IDLE
     ) return StationPlaybackVisual.None
-    if (!connected) return StationPlaybackVisual.Disconnected
-    return when (playback.phase) {
+    return playbackVisual(playback.phase, connected)
+}
+
+internal fun playbackVisual(phase: PlaybackPhase, connected: Boolean): StationPlaybackVisual {
+    if (!connected && phase != PlaybackPhase.IDLE) return StationPlaybackVisual.Disconnected
+    return when (phase) {
         PlaybackPhase.IDLE -> StationPlaybackVisual.None
         PlaybackPhase.RESOLVING -> StationPlaybackVisual.Connecting
         PlaybackPhase.BUFFERING -> StationPlaybackVisual.Buffering
@@ -56,6 +60,18 @@ internal fun stationPlaybackVisual(
         PlaybackPhase.PAUSED -> StationPlaybackVisual.Paused
         PlaybackPhase.ERROR -> StationPlaybackVisual.Error
     }
+}
+
+@Composable
+internal fun playbackVisualLabel(visual: StationPlaybackVisual): String? = when (visual) {
+    StationPlaybackVisual.None -> null
+    StationPlaybackVisual.Connecting -> stringResource(R.string.playback_resolving)
+    StationPlaybackVisual.Buffering -> stringResource(R.string.playback_buffering)
+    StationPlaybackVisual.Retrying -> stringResource(R.string.playback_retrying)
+    StationPlaybackVisual.Playing -> stringResource(R.string.playback_playing)
+    StationPlaybackVisual.Paused -> stringResource(R.string.playback_paused)
+    StationPlaybackVisual.Error -> stringResource(R.string.playback_failed)
+    StationPlaybackVisual.Disconnected -> stringResource(R.string.playback_service_disconnected)
 }
 
 @Composable
@@ -68,23 +84,14 @@ internal fun StationPlaybackStatus(
     val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
     val motionEnabled = rememberMotionEnabled()
     val animate = animationsEnabled && motionEnabled && lifecycle.isAtLeast(Lifecycle.State.RESUMED)
-    val label = when (visual) {
-        StationPlaybackVisual.None -> ""
-        StationPlaybackVisual.Connecting -> stringResource(R.string.playback_resolving)
-        StationPlaybackVisual.Buffering -> stringResource(R.string.playback_buffering)
-        StationPlaybackVisual.Retrying -> stringResource(R.string.playback_retrying)
-        StationPlaybackVisual.Playing -> stringResource(R.string.playback_playing)
-        StationPlaybackVisual.Paused -> stringResource(R.string.playback_paused)
-        StationPlaybackVisual.Error -> stringResource(R.string.playback_failed)
-        StationPlaybackVisual.Disconnected -> stringResource(R.string.playback_service_disconnected)
-    }
+    val label = playbackVisualLabel(visual)
     val tint = when (visual) {
         StationPlaybackVisual.Error -> TuneColors.Error
         StationPlaybackVisual.Paused, StationPlaybackVisual.Disconnected -> TuneColors.Muted
         else -> TuneColors.Primary
     }
     Box(
-        modifier.semantics(mergeDescendants = true) { stateDescription = label },
+        modifier.semantics(mergeDescendants = true) { if (label != null) stateDescription = label },
         contentAlignment = Alignment.Center
     ) {
         if (visual != StationPlaybackVisual.None) {

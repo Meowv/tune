@@ -30,7 +30,11 @@ class MusicPlaybackUiTest {
                 "audio/mpeg", 12000, seekable = true)
         }.toMap()
         val unavailable = MusicTrack("unavailable", "不存在的曲目", listOf("qix"), availability = "unavailable")
-        app.testMusicRepository = FakeMusicRepository(listOf(unavailable) + tracks, audio)
+        val fake = FakeMusicRepository(listOf(unavailable) + tracks, audio)
+        app.testMusicRepository = object : MusicRepository by fake {
+            override suspend fun recommendations(limit: Int, cursor: String?) =
+                fake.recommendations(limit, cursor).copy(partial = true, warnings = listOf("qqmusic:source_unavailable"))
+        }
         app.mockNetwork.value = NetworkState(NetworkType.WIFI)
         app.userSettings.update { it.copy(autoPlay = false, playbackOrder = PlaybackOrder.SEQUENTIAL) }
         ActivityScenario.launch(MainActivity::class.java).use {
@@ -48,11 +52,13 @@ class MusicPlaybackUiTest {
                 compose.onNode(hasText("音乐") and hasAnyAncestor(hasTestTag("page_music"))).assertDoesNotExist()
                 compose.onNodeWithText("推荐").assertDoesNotExist()
                 compose.onNodeWithText("飙升榜").assertDoesNotExist()
+                compose.onNodeWithText("部分来源未能提供结果，已显示可用内容").assertDoesNotExist()
                 compose.onNodeWithText("不存在的曲目").assertDoesNotExist()
                 compose.onNodeWithTag("music_feed_track_ui-2").performClick()
                 withTimeout(6000) { connection.state.first { it.phase == PlaybackPhase.PLAYING && it.music?.id == "ui-2" } }
                 compose.onNodeWithTag("layout_card").performClick()
                 compose.onNodeWithTag("music_cards").assertIsDisplayed()
+                capture("cards")
                 compose.onNodeWithTag("layout_list").performClick()
                 capture("page")
                 compose.onNodeWithTag("circular_player_entry").performClick()
@@ -79,7 +85,7 @@ class MusicPlaybackUiTest {
     private fun capture(name: String) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val mode = if (context.resources.configuration.screenWidthDp >= 600) "car" else "phone"
-        val file = File(context.getExternalFilesDir(null), "music-evidence/$mode-playback-$name.png")
+        val file = File(context.cacheDir, "music-evidence/$mode-playback-$name.png")
         file.parentFile!!.mkdirs()
         file.outputStream().use { compose.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it) }
     }

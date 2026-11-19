@@ -94,6 +94,7 @@ import com.meowv.tune.domain.Station
 import com.meowv.tune.playback.SleepTimerState
 import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.ui.theme.TuneShapes
+import com.meowv.tune.ui.theme.TuneSpacing
 import com.meowv.tune.ui.theme.TuneSizes
 import com.meowv.tune.ui.theme.TuneTextStyle
 import kotlin.math.PI
@@ -170,7 +171,9 @@ internal fun NowPlayingScreen(
                         }
                     }, Modifier.weight(1f))
                     NowPlayingTools(isCar, shuffle, sleepTimer, animationMillis, onToggleShuffle,
-                        { sleepPanelOpen = true }, Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                        { sleepPanelOpen = true },
+                        Modifier.align(Alignment.CenterHorizontally).widthIn(max = if (isCar) 560.dp else 540.dp)
+                            .fillMaxWidth().padding(bottom = TuneSpacing.Small),
                         showCurrentOrder = true)
                 } else if (station == null) {
                     Column(
@@ -1092,7 +1095,7 @@ private fun PlayingWaveform(
 }
 
 @Composable
-private fun NowPlayingIconButton(
+internal fun NowPlayingIconButton(
     icon: Int,
     description: String,
     isCar: Boolean,
@@ -1156,14 +1159,7 @@ private fun NowPlayingIconButton(
 
 @Composable
 private fun NowPlayingNotice(state: PlayerUiState, modifier: Modifier = Modifier) {
-    val buffering = state.phase == PlaybackPhase.RESOLVING ||
-        state.phase == PlaybackPhase.RETRYING || state.phase == PlaybackPhase.BUFFERING
-    val text = when {
-        state.error != null -> playbackErrorText(state.error, state.statusCode)
-            ?: stringResource(R.string.playback_unavailable)
-        buffering -> stringResource(R.string.playback_connecting_source)
-        else -> null
-    }
+    val text = playbackErrorText(state.error, state.statusCode)
     val motionEnabled = rememberMotionEnabled()
     Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Crossfade(
@@ -1174,7 +1170,7 @@ private fun NowPlayingNotice(state: PlayerUiState, modifier: Modifier = Modifier
             if (current != null) {
                 Text(
                     current,
-                    color = if (state.error != null) TuneColors.Error else TuneColors.Muted,
+                    color = TuneColors.Error,
                     fontSize = 13.sp,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
