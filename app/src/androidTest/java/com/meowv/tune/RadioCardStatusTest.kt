@@ -116,7 +116,7 @@ class RadioCardStatusTest {
         compose.runOnIdle { playback.value = PlayerUiState(PlaybackPhase.PAUSED, first) }
         compose.onNodeWithTag("station_cards").performTouchInput { swipeLeft() }
         compose.onNodeWithTag("station_status_${second.uuid}")
-            .assertIsDisplayed().assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, ""))
+            .assertIsDisplayed().assert(SemanticsMatcher("未播放项没有播放状态") { it.config.getOrElse(SemanticsProperties.StateDescription) { "" }.isEmpty() })
         assertTrue(commands.isEmpty())
         compose.onNodeWithTag("station_card_${second.uuid}").performClick()
         compose.runOnIdle { assertEquals(listOf(PlayerCommand.Play(second)), commands) }

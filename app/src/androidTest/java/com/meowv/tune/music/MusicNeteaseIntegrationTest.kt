@@ -143,7 +143,7 @@ class MusicNeteaseIntegrationTest {
                 compose.onNodeWithTag("nav_music").performClick()
                 compose.onNodeWithTag("music_search_open").performClick()
                 compose.onNodeWithTag("music_search_query").performTextInput("Kevin MacLeod")
-                compose.onNodeWithTag("music_search_submit").performClick()
+                compose.onNodeWithTag("music_search_query").performImeAction()
                 compose.waitUntil(15000) {
                     compose.onAllNodes(hasTestTag("music_search_results")).fetchSemanticsNodes().isNotEmpty() &&
                         compose.onAllNodes(hasClickAction() and hasAnyAncestor(hasTestTag("music_search_results")) and hasText("Kevin MacLeod", substring = true)).fetchSemanticsNodes().isNotEmpty()

@@ -67,6 +67,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.crossfade
 import com.meowv.tune.R
 import com.meowv.tune.domain.Station
 import com.meowv.tune.ui.theme.TuneColors
@@ -152,20 +154,41 @@ private val WAVE_STATIC_LEVELS = listOf(.42f, .78f, .55f, .9f)
 internal fun StationBadge(station: Station?, size: Dp) {
     // 圆角随尺寸缩放，但不超过大卡片的 28dp，保证子元素始终比父容器更方。
     val radius = (size * .22f).coerceAtMost(24.dp)
-    Box(
-        Modifier.size(size).clip(RoundedCornerShape(radius)).background(TuneColors.Raised),
-        contentAlignment = Alignment.Center
-    ) {
-        val url = station?.iconUrl
-        if (url.isNullOrBlank()) {
-            TuneIcon(R.drawable.ic_radio, Modifier.size(size * .55f))
-        } else {
-            val fallback = painterResource(R.drawable.ic_radio)
-            AsyncImage(
-                url, null, Modifier.fillMaxSize(),
-                placeholder = fallback, error = fallback,
-                contentScale = BadgeContentScale
-            )
+    MediaArtwork(
+        url = station?.iconUrl,
+        isMusic = false,
+        modifier = Modifier.size(size).clip(RoundedCornerShape(radius))
+    )
+}
+
+@Composable
+internal fun MediaArtwork(url: String?, isMusic: Boolean, modifier: Modifier = Modifier) {
+    val fallback = painterResource(if (isMusic) R.drawable.music_artwork_fallback else R.drawable.radio_artwork_fallback)
+    val context = LocalContext.current
+    val duration = if (isMusic && rememberMotionEnabled()) 160 else 0
+    val request = remember(context, url, duration) {
+        ImageRequest.Builder(context).data(url?.takeIf(String::isNotBlank)).crossfade(duration).build()
+    }
+    Box(modifier.background(TuneColors.Raised), contentAlignment = Alignment.Center) {
+        var showFallback by remember(url) { mutableStateOf(true) }
+        AsyncImage(
+            model = request,
+            contentDescription = null,
+            modifier = Modifier.matchParentSize(),
+            placeholder = fallback,
+            error = fallback,
+            fallback = fallback,
+            contentScale = if (isMusic) ContentScale.Crop else BadgeContentScale,
+            onLoading = { showFallback = true },
+            onSuccess = { showFallback = false },
+            onError = { showFallback = true }
+        )
+        if (showFallback) {
+            Box(Modifier.matchParentSize(), contentAlignment = Alignment.Center) {
+                val glyph = Modifier.fillMaxSize(if (isMusic) .50f else .46f).testTag("media_artwork_fallback")
+                if (isMusic) Image(painterResource(R.drawable.music_record), null, glyph)
+                else TuneIcon(R.drawable.ic_radio, glyph, TuneColors.PrimaryLight)
+            }
         }
     }
 }

@@ -14,7 +14,6 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -68,10 +67,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -88,7 +85,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil3.compose.AsyncImage
 import com.meowv.tune.R
 import com.meowv.tune.domain.PlaybackSource
 import com.meowv.tune.domain.PlaybackPhase
@@ -253,6 +249,7 @@ internal fun NowPlayingScreen(
     }
     if (customSleepOpen && (station != null || state.music != null)) {
         CustomSleepTimerDialog(
+            isCar = isCar,
             onDismiss = { customSleepOpen = false },
             onConfirm = {
                 onSetSleepTimer(it)
@@ -871,26 +868,7 @@ private fun NowPlayingArtwork(media: NowPlayingMedia, modifier: Modifier) {
                 ),
             contentAlignment = Alignment.Center
         ) {
-            val url = media.artworkUrl
-            if (url.isNullOrBlank() && media.isMusic) {
-                Image(painterResource(R.drawable.music_record), null, Modifier.fillMaxSize(.64f))
-            } else if (url.isNullOrBlank()) {
-                TuneIcon(
-                    R.drawable.ic_radio,
-                    Modifier.fillMaxSize(.42f),
-                    TuneColors.Primary.copy(alpha = .9f)
-                )
-            } else {
-                val fallback = painterResource(if (media.isMusic) R.drawable.music_record else R.drawable.ic_radio)
-                AsyncImage(
-                    model = url,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize().padding(if (media.isMusic) 0.dp else 14.dp),
-                    placeholder = fallback,
-                    error = fallback,
-                    contentScale = if (media.isMusic) ContentScale.Crop else ContentScale.Fit
-                )
-            }
+            MediaArtwork(media.artworkUrl, media.isMusic, Modifier.matchParentSize())
         }
     }
 }

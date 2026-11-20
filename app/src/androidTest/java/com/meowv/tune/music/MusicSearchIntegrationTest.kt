@@ -48,9 +48,10 @@ class MusicSearchIntegrationTest {
                 val token = main { controller.connectedToken }
                 compose.onNodeWithTag("nav_music").performClick()
                 compose.onNodeWithTag("music_search_open").performClick()
+                capture("input")
                 assertEquals(0, requests.get())
                 compose.onNodeWithTag("music_search_query").performTextInput("qix")
-                compose.onNodeWithTag("music_search_submit").performClick()
+                compose.onNodeWithTag("music_search_query").performImeAction()
                 compose.waitUntil(8000) {
                     compose.onAllNodesWithTag("music_search_result_original-001").fetchSemanticsNodes().isNotEmpty()
                 }
@@ -89,7 +90,7 @@ class MusicSearchIntegrationTest {
                     compose.onAllNodesWithTag("music_search_empty").fetchSemanticsNodes().isNotEmpty()
                 }
                 compose.onNodeWithTag("music_search_query").performTextReplacement("qix")
-                compose.onNodeWithTag("music_search_submit").performClick()
+                compose.onNodeWithTag("music_search_query").performImeAction()
                 compose.waitUntil(8000) {
                     compose.onAllNodesWithTag("music_search_result_original-001").fetchSemanticsNodes().isNotEmpty()
                 }
@@ -97,6 +98,49 @@ class MusicSearchIntegrationTest {
                 delay(100)
                 assertEquals(PlaybackPhase.IDLE, connection.state.value.phase)
             } finally { app.testMusicRepository = null }
+        }
+    }
+
+    @Test fun historyCanBeReusedAndClearedWhileCarNavigationStaysReachable() = runBlocking {
+        installFakeUnlessUsingLocalBuild()
+        app.musicSearchHistory.clear()
+        app.userSettings.update { it.copy(autoPlay = false) }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            try {
+                compose.onNodeWithTag("nav_music").performClick()
+                compose.onNodeWithTag("music_search_open").performClick()
+                compose.onNodeWithTag("music_search_query").performTextInput("qix")
+                compose.onNodeWithTag("music_search_query").performImeAction()
+                compose.waitUntil(8000) {
+                    compose.onAllNodesWithTag("music_search_result_original-001").fetchSemanticsNodes().isNotEmpty()
+                }
+                val car = app.resources.configuration.screenWidthDp >= 600
+                if (car) {
+                    compose.onNodeWithTag("nav_settings").assertIsDisplayed().performClick()
+                    compose.onNodeWithTag("music_search_page").assertDoesNotExist()
+                    compose.onNodeWithTag("page_settings").assertIsDisplayed()
+                    compose.onNodeWithTag("nav_music").performClick()
+                    compose.onNodeWithTag("music_search_open").performClick()
+                }
+                compose.onNodeWithTag("music_search_query").performTextClearance()
+                compose.waitUntil(5000) {
+                    compose.onAllNodesWithTag("music_search_history_0").fetchSemanticsNodes().isNotEmpty()
+                }
+                capture("history")
+                compose.onNodeWithTag("music_search_history_0").performClick()
+                compose.waitUntil(8000) {
+                    compose.onAllNodesWithTag("music_search_result_original-001").fetchSemanticsNodes().isNotEmpty()
+                }
+                compose.onNodeWithTag("music_search_query").performTextClearance()
+                compose.onNodeWithTag("music_search_history_clear").performClick()
+                compose.waitUntil(5000) {
+                    compose.onAllNodesWithTag("music_search_history").fetchSemanticsNodes().isEmpty()
+                }
+                scenario.recreate()
+                assertEquals(emptyList<String>(), app.musicSearchHistory.read())
+            } finally {
+                app.testMusicRepository = null
+            }
         }
     }
 
@@ -110,7 +154,7 @@ class MusicSearchIntegrationTest {
                 compose.onNodeWithTag("nav_music").performClick()
                 compose.onNodeWithTag("music_search_open").performClick()
                 compose.onNodeWithTag("music_search_query").performTextInput("Metadata")
-                compose.onNodeWithTag("music_search_submit").performClick()
+                compose.onNodeWithTag("music_search_query").performImeAction()
                 compose.waitUntil(4000) { compose.onAllNodesWithTag("music_search_empty").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("music_search_result_metadata").assertDoesNotExist()
                 assertEquals(PlaybackPhase.IDLE, connection.state.value.phase)
@@ -138,7 +182,7 @@ class MusicSearchIntegrationTest {
                 compose.onNodeWithTag("nav_music").performClick()
                 compose.onNodeWithTag("music_search_open").performClick()
                 compose.onNodeWithTag("music_search_query").performTextInput("qix")
-                compose.onNodeWithTag("music_search_submit").performClick()
+                compose.onNodeWithTag("music_search_query").performImeAction()
                 compose.waitUntil(4000) { compose.onAllNodesWithTag("music_search_more").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("music_search_result_metadata").assertDoesNotExist()
                 compose.onNodeWithText("QQ 音乐 响应超时").assertDoesNotExist()
@@ -182,7 +226,7 @@ class MusicSearchIntegrationTest {
                 compose.onNodeWithTag("nav_music").performClick()
                 compose.onNodeWithTag("music_search_open").performClick()
                 compose.onNodeWithTag("music_search_query").performTextInput("qix")
-                compose.onNodeWithTag("music_search_submit").performClick()
+                compose.onNodeWithTag("music_search_query").performImeAction()
                 compose.onNodeWithTag("music_search_retry").assertIsDisplayed().performClick()
                 val list = compose.onNodeWithTag("music_search_results")
                 list.performScrollToNode(hasTestTag("music_search_more"))
@@ -229,7 +273,8 @@ class MusicSearchIntegrationTest {
         val mode = if (app.resources.configuration.screenWidthDp >= 600) "wide" else "phone"
         val file = File(app.cacheDir, "music-evidence/$mode-search-$name.png")
         file.parentFile!!.mkdirs()
-        file.outputStream().use { compose.onNodeWithTag("music_search_page").captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it) }
+        val screen = if (mode == "wide") compose.onRoot() else compose.onNodeWithTag("music_search_page")
+        file.outputStream().use { screen.captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
     private fun <T> main(block: () -> T): T {

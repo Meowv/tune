@@ -26,4 +26,12 @@ class WindowLayoutTest {
         assertEquals(true, isNowPlayingWide(1280f, 720f))
         assertEquals(true, isNowPlayingWide(600f, 360f))
     }
+    @Test
+    fun directoryUsesAvailableContentSpaceAndFallsBackForShortWindows() {
+        assertEquals(1, directoryColumnCount(false, 900f, 600f))
+        assertEquals(1, directoryColumnCount(true, 620f, 340f))
+        assertEquals(2, directoryColumnCount(true, 660f, 280f))
+        assertEquals(2, directoryColumnCount(true, 844f, 400f))
+        assertEquals(1, directoryColumnCount(true, 844f, 279f))
+    }
 }

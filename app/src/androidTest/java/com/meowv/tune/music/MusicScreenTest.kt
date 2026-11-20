@@ -10,6 +10,12 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlaybackSource
 import com.meowv.tune.domain.PlayerUiState
+import com.meowv.tune.domain.PlayerCommand
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.meowv.tune.R
+import com.meowv.tune.ui.MediaArtwork
 import com.meowv.tune.domain.music.MusicFailure
 import com.meowv.tune.domain.music.MusicLyricLine
 import com.meowv.tune.domain.music.MusicTrack
@@ -68,22 +74,38 @@ class MusicScreenTest {
         compose.onNodeWithTag("music_feed_track_original-001").assertIsDisplayed()
     }
 
-    @Test fun outgoingCardKeepsItsContentWhileVisiblyClippedDuringDrag() {
+    @Test fun swipingPreviewsAnotherTrackWithoutPlayingIt() {
         val tracks = (1..2).map { MusicTrack("drag-$it", "Card $it", listOf("qix")) }
+        val commands = mutableListOf<PlayerCommand>()
         compose.setContent { TuneTheme {
-            MusicScreen(isCar, MusicUiState.Idle, MusicFeed(tracks = tracks), true, {}, {}, {})
+            MusicScreen(isCar, MusicUiState.Idle, MusicFeed(tracks = tracks), true, { commands.add(it) }, {}, {})
         } }
         compose.onNodeWithTag("layout_card").performClick()
-        val pager = compose.onNodeWithTag("music_cards")
-        val first = compose.onNodeWithTag("music_feed_card_drag-1")
-        first.assertIsSelected()
-        pager.performTouchInput {
-            down(center)
-            moveBy(Offset(-width * (if (isCar) .40f else .24f), 0f))
+        compose.onNodeWithTag("music_feed_card_drag-1").assertIsSelected()
+        compose.onNodeWithTag("music_cards").performTouchInput { swipeLeft() }
+        val next = compose.onNodeWithTag("music_feed_card_drag-2")
+        next.assertIsSelected().assertIsDisplayed()
+        compose.runOnIdle { assertEquals(emptyList<PlayerCommand>(), commands) }
+        next.performClick()
+        compose.runOnIdle {
+            assertEquals("drag-2", (commands.single() as PlayerCommand.PlayMusic).track?.id)
         }
-        first.assertIsDisplayed().assertHasNoClickAction()
-        compose.onNodeWithText("Card 1", useUnmergedTree = true).assertIsDisplayed()
-        pager.performTouchInput { up() }
+    }
+
+    @Test fun artworkUsesTheFallbackForMissingOrFailedImagesAndPrefersLoadedImages() {
+        val app = InstrumentationRegistry.getInstrumentation().targetContext
+        val url = mutableStateOf<String?>(null)
+        compose.setContent { TuneTheme { MediaArtwork(url.value, true, Modifier.size(144.dp)) } }
+        val fallback = compose.onNodeWithTag("media_artwork_fallback", useUnmergedTree = true)
+        fallback.assertIsDisplayed()
+
+        compose.runOnIdle { url.value = "android.resource://${app.packageName}/${R.drawable.music_record}" }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithTag("media_artwork_fallback", useUnmergedTree = true).fetchSemanticsNodes().isEmpty()
+        }
+
+        compose.runOnIdle { url.value = "file:///nonexistent-v5-artwork.png" }
+        fallback.assertIsDisplayed()
     }
 
     @Test fun lyricsFollowPlaybackAndOnlyTapOrHorizontalDragSeeks() {

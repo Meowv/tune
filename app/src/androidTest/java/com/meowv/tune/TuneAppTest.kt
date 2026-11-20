@@ -285,6 +285,7 @@ class TuneAppTest {
                 app.playerController.state.value.phase == PlaybackPhase.PLAYING
         }
         compose.onNodeWithTag("station_status_${UUID(0, 2)}").assertIsDisplayed()
+        capturePanel("radio-card")
         runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
     }
 
@@ -365,6 +366,15 @@ class TuneAppTest {
         val label = countryScopeLabel()
         openScopePicker()
         compose.onNodeWithTag("scope_picker").assertIsDisplayed()
+        val auto = compose.onNodeWithTag("scope_Auto").getUnclippedBoundsInRoot()
+        val global = compose.onNodeWithTag("scope_Global").getUnclippedBoundsInRoot()
+        if (compose.onAllNodesWithTag("shell_car").fetchSemanticsNodes().isNotEmpty()) {
+            assertEquals(auto.top.value, global.top.value, 1f)
+            assertTrue(global.left >= auto.right)
+        } else {
+            assertTrue(global.top >= auto.bottom)
+        }
+        capturePanel("region-picker")
         compose.onNodeWithTag("scope_options").performScrollToNode(hasTestTag("scope_JP"))
         compose.onNodeWithTag("scope_JP").performClick()
         awaitScope(label)
@@ -409,6 +419,14 @@ class TuneAppTest {
             assertTrue("Player must start after rail", bar.left >= navigation.right)
         } else {
             assertTrue("Player must end before navigation", bar.bottom <= navigation.top)
+        }
+        val first = compose.onNodeWithTag("station_${UUID(0, 1)}").getUnclippedBoundsInRoot()
+        val second = compose.onNodeWithTag("station_${UUID(0, 2)}").getUnclippedBoundsInRoot()
+        if (car && list.right.value - list.left.value >= 660f && list.bottom.value - list.top.value >= 280f) {
+            assertEquals(first.top.value, second.top.value, 1f)
+            assertTrue("Grid keeps source order across each row", second.left >= first.right)
+        } else {
+            assertTrue("Narrow content falls back to one column", second.top >= first.bottom)
         }
         val minimum = if (car) 56.dp else 48.dp
         listOf("nav_radio", "nav_music", "nav_settings", "mini_player_toggle").forEach { tag ->
@@ -776,6 +794,8 @@ class TuneAppTest {
             compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithTag("now_playing_sleep").performClick()
+        compose.onNodeWithTag("sleep_timer_15").assertIsSelected()
+        capturePanel("sleep-timer")
         compose.onNodeWithTag("sleep_timer_cancel").performClick()
         compose.waitUntil(3000) { !app.sleepTimer.state.value.isActive }
         runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
@@ -790,8 +810,15 @@ class TuneAppTest {
         }
         compose.onNodeWithTag("now_playing_sleep").performClick()
         compose.onNodeWithTag("sleep_timer_custom").performClick()
-        compose.onNodeWithTag("sleep_timer_custom_input").performTextInput("12")
-        compose.onNodeWithTag("sleep_timer_custom_confirm").performClick()
+        val input = compose.onNodeWithTag("sleep_timer_custom_input")
+        val confirm = compose.onNodeWithTag("sleep_timer_custom_confirm")
+        confirm.assertIsNotEnabled()
+        input.performTextInput("481")
+        confirm.assertIsNotEnabled()
+        input.performTextReplacement("12")
+        confirm.assertIsEnabled()
+        capturePanel("sleep-custom")
+        confirm.performTouchInput { click() }
         compose.waitUntil(3000) {
             app.sleepTimer.state.value.durationMinutes == 12
         }
@@ -912,6 +939,16 @@ class TuneAppTest {
         )
         compose.onNodeWithTag("now_playing_shuffle_label", useUnmergedTree = true)
             .assertTextEquals(label)
+    }
+
+    private fun capturePanel(name: String) {
+        val args = InstrumentationRegistry.getArguments()
+        if (args.getString("captureV5Panels") != "true") return
+        compose.waitForIdle()
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+        val file = java.io.File(compose.activity.cacheDir, "v5-$name.png")
+        file.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
     }
 
     private fun openScopePicker() {

@@ -1,10 +1,14 @@
 package com.meowv.tune.ui
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
@@ -15,7 +19,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -47,13 +50,14 @@ internal fun MusicSearchScreen(
     onSelectHistory: (String) -> Unit,
     onClearHistory: () -> Unit,
     onClose: () -> Unit,
-    list: LazyListState = rememberLazyListState()
+    list: LazyGridState = rememberLazyGridState(),
+    isCar: Boolean
 ) {
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
     val requester = remember { FocusRequester() }
-    val configuration = LocalConfiguration.current
-    val isCar = isCarWindow(configuration.screenWidthDp.toFloat(), configuration.screenHeightDp.toFloat())
+    val imeVisible = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
+    BackHandler(enabled = !imeVisible) { onClose() }
     val submitEnabled = !state.loading && !state.selecting && state.query.isNotBlank()
     val submit: () -> Unit = {
         if (submitEnabled) {
@@ -75,7 +79,7 @@ internal fun MusicSearchScreen(
                 Row(Modifier.fillMaxWidth().padding(horizontal = horizontal, vertical = TuneSpacing.Small),
                     horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Hairline),
                     verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onClose, modifier = Modifier.size(touch).testTag("music_search_close")) {
+                    IconButton(onClick = { if (imeVisible) { keyboard?.hide(); focus.clearFocus() } else onClose() }, modifier = Modifier.size(touch).testTag("music_search_close")) {
                         Icon(painterResource(R.drawable.ic_arrow_back), stringResource(R.string.music_search_close))
                     }
                     OutlinedTextField(
@@ -101,7 +105,7 @@ internal fun MusicSearchScreen(
                         ),
                         modifier = Modifier.weight(1f).heightIn(min = 56.dp).focusRequester(requester).testTag("music_search_query")
                     )
-                    FilledTonalIconButton(
+                    if (isCar) FilledTonalIconButton(
                         onClick = submit,
                         enabled = submitEnabled,
                         modifier = Modifier.size(56.dp).testTag("music_search_submit"),
@@ -116,11 +120,11 @@ internal fun MusicSearchScreen(
                     }
                 }
 
-                Box(Modifier.weight(1f).fillMaxWidth()) {
+                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                     if (showHistory) {
                         Column(
                             Modifier.fillMaxWidth().padding(horizontal = horizontal, vertical = TuneSpacing.Medium)
-                                .testTag("music_search_history"),
+                                .verticalScroll(rememberScrollState()).testTag("music_search_history"),
                             verticalArrangement = Arrangement.spacedBy(TuneSpacing.Small)
                         ) {
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -144,25 +148,31 @@ internal fun MusicSearchScreen(
                             }
                         }
                     }
-                    if (!showHistory) LazyColumn(Modifier.fillMaxSize().testTag("music_search_results"), state = list,
+                    if (!showHistory) LazyVerticalGrid(
+                        columns = GridCells.Fixed(directoryColumnCount(isCar, maxWidth.value, maxHeight.value)),
+                        modifier = Modifier.fillMaxSize().testTag("music_search_results"), state = list,
+                        horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Medium),
                         contentPadding = PaddingValues(horizontal = horizontal, vertical = TuneSpacing.Hairline)) {
-                        itemsIndexed(visibleTracks, key = { _, track -> track.id }) { index, track ->
-                            val selected = state.selectedId == track.id
-                            val error = state.selectionFailure.takeIf { selected }?.let { stringResource(musicPlaybackFailureMessage(it)) }
-                            MusicTrackRow(track, isCar,
-                                visual = when {
-                                    selected && state.selecting -> StationPlaybackVisual.Connecting
-                                    error != null -> StationPlaybackVisual.Error
-                                    else -> StationPlaybackVisual.None
-                                },
-                                enabled = !state.selecting,
-                                modifier = Modifier.testTag("music_search_result_${track.id}"), error = error) {
-                                onSelect(track)
+                        items(visibleTracks.size, key = { visibleTracks[it].id }) { index ->
+                            val track = visibleTracks[index]
+                            Column {
+                                val selected = state.selectedId == track.id
+                                val error = state.selectionFailure.takeIf { selected }?.let { stringResource(musicPlaybackFailureMessage(it)) }
+                                MusicTrackRow(track, isCar,
+                                    visual = when {
+                                        selected && state.selecting -> StationPlaybackVisual.Connecting
+                                        error != null -> StationPlaybackVisual.Error
+                                        else -> StationPlaybackVisual.None
+                                    },
+                                    enabled = !state.selecting,
+                                    modifier = Modifier.testTag("music_search_result_${track.id}"), error = error) {
+                                    onSelect(track)
+                                }
+                                if (index < visibleTracks.lastIndex) MusicTrackDivider()
                             }
-                            if (index < visibleTracks.lastIndex) MusicTrackDivider()
                         }
                         if (state.request == MusicSearchRequest.APPEND || state.nextCursor != null) {
-                            item(key = "search_footer") {
+                            item(key = "search_footer", span = { GridItemSpan(maxLineSpan) }) {
                                 SearchPagination(state, touch, onMore)
                             }
                         }

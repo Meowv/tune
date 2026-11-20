@@ -16,10 +16,13 @@ internal class MusicSearchHistoryStore(private val preferences: DataStore<Prefer
 
     suspend fun add(query: String) {
         val value = query.trim()
-        if (value.isEmpty() || value.any(Char::isISOControl)) return
-        val updated = (listOf(value) + read().filterNot { it == value }).take(MaxEntries)
+        if (value.length !in 1..100 || value.any(Char::isISOControl) ||
+            value.contains("://") || value.startsWith("www.", ignoreCase = true)) return
         try {
-            preferences.edit { it[Key] = updated.joinToString(Separator) }
+            preferences.edit {
+                it[Key] = (listOf(value) + it[Key].decodeValues().filterNot { old -> old == value })
+                    .take(MaxEntries).joinToString(Separator)
+            }
         } catch (_: IOException) {
             // 搜索本身不依赖历史写入成功。
         }
@@ -27,7 +30,7 @@ internal class MusicSearchHistoryStore(private val preferences: DataStore<Prefer
 
     suspend fun clear() {
         try {
-            preferences.edit { clear() }
+            preferences.edit { it.remove(Key) }
         } catch (_: IOException) {
             // 清空失败不影响当前搜索页。
         }
@@ -36,7 +39,8 @@ internal class MusicSearchHistoryStore(private val preferences: DataStore<Prefer
     private fun String?.decodeValues(): List<String> = this.orEmpty()
         .split(Separator)
         .map(String::trim)
-        .filter(String::isNotEmpty)
+        .filter { it.length in 1..100 && it.none(Char::isISOControl) &&
+            !it.contains("://") && !it.startsWith("www.", ignoreCase = true) }
         .distinct()
         .take(MaxEntries)
 

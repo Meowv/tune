@@ -14,7 +14,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.activity.ComponentActivity
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.key
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlaybackSource
@@ -33,8 +32,6 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.meowv.tune.music.MusicSearchViewModel
 import com.meowv.tune.ui.MusicSearchScreen
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.meowv.tune.music.MusicViewModel
 import com.meowv.tune.settings.SettingsViewModel
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -176,7 +173,16 @@ class MainActivity : ComponentActivity() {
             val musicBrowse by musicModel.browse.collectAsStateWithLifecycle()
             val musicState by musicModel.state.collectAsStateWithLifecycle()
             val musicSearch by musicSearchModel.state.collectAsStateWithLifecycle()
-            val searchList = key(musicSearch.query) { rememberLazyListState() }
+            val searchList = key(musicSearch.query) { androidx.compose.foundation.lazy.grid.rememberLazyGridState() }
+            val searchContent: @androidx.compose.runtime.Composable (Boolean) -> Unit = { isCar ->
+                MusicSearchScreen(
+                    musicSearch, musicSearchModel::queryChanged, musicSearchModel::search,
+                    musicSearchModel::more,
+                    { track -> ensureNotificationPermission(); musicSearchModel.select(track) },
+                    musicSearchModel::selectHistory, musicSearchModel::clearHistory,
+                    musicSearchModel::close, searchList, isCar = isCar
+                )
+            }
             val settings by settingsModel.settings.collectAsStateWithLifecycle()
             val storageError by settingsModel.storageError.collectAsStateWithLifecycle()
             val countries by radioModel.countries.collectAsStateWithLifecycle()
@@ -196,6 +202,8 @@ class MainActivity : ComponentActivity() {
                     onLoadMusic = musicModel::loadFeed,
                     onSearchMusic = musicSearchModel::open,
                     musicSearchOpen = musicSearch.visible,
+                    onCloseMusicSearch = musicSearchModel::close,
+                    musicSearchContent = searchContent,
                     storageError = storageError,
                     radio = radioModel.radioState,
                     playback = tuneApp.playerController.state,
@@ -239,14 +247,7 @@ class MainActivity : ComponentActivity() {
                     },
                     onFirstLayout = { firstFrameReady = true }
                 )
-                if (musicSearch.visible) Dialog(onDismissRequest = musicSearchModel::close,
-                    properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-                    MusicSearchScreen(musicSearch, musicSearchModel::queryChanged, musicSearchModel::search,
-                        musicSearchModel::more,
-                        { track -> ensureNotificationPermission(); musicSearchModel.select(track) },
-                        musicSearchModel::selectHistory, musicSearchModel::clearHistory,
-                        musicSearchModel::close, searchList)
-                }
+
             }
         }
     }

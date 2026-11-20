@@ -11,12 +11,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PageSize
 import androidx.compose.foundation.pager.rememberPagerState
@@ -60,6 +59,8 @@ import com.meowv.tune.ui.theme.TuneShapes
 import com.meowv.tune.ui.theme.TuneSizes
 import com.meowv.tune.ui.theme.TuneSpacing
 import com.meowv.tune.ui.theme.TuneTextStyle
+import androidx.compose.ui.graphics.graphicsLayer
+import kotlin.math.abs
 import kotlinx.coroutines.delay
 import java.text.Collator
 import java.util.Locale
@@ -117,7 +118,7 @@ private fun RadioDirectory(
         }
         // 列表/卡片必须拿到“头部之外”的剩余高度，否则会画到播放器下面。
         // 滚动位置提到 Crossfade 之外，列表↔卡片来回切换不会回到顶部。
-        val listState = rememberLazyListState()
+        val listState = rememberLazyGridState()
         Box(Modifier.weight(1f).fillMaxWidth()) {
             Crossfade(targetState = displayMode, animationSpec = tween(200), label = "display_mode") { mode ->
                 when (mode) {
@@ -140,16 +141,12 @@ private fun StationList(
     state: RadioUiState,
     playback: PlayerUiState,
     selectedId: java.util.UUID?,
-    listState: LazyListState,
+    listState: LazyGridState,
     onPlayback: ((PlayerCommand) -> Unit)?,
     onLoadMore: () -> Unit,
     onSelectTarget: (Station) -> Unit,
     onRefresh: () -> Unit
 ) {
-    if (isCar) {
-        StationGrid(isCar, state, playback, selectedId, onPlayback, onLoadMore, onSelectTarget, onRefresh)
-        return
-    }
     val loadMore by rememberUpdatedState(onLoadMore)
     val stationsSize by rememberUpdatedState(state.stations.size)
     val hasMore by rememberUpdatedState(state.hasMore)
@@ -163,9 +160,11 @@ private fun StationList(
         }.filter { it }.collect { loadMore() }
     }
     // 列表始终存在（用例与滚动位置都依赖它）；首次加载/切换区域时在内容区正中叠一个状态位。
-    Box(Modifier.fillMaxSize()) {
-        LazyColumn(
-            Modifier.fillMaxSize().testTag("station_list"),
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(directoryColumnCount(isCar, maxWidth.value, maxHeight.value)),
+            horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Medium),
+            modifier = Modifier.fillMaxSize().testTag("station_list"),
             state = listState,
             contentPadding = PaddingValues(
                 start = if (isCar) 24.dp else 16.dp,
@@ -174,28 +173,31 @@ private fun StationList(
             )
         ) {
             // 已有缓存行时失败只做顶部提示，不能盖住还能播的台。
-            if (state.error != null && state.stations.isNotEmpty()) item(key = "directory_error") {
+            if (state.error != null && state.stations.isNotEmpty()) item(key = "directory_error", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                 DirectoryFeedback(R.string.directory_error, onRefresh)
             }
-            itemsIndexed(state.stations, key = { _, station -> station.uuid.toString() }) { index, station ->
-                StationRow(
-                    station = station,
-                    isCar = isCar,
-                    selected = station.uuid == selectedId,
-                    playback = playback,
-                    onPlayback = onPlayback,
-                    onSelectTarget = onSelectTarget
-                )
-                if (index < state.stations.lastIndex) {
-                    // 分割线与台名左缘对齐（行内边距 + 台标 + 间距），不压在台标下方。
-                    HorizontalDivider(
-                        modifier = Modifier.padding(start = 76.dp),
-                        color = TuneColors.Divider.copy(alpha = .55f), thickness = .5.dp
+            items(state.stations.size, key = { state.stations[it].uuid.toString() }) { index ->
+                val station = state.stations[index]
+                Column {
+                    StationRow(
+                        station = station,
+                        isCar = isCar,
+                        selected = station.uuid == selectedId,
+                        playback = playback,
+                        onPlayback = onPlayback,
+                        onSelectTarget = onSelectTarget
                     )
+                    if (index < state.stations.lastIndex) {
+                        // 分割线与台名左缘对齐（行内边距 + 台标 + 间距），不压在台标下方。
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = 76.dp),
+                            color = TuneColors.Divider.copy(alpha = .55f), thickness = .5.dp
+                        )
+                    }
                 }
             }
             // 翻页加载沿用列表底部的小环，不打断已加载内容。
-            if (state.isLoading && state.stations.isNotEmpty()) item(key = "directory_loading") {
+            if (state.isLoading && state.stations.isNotEmpty()) item(key = "directory_loading", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                 DirectoryLoading(Modifier.fillMaxWidth().padding(vertical = 20.dp), size = 22.dp)
             }
         }
@@ -219,85 +221,13 @@ private fun StationList(
 }
 
 @Composable
-private fun StationGrid(
-    isCar: Boolean,
-    state: RadioUiState,
-    playback: PlayerUiState,
-    selectedId: java.util.UUID?,
-    onPlayback: ((PlayerCommand) -> Unit)?,
-    onLoadMore: () -> Unit,
-    onSelectTarget: (Station) -> Unit,
-    onRefresh: () -> Unit
-) {
-    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
-    val loadMore by rememberUpdatedState(onLoadMore)
-    val stationsSize by rememberUpdatedState(state.stations.size)
-    val hasMore by rememberUpdatedState(state.hasMore)
-    val loading by rememberUpdatedState(state.isLoading)
-    val error by rememberUpdatedState(state.error)
-    LaunchedEffect(gridState) {
-        snapshotFlow {
-            val last = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            hasMore && !loading && error == null && last > 0 && last >= stationsSize - 4
-        }.filter { it }.collect { loadMore() }
-    }
-    Box(Modifier.fillMaxSize()) {
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            modifier = Modifier.fillMaxSize().testTag("station_list"),
-            state = gridState,
-            contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Medium),
-            verticalArrangement = Arrangement.spacedBy(TuneSpacing.Small)
-        ) {
-            if (state.error != null && state.stations.isNotEmpty()) {
-                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }, key = "directory_error") {
-                    DirectoryFeedback(R.string.directory_error, onRefresh)
-                }
-            }
-            items(state.stations.size, key = { state.stations[it].uuid.toString() }) { index ->
-                val station = state.stations[index]
-                StationRow(
-                    station = station,
-                    isCar = isCar,
-                    selected = station.uuid == selectedId,
-                    playback = playback,
-                    onPlayback = onPlayback,
-                    onSelectTarget = onSelectTarget,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-            if (state.isLoading && state.stations.isNotEmpty()) {
-                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }, key = "directory_loading") {
-                    DirectoryLoading(Modifier.fillMaxWidth().padding(vertical = 20.dp), size = 22.dp)
-                }
-            }
-        }
-        if (state.stations.isEmpty()) {
-            when {
-                state.isLoading -> DirectoryLoading(Modifier.fillMaxSize())
-                state.error != null -> DirectoryMessage(
-                    R.drawable.ic_ui_info, TuneColors.Error, R.string.directory_error, Modifier.fillMaxSize()
-                ) {
-                    TextButton(onClick = onRefresh) { Text(stringResource(R.string.directory_retry), color = TuneColors.Primary) }
-                }
-                else -> DirectoryMessage(
-                    R.drawable.ic_radio, TuneColors.Muted, R.string.directory_empty, Modifier.fillMaxSize()
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun StationRow(
     station: Station,
     isCar: Boolean,
     selected: Boolean,
     playback: PlayerUiState,
     onPlayback: ((PlayerCommand) -> Unit)?,
-    onSelectTarget: (Station) -> Unit,
-    modifier: Modifier = Modifier
+    onSelectTarget: (Station) -> Unit
 ) {
     val title = station.name.ifBlank { stringResource(R.string.station_unnamed) }
     val isCurrent = playback.station?.uuid == station.uuid
@@ -338,7 +268,7 @@ private fun StationRow(
     val markerColor = TuneColors.Primary
     val glyph = TuneSizes.IconMd
     Row(
-        modifier.fillMaxWidth().height(if (isCar) 72.dp else 78.dp)
+        Modifier.fillMaxWidth().height(if (isCar) 72.dp else 78.dp)
             .clip(shape)
             .background(rowBackground)
             .drawBehind {
@@ -509,7 +439,14 @@ private fun CardMode(
                         onSelectTarget(station)
                         onPlayback?.invoke(PlayerCommand.Play(station))
                     },
+                    interactive = page == pagerState.settledPage && !pagerState.isScrollInProgress,
                     modifier = Modifier.fillMaxWidth().height(height).testTag("station_card_${station.uuid}")
+                        .graphicsLayer {
+                            val distance = abs((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
+                            alpha = 1f - distance * .6f
+                            scaleX = 1f - distance * .08f
+                            scaleY = scaleX
+                        }
                 )
                 Spacer(Modifier.height(statusGap))
                 StationPlaybackStatus(
@@ -528,10 +465,11 @@ private fun CardMode(
 @Composable
 private fun StationCard(
     station: Station, isCar: Boolean, showCountry: Boolean,
-    onClick: () -> Unit, modifier: Modifier
+    onClick: () -> Unit, modifier: Modifier, interactive: Boolean
 ) {
     BoxWithConstraints(
-        modifier.background(TuneColors.Raised, TuneShapes.Card).clickable(onClick = onClick)
+        modifier.clip(TuneShapes.Card).background(TuneColors.Raised)
+            .clickable(enabled = interactive, onClick = onClick)
     ) {
         val padding = if (maxHeight < 280.dp) TuneSpacing.Large else TuneSpacing.Section
         val nameLine = if (isCar) 32.sp else 27.sp
@@ -788,10 +726,10 @@ internal fun ScopePicker(
                 onDispose { }
             }
             Surface(
-                Modifier.widthIn(max = 460.dp).fillMaxWidth(.9f).height(height),
+                Modifier.widthIn(max = 660.dp).fillMaxWidth(.9f).height(height),
                 shape = TuneShapes.Dialog, color = TuneColors.Surface
             ) {
-                ScopeOptions(scope, countries, onRetry, onDismiss, onSelect)
+                ScopeOptions(isCar, scope, countries, onRetry, onDismiss, onSelect)
             }
         }
     } else {
@@ -802,7 +740,7 @@ internal fun ScopePicker(
             dragHandle = { BottomSheetDefaults.DragHandle(color = TuneColors.Border) }
         ) {
             Box(Modifier.fillMaxWidth().heightIn(max = height)) {
-                ScopeOptions(scope, countries, onRetry, onDismiss, onSelect)
+                ScopeOptions(isCar, scope, countries, onRetry, onDismiss, onSelect)
             }
         }
     }
@@ -810,6 +748,7 @@ internal fun ScopePicker(
 
 @Composable
 private fun ScopeOptions(
+    isCar: Boolean,
     scope: RadioScope, countries: CountryOptions, onRetry: () -> Unit,
     onDismiss: () -> Unit, onSelect: (RadioScope) -> Unit
 ) {
@@ -846,43 +785,45 @@ private fun ScopeOptions(
                 TuneIcon(R.drawable.ic_close, Modifier.size(22.dp), TuneColors.Muted)
             }
         }
-        LazyColumn(
-            Modifier.weight(1f).focusGroup().testTag("scope_options"),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+        LazyVerticalGrid(
+            columns = if (isCar) GridCells.Adaptive(156.dp) else GridCells.Fixed(1),
+            modifier = Modifier.weight(1f).fillMaxWidth().focusGroup().testTag("scope_options"),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(if (isCar) 8.dp else 2.dp)
         ) {
             item(key = "AUTO") {
-                ScopeOption("Auto", stringResource(R.string.scope_auto), scope.mode == ScopeMode.AUTO) {
+                ScopeOption(isCar, "Auto", stringResource(R.string.scope_auto), scope.mode == ScopeMode.AUTO) {
                     onSelect(RadioScope())
                 }
             }
             item(key = "GLOBAL") {
-                ScopeOption("Global", stringResource(R.string.scope_global), scope.mode == ScopeMode.GLOBAL) {
+                ScopeOption(isCar, "Global", stringResource(R.string.scope_global), scope.mode == ScopeMode.GLOBAL) {
                     onSelect(RadioScope(ScopeMode.GLOBAL))
                 }
             }
-            if (countries.isLoading) item { DirectoryFeedback(R.string.directory_loading) }
-            if (countries.failed) item { DirectoryFeedback(R.string.directory_error, onRetry) }
-            if (countries.stale) item { DirectoryFeedback(R.string.directory_stale) }
+            if (countries.isLoading) item(span = { GridItemSpan(maxLineSpan) }) { DirectoryFeedback(R.string.directory_loading) }
+            if (countries.failed) item(span = { GridItemSpan(maxLineSpan) }) { DirectoryFeedback(R.string.directory_error, onRetry) }
+            if (countries.stale) item(span = { GridItemSpan(maxLineSpan) }) { DirectoryFeedback(R.string.directory_stale) }
             if (sorted.isEmpty() && !countries.isLoading && !countries.failed) {
-                item { DirectoryFeedback(R.string.scope_empty, onRetry) }
+                item(span = { GridItemSpan(maxLineSpan) }) { DirectoryFeedback(R.string.scope_empty, onRetry) }
             }
-            itemsIndexed(sorted, key = { _, item -> item.first.value }) { _, item ->
-                val (code, label) = item
+            items(sorted.size, key = { sorted[it].first.value }) { index ->
+                val (code, label) = sorted[index]
                 val option = RadioScope(ScopeMode.COUNTRY, code)
-                ScopeOption(code.value, label, scope == option) { onSelect(option) }
+                ScopeOption(isCar, code.value, label, scope == option) { onSelect(option) }
             }
         }
     }
 }
 
 @Composable
-private fun ScopeOption(tag: String, label: String, selected: Boolean, onSelect: () -> Unit) {
+private fun ScopeOption(isCar: Boolean, tag: String, label: String, selected: Boolean, onSelect: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val shape = TuneShapes.Control
     Row(
         Modifier.fillMaxWidth().heightIn(min = 56.dp)
             .clip(shape)
-            .background(if (selected) TuneColors.Raised else TuneColors.Surface)
+            .background(if (selected) TuneColors.Primary.copy(alpha = .15f) else if (isCar) TuneColors.Raised else TuneColors.Surface)
             .then(if (focused) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect)

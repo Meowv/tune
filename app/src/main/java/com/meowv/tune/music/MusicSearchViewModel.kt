@@ -64,19 +64,10 @@ internal class MusicSearchViewModel(
         if (value == mutable.value.query || mutable.value.selecting) return
         generation++
         pending?.cancel()
-        mutable.value = MusicSearchState(visible = true, query = value)
+        mutable.value = MusicSearchState(visible = true, query = value, history = mutable.value.history)
     }
 
-    fun search() {
-        val query = mutable.value.query.trim()
-        if (query.isNotEmpty()) {
-            viewModelScope.launch {
-                historyStore?.add(query)
-                mutable.value = mutable.value.copy(history = historyStore?.read().orEmpty())
-            }
-        }
-        load(more = false)
-    }
+    fun search() = load(more = false)
 
     fun selectHistory(query: String) {
         queryChanged(query)
@@ -135,6 +126,10 @@ internal class MusicSearchViewModel(
                     nextCursor = page.nextCursor?.takeUnless { it == cursor || items.size >= 200 },
                     sourceWarnings = warnings, partial = page.partial || warnings.isNotEmpty() ||
                         more && old.partial && old.sourceWarnings.isEmpty())
+                if (!more && historyStore != null) {
+                    historyStore.add(query)
+                    mutable.value = mutable.value.copy(history = historyStore.read())
+                }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: MusicException) {
                 ensureActive()

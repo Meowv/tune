@@ -13,3 +13,6 @@ internal fun isCarWindow(widthDp: Float, heightDp: Float): Boolean =
 
 internal fun isNowPlayingWide(widthDp: Float, heightDp: Float): Boolean =
     isCarWindow(widthDp, heightDp)
+
+internal fun directoryColumnCount(isCar: Boolean, widthDp: Float, heightDp: Float): Int =
+    if (isCar && widthDp >= 660f && heightDp >= 280f) 2 else 1

@@ -3,16 +3,13 @@ package com.meowv.tune.ui
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PageSize
 import androidx.compose.foundation.pager.rememberPagerState
@@ -42,10 +39,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -58,9 +52,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil3.compose.AsyncImage
-import coil3.request.ImageRequest
-import coil3.request.crossfade
 import com.meowv.tune.R
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlayerCommand
@@ -95,7 +86,7 @@ internal fun MusicScreen(
     val visual = playback?.let { playbackVisual(it.phase, connected) } ?: StationPlaybackVisual.None
     val playbackError = playback?.takeIf { it.error == null }?.let { musicPlaybackErrorText(it) }
     val waitingForAccess = browse.failure == MusicFailure.NOT_CONFIGURED
-    val list = rememberLazyListState()
+    val list = rememberLazyGridState()
     var mode by rememberSaveable { mutableStateOf(RadioDisplayMode.LIST) }
     var previewId by rememberSaveable { mutableStateOf<String?>(null) }
     var listSelectionId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -163,10 +154,11 @@ internal fun MusicScreen(
                     size = 22.dp, tag = "music_feed_loading")
             } else {
                 val horizontal = if (isCar) 24.dp else 16.dp
-                if (isCar) {
+                BoxWithConstraints(statusModifier) {
                     LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
-                        modifier = statusModifier.testTag("music_feed"),
+                        columns = GridCells.Fixed(directoryColumnCount(isCar, maxWidth.value, maxHeight.value)),
+                        modifier = Modifier.fillMaxSize().testTag("music_feed"),
+                        state = list,
                         contentPadding = PaddingValues(start = horizontal, end = horizontal, bottom = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Medium),
                         verticalArrangement = Arrangement.spacedBy(TuneSpacing.Small)
@@ -175,33 +167,17 @@ internal fun MusicScreen(
                             val track = browse.tracks[index]
                             val current = track.id == currentId
                             val rowVisual = if (current) visual else StationPlaybackVisual.None
-                            MusicTrackRow(track, isCar, current, rowVisual,
-                                enabled = connected && !rowVisual.busy, error = playbackError.takeIf { current },
-                                animationsEnabled = animationsEnabled,
-                                modifier = Modifier.testTag("music_feed_track_${track.id}")) {
-                                clickTrack(track)
+                            Column {
+                                MusicTrackRow(track, isCar, current, rowVisual,
+                                    enabled = connected && !rowVisual.busy, error = playbackError.takeIf { current },
+                                    animationsEnabled = animationsEnabled,
+                                    modifier = Modifier.testTag("music_feed_track_${track.id}")) {
+                                    clickTrack(track)
+                                }
+                                if (index < browse.tracks.lastIndex) MusicTrackDivider()
                             }
                         }
                         if (browse.loading) item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }, key = "music_feed_loading") {
-                            DirectoryLoading(Modifier.fillMaxWidth().padding(vertical = TuneSpacing.Medium),
-                                size = 22.dp, tag = "music_feed_loading")
-                        }
-                    }
-                } else {
-                    LazyColumn(state = list, modifier = statusModifier.testTag("music_feed"),
-                        contentPadding = PaddingValues(start = horizontal, end = horizontal, bottom = 12.dp)) {
-                        itemsIndexed(browse.tracks, key = { _, track -> track.id }) { index, track ->
-                            val current = track.id == currentId
-                            val rowVisual = if (current) visual else StationPlaybackVisual.None
-                            MusicTrackRow(track, isCar, current, rowVisual,
-                                enabled = connected && !rowVisual.busy, error = playbackError.takeIf { current },
-                                animationsEnabled = animationsEnabled,
-                                modifier = Modifier.testTag("music_feed_track_${track.id}")) {
-                                clickTrack(track)
-                            }
-                            if (index < browse.tracks.lastIndex) MusicTrackDivider()
-                        }
-                        if (browse.loading) item(key = "music_feed_loading") {
                             DirectoryLoading(Modifier.fillMaxWidth().padding(vertical = TuneSpacing.Medium),
                                 size = 22.dp, tag = "music_feed_loading")
                         }
@@ -301,13 +277,15 @@ private fun MusicCards(
                         MusicCard(track, isCar, current, cardVisual, connected && !cardVisual.busy,
                             interactive = fullyVisible && !pager.isScrollInProgress,
                             modifier = Modifier.matchParentSize().then(cardTag)
-                                .graphicsLayer { alpha = if (showContent) 1f else 0f }
+                                .graphicsLayer {
+                                    alpha = if (showContent) 1f else .4f
+                                    scaleX = if (showContent) 1f else .92f
+                                    scaleY = scaleX
+                                }
                                 .semantics {
                                     if (fullyVisible && index == pager.settledPage) selected = true
                                 }
                         ) { onPlay(track) }
-                        if (!showContent) Spacer(Modifier.matchParentSize()
-                            .border(1.dp, TuneColors.BorderSoft, TuneShapes.Card).testTag("music_card_preview"))
                     }
                     Spacer(Modifier.height(statusGap))
                     when {
@@ -383,18 +361,7 @@ private fun musicActionLabel(visual: StationPlaybackVisual): Int = when (visual)
 
 @Composable
 internal fun MusicCover(track: MusicTrack?, modifier: Modifier = Modifier, shape: Shape = TuneShapes.Control) {
-    val fallback = painterResource(R.drawable.music_record)
-    val artwork = modifier.clip(shape).background(TuneColors.Raised)
-    val cover = track?.coverUrl
-    if (cover.isNullOrBlank()) Image(fallback, null, artwork)
-    else {
-        val context = LocalContext.current
-        val duration = if (rememberMotionEnabled()) 160 else 0
-        val request = remember(context, cover, duration) {
-            ImageRequest.Builder(context).data(cover).crossfade(duration).build()
-        }
-        AsyncImage(request, null, artwork, placeholder = fallback, error = fallback, contentScale = ContentScale.Crop)
-    }
+    MediaArtwork(track?.coverUrl, isMusic = true, modifier = modifier.clip(shape))
 }
 
 @Composable

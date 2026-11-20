@@ -92,6 +92,8 @@ internal fun TuneApp(
     musicState: MusicUiState = MusicUiState.NotConfigured,
     onSearchMusic: () -> Unit = {},
     musicSearchOpen: Boolean = false,
+    onCloseMusicSearch: () -> Unit = {},
+    musicSearchContent: @Composable (Boolean) -> Unit = {},
     musicBrowse: MusicFeed = MusicFeed(),
     onEnterMusic: () -> Unit = {},
     onLoadMusic: () -> Unit = {},
@@ -179,7 +181,7 @@ internal fun TuneApp(
         if (nowPlayingOpen) focusManager.clearFocus(force = true)
     }
     val rotation = rememberSaveable(saver = PlayerRotationState.Saver) { PlayerRotationState() }
-    val shellEnabled = !fullscreenOccupied && !showUpdate && !showScopePicker && !musicSearchOpen
+    val shellEnabled = !fullscreenOccupied && !showUpdate && !showScopePicker
     BackHandler(enabled = nowPlayingOpen && !showUpdate && !showScopePicker) {
         nowPlayingOpen = false
     }
@@ -206,6 +208,7 @@ internal fun TuneApp(
                         if (playbackState.source == PlaybackSource.RADIO && playbackState.station == null && target != null) {
                             onSelectTarget(target)
                         }
+                        onCloseMusicSearch()
                         nowPlayingOpen = true
                     }
                 )
@@ -216,6 +219,7 @@ internal fun TuneApp(
             ) {
                 if (isCar && !showUpdate) {
                     MeowvNavigationRail(page) {
+                        onCloseMusicSearch()
                         nowPlayingOpen = false
                         page = it
                     }
@@ -236,7 +240,7 @@ internal fun TuneApp(
                             }
                             .focusGroup()
                             .then(
-                                if (!shellEnabled) {
+                                if (!shellEnabled || musicSearchOpen) {
                                     Modifier.semantics { hideFromAccessibility() }
                                 } else Modifier
                             )
@@ -258,17 +262,24 @@ internal fun TuneApp(
                             directoryAnimationsEnabled = shellEnabled
                         )
                         if (isCar) {
-                            if (!fullscreenOccupied) playerEntry()
+                            if (!fullscreenOccupied && !musicSearchOpen) playerEntry()
                         } else {
                             MeowvBottomDock(page, playerEntry) { page = it }
                         }
                     }
-                    if (!shellEnabled) {
+                    if (!shellEnabled || musicSearchOpen) {
                         Box(Modifier.fillMaxSize().pointerInput(Unit) {
                             awaitPointerEventScope {
                                 while (true) awaitPointerEvent().changes.forEach { it.consume() }
                             }
                         })
+                    }
+                    if (isCar && musicSearchOpen) {
+                        Column(Modifier.fillMaxSize()) {
+                            Box(Modifier.weight(1f).fillMaxWidth()) { musicSearchContent(true) }
+                            val imeVisible = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
+                            if (!imeVisible) playerEntry()
+                        }
                     }
                     androidx.compose.animation.AnimatedVisibility(
                         visibleState = fullscreenTransition,
@@ -311,6 +322,14 @@ internal fun TuneApp(
                         )
                     }
                 }
+            }
+            if (!isCar && musicSearchOpen) {
+                androidx.compose.ui.window.Dialog(
+                    onDismissRequest = onCloseMusicSearch,
+                    properties = androidx.compose.ui.window.DialogProperties(
+                        usePlatformDefaultWidth = false, decorFitsSystemWindows = false
+                    )
+                ) { musicSearchContent(false) }
             }
             // 版本页覆盖整个外壳（含播放器与导航），保持主菜单仍是三个。
             if (showUpdate) {

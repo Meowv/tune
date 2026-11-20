@@ -65,6 +65,17 @@ class MusicPlaybackUiTest {
                 compose.onNodeWithText("飙升榜").assertDoesNotExist()
                 compose.onNodeWithText("部分来源未能提供结果，已显示可用内容").assertDoesNotExist()
                 compose.onNodeWithText("不存在的曲目").assertDoesNotExist()
+                val feedBounds = feed.getUnclippedBoundsInRoot()
+                val firstBounds = compose.onNodeWithTag("music_feed_track_ui-1").getUnclippedBoundsInRoot()
+                val secondBounds = compose.onNodeWithTag("music_feed_track_ui-2").getUnclippedBoundsInRoot()
+                val car = compose.onAllNodesWithTag("shell_car").fetchSemanticsNodes().isNotEmpty()
+                if (car && feedBounds.right.value - feedBounds.left.value >= 660f &&
+                    feedBounds.bottom.value - feedBounds.top.value >= 280f) {
+                    assertEquals(firstBounds.top.value, secondBounds.top.value, 1f)
+                    assertTrue(secondBounds.left >= firstBounds.right)
+                } else {
+                    assertTrue(secondBounds.top >= firstBounds.bottom)
+                }
                 compose.onNodeWithTag("music_feed_track_ui-2").performClick()
                 withTimeout(6000) { connection.state.first { it.phase == PlaybackPhase.PLAYING && it.music?.id == "ui-2" } }
                 val rowControl = compose.onNodeWithTag("music_track_action_ui-2", useUnmergedTree = true)
