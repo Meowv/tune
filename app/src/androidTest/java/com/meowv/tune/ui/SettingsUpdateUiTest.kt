@@ -1,6 +1,10 @@
 package com.meowv.tune.ui
 
+import android.graphics.Bitmap
 import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.test.platform.app.InstrumentationRegistry
+import java.io.File
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.mutableStateOf
@@ -66,21 +70,30 @@ class SettingsUpdateUiTest {
         assertEquals(1, checks)
         compose.runOnIdle { state.value = UpdateUiState.Checking }
         compose.onNodeWithTag("update_check").assertIsNotEnabled()
+        captureUpdateStatus("checking")
         compose.runOnIdle { state.value = UpdateUiState.Error(UpdateFailure.OFFLINE) }
         compose.onNodeWithText("重试检查").assertExists()
+        captureUpdateStatus("offline")
         compose.onNodeWithText("已是最新版本").assertDoesNotExist()
         compose.runOnIdle { state.value = UpdateUiState.UpToDate(info) }
         compose.onNodeWithText("重新检查").assertExists()
+        captureUpdateStatus("up-to-date")
         compose.runOnIdle { state.value = UpdateUiState.UpdateAvailable(info); install.value = InstallState.Downloading(45, 100) }
         compose.onNodeWithText("45%").assertExists()
         compose.onNodeWithTag("update_cancel").assertExists()
+        captureUpdateStatus("downloading")
+        compose.runOnIdle { install.value = InstallState.Verifying }
+        compose.onNodeWithTag("update_check").assertIsNotEnabled()
+        captureUpdateStatus("verifying")
         compose.runOnIdle { install.value = InstallState.Downloaded }
         compose.onNodeWithTag("update_install").performClick()
         assertEquals(1, installs)
         compose.runOnIdle { install.value = InstallState.InstallPermissionRequired }
         compose.onNodeWithTag("update_permission").assertExists()
+        captureUpdateStatus("permission-required")
         compose.runOnIdle { install.value = InstallState.Failed(InstallFailure.CHECKSUM_MISMATCH) }
         compose.onNodeWithText("SHA-256 校验不通过，已删除。").assertExists()
+        captureUpdateStatus("checksum-failed")
         compose.runOnIdle { install.value = InstallState.Failed(InstallFailure.INSTALL_CANCELLED) }
         compose.onNodeWithTag("update_install").performClick()
         assertEquals(2, installs)
@@ -103,6 +116,14 @@ class SettingsUpdateUiTest {
         compose.onNodeWithText("刷新数据").assertIsNotEnabled()
         compose.onNodeWithTag("page_settings").performScrollToNode(hasText("版本与更新"))
         compose.onNodeWithText("vtest · 检查更新失败").assertExists()
+    }
+
+    private fun captureUpdateStatus(name: String) {
+        if (InstrumentationRegistry.getArguments().getString("captureV5States") != "true") return
+        val cache = InstrumentationRegistry.getInstrumentation().targetContext.cacheDir
+        File(cache, "v5-update-$name.png").outputStream().use { output ->
+            compose.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, output)
+        }
     }
 
     @androidx.compose.runtime.Composable

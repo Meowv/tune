@@ -46,9 +46,10 @@ class SettingsClosureTest {
     fun settingsExposeOnlySupportedEntries() {
         openPage("nav_settings")
         compose.onNodeWithText("自动播放").assertExists()
+        compose.onNodeWithText("播放").assertExists()
         listOf(
             "启动自动播放", "媒体断开暂停", "仅 Wi-Fi 播放", "流量提醒",
-            "主题", "布局", "大字显示", "播放", "数据与关于"
+            "主题", "布局", "大字显示", "数据与关于"
         ).forEach {
             compose.onNodeWithText(it).assertDoesNotExist()
         }
@@ -95,7 +96,7 @@ class SettingsClosureTest {
         compose.onNodeWithText("关闭").performClick()
     }
 
-    // LazyColumn 只组合可见项，先滚动列表再定位目标行。
+    // 设置页只组合可见项，先滚动列表再定位目标行。
     private fun scrollSettingsTo(text: String, substring: Boolean = false) {
         compose.onNodeWithTag("page_settings").performScrollToNode(hasText(text, substring = substring))
     }

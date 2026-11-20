@@ -17,6 +17,7 @@ import com.meowv.tune.domain.music.*
 import com.meowv.tune.playback.RadioPlaybackService
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -89,6 +90,7 @@ class MusicSearchIntegrationTest {
                 compose.waitUntil(8000) {
                     compose.onAllNodesWithTag("music_search_empty").fetchSemanticsNodes().isNotEmpty()
                 }
+                capture("empty")
                 compose.onNodeWithTag("music_search_query").performTextReplacement("qix")
                 compose.onNodeWithTag("music_search_query").performImeAction()
                 compose.waitUntil(8000) {
@@ -204,6 +206,7 @@ class MusicSearchIntegrationTest {
 
     @Test fun searchRetriesKeepResultsCursorAndScrollPosition() = runBlocking<Unit> {
         val first = AtomicInteger()
+        val failInitialRequest = CompletableDeferred<Unit>()
         val append = AtomicInteger()
         val page = (1..20).map { MusicTrack("page-$it", "Search result $it", listOf("qix")) }
         val second = MusicTrack("page-21", "Search result 21", listOf("qix"))
@@ -211,7 +214,10 @@ class MusicSearchIntegrationTest {
         app.testMusicRepository = object : MusicRepository by fake {
             override suspend fun search(query: String, limit: Int, cursor: String?): MusicPage =
                 if (cursor == null) {
-                    if (first.incrementAndGet() == 1) throw MusicException(MusicFailure.CONNECTION)
+                    if (first.incrementAndGet() == 1) {
+                        failInitialRequest.await()
+                        throw MusicException(MusicFailure.CONNECTION)
+                    }
                     MusicPage(page, "next")
                 } else {
                     assertEquals("next", cursor)
@@ -227,7 +233,17 @@ class MusicSearchIntegrationTest {
                 compose.onNodeWithTag("music_search_open").performClick()
                 compose.onNodeWithTag("music_search_query").performTextInput("qix")
                 compose.onNodeWithTag("music_search_query").performImeAction()
-                compose.onNodeWithTag("music_search_retry").assertIsDisplayed().performClick()
+                try {
+                    compose.onNodeWithTag("music_search_loading").assertIsDisplayed()
+                    capture("loading")
+                } finally {
+                    failInitialRequest.complete(Unit)
+                }
+                compose.waitUntil(5000) {
+                    compose.onAllNodesWithTag("music_search_retry").fetchSemanticsNodes().isNotEmpty()
+                }
+                capture("error")
+                compose.onNodeWithTag("music_search_retry").performClick()
                 val list = compose.onNodeWithTag("music_search_results")
                 list.performScrollToNode(hasTestTag("music_search_more"))
                 val more = compose.onNodeWithTag("music_search_more")
@@ -235,6 +251,7 @@ class MusicSearchIntegrationTest {
                 more.assertTextEquals("重试")
                 compose.onNodeWithTag("music_search_result_page-20").assertIsDisplayed()
                 compose.onNodeWithTag("music_search_retry").assertDoesNotExist()
+                capture("append-error")
 
                 more.performClick()
                 compose.onNodeWithTag("music_search_more").assertDoesNotExist()

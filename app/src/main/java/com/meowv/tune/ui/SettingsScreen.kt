@@ -9,8 +9,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -62,73 +65,95 @@ internal fun SettingsScreen(
     musicDevice: MusicDeviceState? = null
 ) {
     var dialog by rememberSaveable { mutableStateOf(SettingsDialog.NONE) }
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-        LazyColumn(Modifier.widthIn(max = 720.dp).fillMaxSize().testTag("page_settings"),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = if (isCar) 12.dp else 20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            item(key = "playback_settings") {
-                SettingsGroup {
-                    SettingRow(R.drawable.ic_ui_autoplay, R.string.setting_autoplay, isCar, checked = settings.autoPlay) {
-                        onSettingsChange { current -> current.copy(autoPlay = !current.autoPlay) }
+    val playback: @Composable () -> Unit = {
+        SettingsGroup(R.string.setting_group_playback) {
+            SettingRow(
+                R.drawable.ic_ui_autoplay, R.string.setting_autoplay, isCar,
+                checked = settings.autoPlay,
+                subtitle = stringResource(R.string.setting_autoplay_summary)
+            ) {
+                onSettingsChange { current -> current.copy(autoPlay = !current.autoPlay) }
+            }
+        }
+    }
+    val data: @Composable () -> Unit = {
+        SettingsGroup(R.string.setting_group_data) {
+            SettingRow(
+                R.drawable.ic_ui_refresh, R.string.setting_refresh, isCar,
+                enabled = !refreshing,
+                trailing = if (refreshing) ({ InlineSpinner(isCar) }) else null,
+                onClick = onRefreshAll
+            )
+            SettingsDivider()
+            SettingRow(R.drawable.ic_ui_trash, R.string.setting_cache, isCar, onClick = onClearCache)
+        }
+    }
+    val about: @Composable () -> Unit = {
+        SettingsGroup(R.string.setting_group_about) {
+            SettingRow(
+                R.drawable.ic_ui_database, R.string.setting_source, isCar,
+                trailing = { Chevron(isCar) }, onClick = { dialog = SettingsDialog.SOURCE }
+            )
+            SettingsDivider()
+            SettingRow(
+                R.drawable.ic_ui_scroll, R.string.setting_licenses, isCar,
+                trailing = { Chevron(isCar) }, onClick = { dialog = SettingsDialog.LICENSES }
+            )
+            SettingsDivider()
+            SettingRow(
+                R.drawable.ic_ui_arrow_up_circle, R.string.setting_update, isCar,
+                subtitle = updateSubtitle, trailing = { Chevron(isCar) }, onClick = onOpenUpdate
+            )
+        }
+    }
+
+    BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+        val wide = isCar && maxWidth >= 660.dp
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(if (wide) 2 else 1),
+            modifier = Modifier.widthIn(max = if (wide) 1080.dp else 720.dp).fillMaxSize().testTag("page_settings"),
+            contentPadding = PaddingValues(horizontal = TuneSpacing.Section, vertical = TuneSpacing.Large),
+            horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Large),
+            verticalArrangement = Arrangement.spacedBy(TuneSpacing.Large)
+        ) {
+            if (wide) {
+                item(key = "settings_left_column") {
+                    Column(verticalArrangement = Arrangement.spacedBy(TuneSpacing.Large)) {
+                        playback()
+                        data()
+                        musicDevice?.let { MusicDeviceGroup(it, isCar) }
                     }
                 }
+            } else {
+                item(key = "playback_settings") { playback() }
+                item(key = "data_settings") { data() }
+                if (musicDevice != null) item(key = "music_device") { MusicDeviceGroup(musicDevice, isCar) }
             }
-            item(key = "data_settings") {
-                SettingsGroup {
-                    // 刷新期间行内转圈并禁用，重复点击不会叠加请求。
-                    SettingRow(
-                        R.drawable.ic_ui_refresh, R.string.setting_refresh, isCar,
-                        enabled = !refreshing,
-                        trailing = if (refreshing) ({ InlineSpinner(isCar) }) else null,
-                        onClick = onRefreshAll
-                    )
-                    SettingsDivider()
-                    SettingRow(R.drawable.ic_ui_trash, R.string.setting_cache, isCar, onClick = onClearCache)
-                }
-            }
-            if (musicDevice != null) item(key = "music_device") {
-                val status = stringResource(when (musicDevice.phase) {
-                    MusicDevicePhase.CHECKING -> R.string.music_device_checking
-                    MusicDevicePhase.OFFLINE -> R.string.music_device_offline
-                    MusicDevicePhase.PENDING -> R.string.music_device_pending
-                    MusicDevicePhase.ACTIVE -> R.string.music_device_active
-                    MusicDevicePhase.REVOKED -> R.string.music_device_revoked
-                    MusicDevicePhase.UNAVAILABLE -> R.string.music_device_unavailable
-                })
-                SettingsGroup {
-                    SettingRow(R.drawable.ic_menu_music, R.string.setting_music_device, isCar,
-                        subtitle = musicDevice.shortCode?.let { stringResource(R.string.music_device_summary, status, it) } ?: status)
-                }
-            }
-            item(key = "about_settings") {
-                SettingsGroup {
-                    SettingRow(
-                        R.drawable.ic_ui_database, R.string.setting_source, isCar,
-                        trailing = { Chevron(isCar) },
-                        onClick = { dialog = SettingsDialog.SOURCE }
-                    )
-                    SettingsDivider()
-                    SettingRow(
-                        R.drawable.ic_ui_scroll, R.string.setting_licenses, isCar,
-                        trailing = { Chevron(isCar) },
-                        onClick = { dialog = SettingsDialog.LICENSES }
-                    )
-                    SettingsDivider()
-                    // 版本与更新：副标题跟随检查状态，入口只在设置页，不新增主菜单。
-                    SettingRow(
-                        R.drawable.ic_ui_arrow_up_circle, R.string.setting_update, isCar,
-                        subtitle = updateSubtitle,
-                        trailing = { Chevron(isCar) },
-                        onClick = onOpenUpdate
-                    )
-                }
-            }
+            item(key = "about_settings") { about() }
         }
     }
     when (dialog) {
         SettingsDialog.NONE -> Unit
-        SettingsDialog.SOURCE -> TextDialog(R.string.setting_source, R.string.about_source_body) { dialog = SettingsDialog.NONE }
-        SettingsDialog.LICENSES -> TextDialog(R.string.setting_licenses, R.string.about_licenses_body) { dialog = SettingsDialog.NONE }
+        SettingsDialog.SOURCE -> TextDialog(isCar, R.string.setting_source, R.string.about_source_body) { dialog = SettingsDialog.NONE }
+        SettingsDialog.LICENSES -> TextDialog(isCar, R.string.setting_licenses, R.string.about_licenses_body) { dialog = SettingsDialog.NONE }
+    }
+}
+
+@Composable
+private fun MusicDeviceGroup(device: MusicDeviceState, isCar: Boolean) {
+    val status = stringResource(when (device.phase) {
+        MusicDevicePhase.CHECKING -> R.string.music_device_checking
+        MusicDevicePhase.OFFLINE -> R.string.music_device_offline
+        MusicDevicePhase.PENDING -> R.string.music_device_pending
+        MusicDevicePhase.ACTIVE -> R.string.music_device_active
+        MusicDevicePhase.REVOKED -> R.string.music_device_revoked
+        MusicDevicePhase.UNAVAILABLE -> R.string.music_device_unavailable
+    })
+    SettingsGroup {
+        SettingRow(
+            R.drawable.ic_menu_music, R.string.setting_music_device, isCar,
+            subtitle = device.shortCode?.let { stringResource(R.string.music_device_summary, status, it) } ?: status
+        )
     }
 }
 
@@ -157,21 +182,39 @@ private fun Chevron(isCar: Boolean) {
 private enum class SettingsDialog { NONE, SOURCE, LICENSES }
 
 @Composable
-private fun TextDialog(@StringRes title: Int, @StringRes body: Int, onDismiss: () -> Unit) {
+private fun TextDialog(isCar: Boolean, @StringRes title: Int, @StringRes body: Int, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(title), color = TuneColors.Text) },
-        text = { Text(stringResource(body), color = TuneColors.Muted, fontSize = 14.sp, style = TuneTextStyle) },
-        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) } },
+        text = {
+            Text(
+                stringResource(body), color = TuneColors.Muted, fontSize = 14.sp,
+                style = TuneTextStyle, modifier = Modifier.verticalScroll(rememberScrollState())
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)) {
+                Text(stringResource(R.string.action_close))
+            }
+        },
         containerColor = TuneColors.Surface,
         textContentColor = TuneColors.Text
     )
 }
 
 @Composable
-private fun SettingsGroup(content: @Composable ColumnScope.() -> Unit) {
-    Surface(color = TuneColors.Surface, shape = TuneShapes.SettingsGroup) {
-        Column(Modifier.fillMaxWidth(), content = content)
+private fun SettingsGroup(@StringRes title: Int? = null, content: @Composable ColumnScope.() -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(TuneSpacing.Small)) {
+        if (title != null) {
+            Text(
+                stringResource(title), color = TuneColors.Muted, fontSize = 14.sp,
+                style = TuneTextStyle, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = TuneSpacing.Hairline).semantics { heading() }
+            )
+        }
+        Surface(color = TuneColors.Surface, shape = TuneShapes.SettingsGroup) {
+            Column(Modifier.fillMaxWidth(), content = content)
+        }
     }
 }
 
@@ -197,7 +240,7 @@ private fun SettingRow(
     val shape = RectangleShape
     val background by animateColorAsState(
         if (focused && enabled) TuneColors.Selected else Color.Transparent,
-        animationSpec = tween(180), label = "setting_row_background"
+        animationSpec = tween(if (rememberMotionEnabled()) 180 else 0), label = "setting_row_background"
     )
     val contentAlpha = if (enabled) 1f else .55f
     val rowModifier = Modifier.fillMaxWidth().heightIn(min = if (subtitle != null) 80.dp else 68.dp)

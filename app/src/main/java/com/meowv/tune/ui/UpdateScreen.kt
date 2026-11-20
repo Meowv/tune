@@ -6,7 +6,9 @@ import android.net.Uri
 import android.provider.Settings
 import android.text.format.Formatter
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -21,6 +23,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -28,13 +31,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -49,13 +55,10 @@ import com.meowv.tune.update.install.InstallFailure
 import com.meowv.tune.update.install.InstallState
 import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.ui.theme.TuneShapes
+import com.meowv.tune.ui.theme.TuneSizes
 import com.meowv.tune.ui.theme.TuneSpacing
 import com.meowv.tune.ui.theme.TuneTextStyle
 
-/**
- * 版本与更新页：从设置进入的独立子页，覆盖整个外壳（含播放器与导航），
- * 由系统返回键或左上返回键退出，不改变主菜单结构。
- */
 @Composable
 internal fun UpdateScreen(
     isCar: Boolean,
@@ -83,23 +86,39 @@ internal fun UpdateScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             BoxWithConstraints(Modifier.widthIn(max = 1080.dp).fillMaxWidth()) {
-                val twoColumns = maxWidth >= 840.dp
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    BrandHeader(isCar)
-                    val statusAndVersion: @Composable ColumnScope.() -> Unit = {
-                        StatusCard(isCar, state, install, upgradedTo, onCheck, onDownload, onCancelDownload, onInstall)
-                        VersionCard(isCar, local, state.latest)
-                    }
-                    if (twoColumns) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp), content = statusAndVersion)
-                            Column(Modifier.weight(1f)) { ReleaseNotesCard(isCar, state.latest, notesExpanded) { notesExpanded = !notesExpanded } }
+                val twoColumns = maxWidth >= (if (isCar) 620.dp else 840.dp)
+                val status: @Composable () -> Unit = {
+                    StatusCard(isCar, state, install, upgradedTo, onCheck, onDownload, onCancelDownload, onInstall)
+                }
+                val notes: @Composable () -> Unit = {
+                    ReleaseNotesCard(isCar, state.latest, notesExpanded) { notesExpanded = !notesExpanded }
+                }
+                if (isCar && twoColumns) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Large)) {
+                        Box(Modifier.weight(.85f)) { VersionCard(isCar, local, state.latest, showBrand = true) }
+                        Column(Modifier.weight(1.15f), verticalArrangement = Arrangement.spacedBy(TuneSpacing.Large)) {
+                            status()
+                            notes()
                         }
-                    } else {
-                        Column(Modifier.widthIn(max = 720.dp).fillMaxWidth().align(Alignment.CenterHorizontally),
-                            verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                            statusAndVersion()
-                            ReleaseNotesCard(isCar, state.latest, notesExpanded) { notesExpanded = !notesExpanded }
+                    }
+                } else {
+                    Column(
+                        Modifier.widthIn(max = if (twoColumns) 1080.dp else 720.dp).fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(TuneSpacing.Large)
+                    ) {
+                        BrandHeader(isCar)
+                        if (twoColumns) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Large)) {
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(TuneSpacing.Large)) {
+                                    status()
+                                    VersionCard(isCar, local, state.latest)
+                                }
+                                Box(Modifier.weight(1f)) { notes() }
+                            }
+                        } else {
+                            status()
+                            VersionCard(isCar, local, state.latest)
+                            notes()
                         }
                     }
                 }
@@ -111,13 +130,17 @@ internal fun UpdateScreen(
 @Composable
 private fun UpdateTopBar(isCar: Boolean, onBack: () -> Unit) {
     val backLabel = stringResource(R.string.update_back)
+    var focused by remember { mutableStateOf(false) }
     Row(
         Modifier.fillMaxWidth().height(if (isCar) 64.dp else 56.dp)
             .padding(horizontal = if (isCar) 16.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
-            Modifier.size(48.dp).clip(CircleShape)
+            Modifier.size(if (isCar) TuneSizes.TouchCar else TuneSizes.Touch).clip(CircleShape)
+                .background(TuneColors.Raised)
+                .then(if (focused) Modifier.border(2.dp, TuneColors.Primary, CircleShape) else Modifier)
+                .onFocusChanged { focused = it.isFocused }
                 .clickable(role = Role.Button, onClick = onBack)
                 .testTag("update_back")
                 .semantics { contentDescription = backLabel },
@@ -173,7 +196,7 @@ private fun StatusCard(
             Column(Modifier.weight(1f)) {
                 Text(
                     presentation.title,
-                    modifier = Modifier.testTag("update_status_title"),
+                    modifier = Modifier.testTag("update_status_title").semantics { liveRegion = LiveRegionMode.Polite },
                     color = presentation.tint,
                     fontSize = if (isCar) 19.sp else 17.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -360,10 +383,13 @@ private fun PrimaryButton(
         enabled -> TuneColors.Background
         else -> TuneColors.Primary
     }
+    var focused by remember { mutableStateOf(false) }
     Button(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.fillMaxWidth().heightIn(min = if (isCar) 52.dp else 48.dp).testTag(tag),
+        border = if (focused) BorderStroke(2.dp, TuneColors.Text) else null,
+        modifier = Modifier.fillMaxWidth().heightIn(min = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
+            .onFocusChanged { focused = it.isFocused }.testTag(tag),
         shape = TuneShapes.Control,
         colors = ButtonDefaults.buttonColors(
             containerColor = background, contentColor = textColor,
@@ -487,8 +513,12 @@ private fun statusPresentation(
 }
 
 @Composable
-private fun VersionCard(isCar: Boolean, local: LocalVersion, info: UpdateInfo?) {
+private fun VersionCard(isCar: Boolean, local: LocalVersion, info: UpdateInfo?, showBrand: Boolean = false) {
     UpdateCard {
+        if (showBrand) {
+            BrandHeader(isCar)
+            Spacer(Modifier.height(TuneSpacing.Large))
+        }
         CardTitle(stringResource(R.string.update_section_version), isCar)
         Spacer(Modifier.height(TuneSpacing.Small))
         InfoRow(stringResource(R.string.update_label_current), "v${local.versionName}")
@@ -542,7 +572,7 @@ private fun ReleaseNotesCard(isCar: Boolean, info: UpdateInfo?, expanded: Boolea
         if (notes.isEmpty()) {
             Text(stringResource(R.string.update_notes_empty), color = TuneColors.Muted, fontSize = 13.sp, style = TuneTextStyle)
         } else {
-            Column(Modifier.animateContentSize()) {
+            Column(if (rememberMotionEnabled()) Modifier.animateContentSize() else Modifier) {
                 (if (expanded) notes else notes.take(5)).forEach { note ->
                     Text(note, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                         color = TuneColors.Muted, fontSize = if (isCar) 14.sp else 13.sp,
@@ -550,7 +580,11 @@ private fun ReleaseNotesCard(isCar: Boolean, info: UpdateInfo?, expanded: Boolea
                 }
             }
             if (notes.size > 5) {
-                TextButton(onClick = onToggle, modifier = Modifier.testTag("update_notes_toggle")) {
+                TextButton(
+                    onClick = onToggle,
+                    modifier = Modifier.heightIn(min = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
+                        .testTag("update_notes_toggle")
+                ) {
                     Text(stringResource(if (expanded) R.string.update_notes_collapse else R.string.update_notes_expand),
                         style = TuneTextStyle)
                 }

@@ -1,16 +1,17 @@
 package com.meowv.tune
 
-import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.hasText
+import android.graphics.Bitmap
+import android.view.KeyEvent
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.onAllNodesWithTag
-import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import java.io.File
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import com.meowv.tune.domain.RadioScope
 import com.meowv.tune.domain.ScopeMode
 import com.meowv.tune.domain.TuneSettings
@@ -34,6 +35,16 @@ class UpdatePageTest {
     @Test
     fun settingsEntryShowsUpdateStatusAndOpensPage() {
         openSettings()
+        val isCar = compose.onAllNodesWithTag("shell_car").fetchSemanticsNodes().isNotEmpty()
+        val settings = compose.onNodeWithTag("page_settings").getUnclippedBoundsInRoot()
+        val wide = isCar && settings.right - settings.left >= 660.dp
+        if (wide) {
+            val playback = compose.onNodeWithText("播放").getUnclippedBoundsInRoot()
+            val about = compose.onNodeWithText("关于").getUnclippedBoundsInRoot()
+            assertEquals(playback.top.value, about.top.value, 1f)
+            assertTrue(about.left > playback.right)
+        }
+        capture("settings")
         scrollTo("版本与更新")
         val localVersion = compose.activity.packageManager
             .getPackageInfo(compose.activity.packageName, 0).versionName
@@ -49,6 +60,21 @@ class UpdatePageTest {
         compose.waitForIdle()
         compose.onNodeWithTag("update_status_title").assertIsDisplayed()
         compose.onNodeWithText("发现新版本 1.1.0").assertIsDisplayed()
+        val status = compose.onNodeWithTag("update_status_title").getUnclippedBoundsInRoot()
+        val version = compose.onNodeWithText("版本信息").getUnclippedBoundsInRoot()
+        if (isCar) {
+            compose.onNodeWithTag("side_navigation").assertIsDisplayed()
+            val updateBounds = compose.onNodeWithTag("page_update").getUnclippedBoundsInRoot()
+            val playerBounds = compose.onNodeWithTag("mini_player_bar").assertIsDisplayed().getUnclippedBoundsInRoot()
+            assertTrue(updateBounds.bottom <= playerBounds.top)
+            if (wide) assertTrue(status.left > version.right) else assertTrue(status.bottom <= version.top)
+            compose.waitUntil(5_000) { compose.activity.hasWindowFocus() }
+            InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_TAB)
+            compose.onNodeWithTag("update_back")
+                .performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+                .assertIsFocused()
+        }
+        capture("update")
         compose.onNodeWithText("构建版本").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("优化电台播放体验").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("2026-11-15").assertDoesNotExist()
@@ -59,6 +85,21 @@ class UpdatePageTest {
             compose.onAllNodesWithTag("page_update").fetchSemanticsNodes().isEmpty()
         }
         compose.onNodeWithTag("page_settings").assertIsDisplayed()
+        if (isCar) {
+            scrollTo("版本与更新")
+            compose.onNodeWithText("版本与更新").performClick()
+            compose.onNodeWithTag("nav_radio").performClick()
+            compose.onNodeWithTag("page_update").assertDoesNotExist()
+            compose.onNodeWithTag("page_radio").assertIsDisplayed()
+        }
+    }
+
+    private fun capture(name: String) {
+        if (InstrumentationRegistry.getArguments().getString("captureV5Settings") != "true") return
+        val file = File(compose.activity.cacheDir, "v5-$name.png")
+        file.outputStream().use { output ->
+            compose.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, output)
+        }
     }
 
     private fun openSettings() {

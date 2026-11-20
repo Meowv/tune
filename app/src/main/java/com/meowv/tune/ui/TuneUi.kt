@@ -181,7 +181,7 @@ internal fun TuneApp(
         if (nowPlayingOpen) focusManager.clearFocus(force = true)
     }
     val rotation = rememberSaveable(saver = PlayerRotationState.Saver) { PlayerRotationState() }
-    val shellEnabled = !fullscreenOccupied && !showUpdate && !showScopePicker
+    val shellEnabled = !fullscreenOccupied && !showScopePicker
     BackHandler(enabled = nowPlayingOpen && !showUpdate && !showScopePicker) {
         nowPlayingOpen = false
     }
@@ -208,18 +208,38 @@ internal fun TuneApp(
                         if (playbackState.source == PlaybackSource.RADIO && playbackState.station == null && target != null) {
                             onSelectTarget(target)
                         }
-                        onCloseMusicSearch()
+                        if (musicSearchOpen) onCloseMusicSearch()
+                        showUpdate = false
                         nowPlayingOpen = true
                     }
                 )
+            }
+            val updateContent: @Composable (Modifier) -> Unit = { modifier ->
+                UpdateScreen(
+                    isCar = isCar,
+                    local = localVersion,
+                    state = update,
+                    install = install,
+                    upgradedTo = upgradedTo,
+                    onBack = { showUpdate = false },
+                    onCheck = onCheckUpdate,
+                    onDownload = onDownloadUpdate,
+                    onCancelDownload = onCancelDownload,
+                    onInstall = onInstallUpdate,
+                    modifier = modifier
+                )
+            }
+            LaunchedEffect(showUpdate) {
+                if (showUpdate) focusManager.clearFocus(force = true)
             }
             Row(
                 Modifier.fillMaxSize()
                     .then(if (isCar) Modifier.windowInsetsPadding(WindowInsets.safeDrawing) else Modifier)
             ) {
-                if (isCar && !showUpdate) {
+                if (isCar) {
                     MeowvNavigationRail(page) {
-                        onCloseMusicSearch()
+                        if (musicSearchOpen) onCloseMusicSearch()
+                        showUpdate = false
                         nowPlayingOpen = false
                         page = it
                     }
@@ -232,7 +252,9 @@ internal fun TuneApp(
                             .testTag(if (isCar) "shell_car" else "shell_phone")
                             .focusProperties {
                                 onEnter = {
-                                    if (fullscreenOccupied &&
+                                    if (showUpdate || musicSearchOpen) {
+                                        cancelFocusChange()
+                                    } else if (fullscreenOccupied &&
                                         (!fullscreenTransition.currentState || !fullscreenFocus.requestFocus())) {
                                         cancelFocusChange()
                                     }
@@ -240,7 +262,7 @@ internal fun TuneApp(
                             }
                             .focusGroup()
                             .then(
-                                if (!shellEnabled || musicSearchOpen) {
+                                if (!shellEnabled || showUpdate || musicSearchOpen) {
                                     Modifier.semantics { hideFromAccessibility() }
                                 } else Modifier
                             )
@@ -259,22 +281,27 @@ internal fun TuneApp(
                             onClearCache, { showUpdate = true }, { showScopePicker = true },
                             musicState = musicState, onSearchMusic = onSearchMusic,
                             musicBrowse = musicBrowse, onLoadMusic = onLoadMusic, musicDevice = musicDevice,
-                            directoryAnimationsEnabled = shellEnabled
+                            directoryAnimationsEnabled = shellEnabled && !showUpdate && !musicSearchOpen
                         )
                         if (isCar) {
-                            if (!fullscreenOccupied && !musicSearchOpen) playerEntry()
+                            if (!fullscreenOccupied && !musicSearchOpen && !showUpdate) playerEntry()
                         } else {
                             MeowvBottomDock(page, playerEntry) { page = it }
                         }
                     }
-                    if (!shellEnabled || musicSearchOpen) {
+                    if (!shellEnabled || showUpdate || musicSearchOpen) {
                         Box(Modifier.fillMaxSize().pointerInput(Unit) {
                             awaitPointerEventScope {
                                 while (true) awaitPointerEvent().changes.forEach { it.consume() }
                             }
                         })
                     }
-                    if (isCar && musicSearchOpen) {
+                    if (isCar && showUpdate) {
+                        Column(Modifier.fillMaxSize().background(TuneColors.Background)) {
+                            updateContent(Modifier.weight(1f).fillMaxWidth())
+                            playerEntry()
+                        }
+                    } else if (isCar && musicSearchOpen) {
                         Column(Modifier.fillMaxSize()) {
                             Box(Modifier.weight(1f).fillMaxWidth()) { musicSearchContent(true) }
                             val imeVisible = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
@@ -331,24 +358,10 @@ internal fun TuneApp(
                     )
                 ) { musicSearchContent(false) }
             }
-            // 版本页覆盖整个外壳（含播放器与导航），保持主菜单仍是三个。
-            if (showUpdate) {
-                UpdateScreen(
-                    isCar = isCar,
-                    local = localVersion,
-                    state = update,
-                    install = install,
-                    upgradedTo = upgradedTo,
-                    onBack = { showUpdate = false },
-                    onCheck = onCheckUpdate,
-                    onDownload = onDownloadUpdate,
-                    onCancelDownload = onCancelDownload,
-                    onInstall = onInstallUpdate,
-                    modifier = Modifier.fillMaxSize()
-                        .background(TuneColors.Background)
-                        .windowInsetsPadding(
-                            if (isCar) WindowInsets.displayCutout else WindowInsets.safeDrawing
-                        )
+            if (!isCar && showUpdate) {
+                updateContent(
+                    Modifier.fillMaxSize().background(TuneColors.Background)
+                        .windowInsetsPadding(WindowInsets.safeDrawing)
                 )
             }
             SnackbarHost(
