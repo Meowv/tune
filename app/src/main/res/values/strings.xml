@@ -59,10 +59,10 @@
   <string name="directory_stale">缓存已过期</string>
   <string name="action_close">关闭</string>
   <string name="settings_storage_error">无法读取或保存设置</string>
-  <string name="directory_cache_cleared">电台目录缓存已清理</string>
-  <string name="directory_cache_clear_failed">无法清理电台目录缓存</string>
-  <string name="directory_refreshed">电台列表已刷新</string>
-  <string name="directory_refresh_failed">刷新失败：%1$s</string>
+  <string name="cache_cleared">缓存已清理</string>
+  <string name="cache_clear_failed">无法清理缓存</string>
+  <string name="data_refreshed">数据已刷新</string>
+  <string name="data_refresh_failed">刷新失败：%1$s</string>
   <string name="directory_reason_offline">网络不可用</string>
   <string name="directory_reason_timeout">请求超时</string>
   <string name="directory_reason_unavailable">服务暂不可用</string>

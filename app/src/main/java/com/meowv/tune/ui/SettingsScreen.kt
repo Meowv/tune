@@ -54,8 +54,8 @@ internal fun SettingsScreen(
     refreshing: Boolean,
     updateSubtitle: String,
     onSettingsChange: ((TuneSettings) -> TuneSettings) -> Unit,
-    onRefreshDirectory: () -> Unit,
-    onClearDirectoryCache: () -> Unit,
+    onRefreshAll: () -> Unit,
+    onClearCache: () -> Unit,
     onOpenUpdate: () -> Unit
 ) {
     var dialog by rememberSaveable { mutableStateOf(SettingsDialog.NONE) }
@@ -77,10 +77,10 @@ internal fun SettingsScreen(
                         R.drawable.ic_ui_refresh, R.string.setting_refresh, isCar,
                         enabled = !refreshing,
                         trailing = if (refreshing) ({ InlineSpinner(isCar) }) else null,
-                        onClick = onRefreshDirectory
+                        onClick = onRefreshAll
                     )
                     SettingsDivider()
-                    SettingRow(R.drawable.ic_ui_trash, R.string.setting_cache, isCar, onClick = onClearDirectoryCache)
+                    SettingRow(R.drawable.ic_ui_trash, R.string.setting_cache, isCar, onClick = onClearCache)
                 }
             }
             item(key = "about_settings") {

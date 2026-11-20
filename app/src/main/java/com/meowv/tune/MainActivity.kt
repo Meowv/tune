@@ -7,9 +7,12 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
+import coil3.SingletonImageLoader
 import java.io.IOException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.key
@@ -147,12 +150,12 @@ class MainActivity : ComponentActivity() {
                 when (state) {
                     DirectoryRefresh.Success -> {
                         radioModel.acknowledgeRefresh()
-                        snackbar.showSnackbar(getString(R.string.directory_refreshed))
+                        snackbar.showSnackbar(getString(R.string.data_refreshed))
                     }
                     is DirectoryRefresh.Failed -> {
                         radioModel.acknowledgeRefresh()
                         snackbar.showSnackbar(
-                            getString(R.string.directory_refresh_failed, refreshFailureReason(state.error))
+                            getString(R.string.data_refresh_failed, refreshFailureReason(state.error))
                         )
                     }
                     DirectoryRefresh.Idle, DirectoryRefresh.Running -> Unit
@@ -212,10 +215,13 @@ class MainActivity : ComponentActivity() {
                     countries = countries,
                     onLoadCountries = radioModel::loadCountries,
                     onRefreshRadio = { settingsModel.settings.value?.let { radioModel.refresh(it.scope) } },
-                    onRefreshFromSettings = { settingsModel.settings.value?.let { radioModel.refreshManually(it.scope) } },
+                    onRefreshAll = {
+                        settingsModel.settings.value?.let { radioModel.refreshManually(it.scope) }
+                        musicModel.loadFeed()
+                    },
                     onLoadMore = radioModel::loadMore,
                     onSettingsChange = settingsModel::update,
-                    onClearDirectoryCache = ::clearDirectoryCache,
+                    onClearCache = ::clearCaches,
                     onShellChanged = {
                         carShell = it
                         applySystemBars()
@@ -308,13 +314,17 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
 
-    private fun clearDirectoryCache() {
+    // 清理缓存覆盖电台目录与图片缓存；音乐播放断点属于续播状态，不在此清除。
+    private fun clearCaches() {
         lifecycleScope.launch {
             val message = try {
                 tuneApp.directoryCache.clear()
-                R.string.directory_cache_cleared
+                withContext(Dispatchers.IO) {
+                    runCatching { SingletonImageLoader.get(this@MainActivity).diskCache?.clear() }
+                }
+                R.string.cache_cleared
             } catch (_: IOException) {
-                R.string.directory_cache_clear_failed
+                R.string.cache_clear_failed
             }
             snackbar.showSnackbar(getString(message))
         }
