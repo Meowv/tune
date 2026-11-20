@@ -43,6 +43,8 @@ import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.RadioDisplayMode
 import com.meowv.tune.music.MusicUiState
+import com.meowv.tune.music.MusicDevicePhase
+import com.meowv.tune.music.MusicDeviceState
 import com.meowv.tune.music.MusicFeed
 import com.meowv.tune.domain.PlaybackSource
 import com.meowv.tune.domain.RadioUiState
@@ -93,7 +95,9 @@ internal fun TuneApp(
     musicSearchOpen: Boolean = false,
     musicBrowse: MusicFeed = MusicFeed(),
     onEnterMusic: () -> Unit = {},
-    onLoadMusic: () -> Unit = {}
+    onLoadMusic: () -> Unit = {},
+    musicDevice: MusicDeviceState? = null,
+    onMusicActivated: () -> Unit = {}
 ) {
     val connected by playbackConnected.collectAsStateWithLifecycle()
     val playbackState by playback.collectAsStateWithLifecycle()
@@ -103,7 +107,11 @@ internal fun TuneApp(
     var showScopePicker by rememberSaveable { mutableStateOf(false) }
     var showUpdate by rememberSaveable { mutableStateOf(false) }
     var nowPlayingOpen by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(page) { if (page == TunePage.Music) onEnterMusic() }
+    LaunchedEffect(page, musicDevice?.phase) {
+        if (page == TunePage.Music) {
+            if (musicDevice?.phase == MusicDevicePhase.ACTIVE) onMusicActivated() else onEnterMusic()
+        }
+    }
     LaunchedEffect(showScopePicker) { if (showScopePicker) onLoadCountries(false) }
     // 进入版本页时检查一次；重复进入由 ViewModel 的进行中判断挡住，不会叠加请求。
     LaunchedEffect(showUpdate) { if (showUpdate) onCheckUpdate() }
@@ -227,7 +235,7 @@ internal fun TuneApp(
                             onSettingsChange, onRefreshRadio, onRefreshAll, onLoadMore,
                             onClearCache, { showUpdate = true }, { showScopePicker = true },
                             musicState = musicState, onSearchMusic = onSearchMusic,
-                            musicBrowse = musicBrowse, onLoadMusic = onLoadMusic,
+                            musicBrowse = musicBrowse, onLoadMusic = onLoadMusic, musicDevice = musicDevice,
                             directoryAnimationsEnabled = shellEnabled
                         )
                     }
@@ -239,7 +247,7 @@ internal fun TuneApp(
                         onSettingsChange, onRefreshRadio, onRefreshAll, onLoadMore,
                         onClearCache, { showUpdate = true }, { showScopePicker = true },
                         musicState = musicState, onSearchMusic = onSearchMusic,
-                        musicBrowse = musicBrowse, onLoadMusic = onLoadMusic,
+                        musicBrowse = musicBrowse, onLoadMusic = onLoadMusic, musicDevice = musicDevice,
                         directoryAnimationsEnabled = shellEnabled
                     )
                 }
@@ -395,6 +403,7 @@ private fun TunePager(
     onScopeClick: () -> Unit,
     directoryAnimationsEnabled: Boolean,
     musicBrowse: MusicFeed,
+    musicDevice: MusicDeviceState?,
     onLoadMusic: () -> Unit,
     musicState: MusicUiState,
     onSearchMusic: () -> Unit
@@ -409,7 +418,7 @@ private fun TunePager(
                 onRefreshAll, onLoadMore, onClearCache,
                 onOpenUpdate, onScopeClick,
                 directoryAnimationsEnabled && index == state.settledPage && !state.isScrollInProgress,
-                musicBrowse, onLoadMusic, musicState, onSearchMusic
+                musicBrowse, musicDevice, onLoadMusic, musicState, onSearchMusic
             )
         }
     }
@@ -438,6 +447,7 @@ private fun pageContent(
     onScopeClick: () -> Unit,
     directoryAnimationsEnabled: Boolean,
     musicBrowse: MusicFeed,
+    musicDevice: MusicDeviceState?,
     onLoadMusic: () -> Unit,
     musicState: MusicUiState,
     onSearchMusic: () -> Unit
@@ -466,6 +476,7 @@ private fun pageContent(
                 // 刷新数据同时覆盖电台目录与音乐推荐列表，任一在途都禁用按钮并转圈。
                 refreshing = directoryRefreshing || musicBrowse.loading,
                 updateSubtitle = updateSubtitle,
+                musicDevice = musicDevice,
                 onSettingsChange = onSettingsChange,
                 onRefreshAll = onRefreshAll,
                 onClearCache = onClearCache,

@@ -63,6 +63,7 @@ import com.meowv.tune.R
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.domain.RadioDisplayMode
+import com.meowv.tune.domain.music.MusicFailure
 import com.meowv.tune.domain.music.MusicQueueSeed
 import com.meowv.tune.domain.music.MusicTrack
 import com.meowv.tune.domain.music.canStartPlayback
@@ -91,6 +92,7 @@ internal fun MusicScreen(
     val currentId = playback?.music?.id
     val visual = playback?.let { playbackVisual(it.phase, connected) } ?: StationPlaybackVisual.None
     val playbackError = playback?.takeIf { it.error == null }?.let { musicPlaybackErrorText(it) }
+    val waitingForAccess = browse.failure == MusicFailure.NOT_CONFIGURED
     val list = rememberLazyListState()
     var mode by rememberSaveable { mutableStateOf(RadioDisplayMode.LIST) }
     var previewId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -121,8 +123,7 @@ internal fun MusicScreen(
             val statusModifier = Modifier.weight(1f).fillMaxWidth()
             if (browse.tracks.isEmpty()) {
                 when {
-                    state == MusicUiState.NotConfigured -> DirectoryMessage(
-                        R.drawable.ic_ui_info, TuneColors.Muted, R.string.music_not_configured, statusModifier)
+                    state == MusicUiState.NotConfigured || waitingForAccess -> Unit
                     browse.failure != null -> DirectoryMessage(
                         R.drawable.ic_ui_info, TuneColors.Error, musicPlaybackFailureMessage(browse.failure), statusModifier
                     ) {
@@ -146,7 +147,7 @@ internal fun MusicScreen(
                     onCommand(PlayerCommand.PlayMusic(song, browse.seed ?: MusicQueueSeed(browse.tracks, null)))
                 }
             }
-            if (browse.failure != null) {
+            if (browse.failure != null && !waitingForAccess) {
                 DirectoryFeedback(musicPlaybackFailureMessage(browse.failure), onLoad)
             }
 

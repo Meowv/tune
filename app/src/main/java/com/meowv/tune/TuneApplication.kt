@@ -9,6 +9,9 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.meowv.tune.network.*
+import com.meowv.tune.music.DeviceActivation
+import com.meowv.tune.music.MusicActivationClient
+import com.meowv.tune.music.MusicApiClient
 import com.meowv.tune.domain.CountryDirectory
 import com.meowv.tune.radio.DirectoryCache
 import com.meowv.tune.radio.RadioBrowserCountries
@@ -60,16 +63,24 @@ private val Context.installPreferences by preferencesDataStore(
     name = "meowvtune_install",
     corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
 )
+private val Context.musicDevicePreferences by preferencesDataStore(
+    name = "music_device",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
+)
 private val LastMirror = stringPreferencesKey("last_good_host")
 
 open class TuneApplication : Application(), SingletonImageLoader.Factory {
-    // 共用音乐凭据由本机构建配置注入；测试仍可显式替换仓储。
+    internal open val musicActivation: DeviceActivation? by lazy {
+        BuildConfig.MUSIC_API_BASE_URL.takeIf(String::isNotBlank)?.toHttpUrl()?.let {
+            DeviceActivation(musicDevicePreferences, MusicActivationClient(it, allowLocalHttp = BuildConfig.DEBUG))
+        }
+    }
+
     internal open val musicRepository: MusicRepository? by lazy {
-        if (BuildConfig.MUSIC_API_BASE_URL.isBlank() || BuildConfig.MUSIC_DEVICE_TOKEN.isBlank()) null
-        else com.meowv.tune.music.MusicApiClient(
-            BuildConfig.MUSIC_API_BASE_URL.toHttpUrl(),
-            { BuildConfig.MUSIC_DEVICE_TOKEN }, allowLocalHttp = BuildConfig.DEBUG
-        )
+        musicActivation?.let { activation ->
+            MusicApiClient(BuildConfig.MUSIC_API_BASE_URL.toHttpUrl(), activation::readToken,
+                allowLocalHttp = BuildConfig.DEBUG, onUnauthorized = activation::onUnauthorized)
+        }
     }
 
     // 同一进程只尝试一次启动恢复，避免 Activity 重建或回前台重复开流。

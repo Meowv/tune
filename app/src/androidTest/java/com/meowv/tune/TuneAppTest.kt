@@ -321,9 +321,8 @@ class TuneAppTest {
         compose.onNodeWithTag("page_radio").assertIsDisplayed()
         selectPage("nav_music")
         compose.onNodeWithTag("page_music").assertIsDisplayed()
-        // 测试环境未注入音乐仓库，音乐页处于未配置态；用字符串资源引用避免文案调整导致用例失效。
         compose.onNodeWithText(compose.activity.getString(R.string.music_not_configured))
-            .performScrollTo().assertIsDisplayed()
+            .assertDoesNotExist()
         selectPage("nav_settings")
         compose.onNodeWithTag("page_settings").assertIsDisplayed()
         compose.onNodeWithText("自动播放").performScrollTo().assertIsDisplayed()

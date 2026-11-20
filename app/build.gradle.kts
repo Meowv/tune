@@ -13,7 +13,7 @@ val releaseProperties = Properties().apply {
     if (releaseKeystore.exists()) releaseKeystore.inputStream().use { load(it) }
 }
 
-// 共用凭据只从未跟踪的本机构建配置注入，不提交原文。
+// 构建只读取音乐服务地址。
 val musicProperties = Properties().apply {
     val source = rootProject.file("music-service.properties")
     if (source.exists()) source.inputStream().use { load(it) }
@@ -31,13 +31,8 @@ fun musicUrl(value: String, local: Boolean): String {
         else -> "/"
     }
 }
-fun musicToken(name: String): String = musicValue(name).also {
-    require(it.isEmpty() || it.matches(Regex("mvm_[A-Za-z0-9_-]{43}"))) { "请使用音乐模块签发的专用凭据。" }
-}
 val debugMusicUrl = musicUrl(musicValue("MUSIC_DEBUG_API_BASE_URL", "http://10.0.2.2:5000/api/"), true)
 val releaseMusicUrl = musicUrl(musicValue("MUSIC_RELEASE_API_BASE_URL", "https://studio.meowv.com/api/"), false)
-val debugMusicToken = musicToken("MUSIC_DEBUG_DEVICE_TOKEN")
-val releaseMusicToken = musicToken("MUSIC_RELEASE_DEVICE_TOKEN")
 fun musicBuildString(value: String): String = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 android {
@@ -89,11 +84,9 @@ android {
     buildTypes {
         debug {
             buildConfigField("String", "MUSIC_API_BASE_URL", musicBuildString(debugMusicUrl))
-            buildConfigField("String", "MUSIC_DEVICE_TOKEN", musicBuildString(debugMusicToken))
         }
         release {
             buildConfigField("String", "MUSIC_API_BASE_URL", musicBuildString(releaseMusicUrl))
-            buildConfigField("String", "MUSIC_DEVICE_TOKEN", musicBuildString(releaseMusicToken))
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

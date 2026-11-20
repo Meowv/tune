@@ -7,6 +7,14 @@
   <string name="brand_full">喵听听 · Meowv Tune</string>
   <string name="action_play">播放</string>
   <string name="player_idle">未播放</string>
+  <string name="setting_music_device">音乐设备</string>
+  <string name="music_device_checking">正在登记或检查设备</string>
+  <string name="music_device_offline">等待网络连接</string>
+  <string name="music_device_pending">待管理员激活</string>
+  <string name="music_device_active">已激活</string>
+  <string name="music_device_revoked">已撤销</string>
+  <string name="music_device_unavailable">暂时无法检查设备</string>
+  <string name="music_device_summary">%1$s · 短码 %2$s</string>
   <string name="music_not_configured">音乐服务暂未就绪</string>
   <string name="music_previous">上一曲</string>
   <string name="music_next">下一曲</string>
@@ -15,7 +23,7 @@
   <string name="music_playback_forbidden">当前歌曲没有播放权限</string>
   <string name="music_playback_timeout">音乐来源响应超时</string>
   <string name="music_playback_source_unavailable">音乐来源暂时不可用</string>
-  <string name="music_unauthorized">音乐服务访问已失效，请联系维护者更新应用</string>
+  <string name="music_unauthorized">音乐服务访问已失效，请在设置中查看设备状态</string>
   <string name="music_rate_limited">请求较多，请稍后再试</string>
   <string name="music_retry">重试</string>
   <string name="music_search">搜索音乐</string>

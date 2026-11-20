@@ -41,6 +41,7 @@ internal class MusicViewModel(
 ) : ViewModel(scope) {
     private val mutableState = MutableStateFlow<MusicUiState>(if (repository == null) MusicUiState.NotConfigured else MusicUiState.Idle)
     val state = mutableState.asStateFlow()
+    private var feedLoad: Job? = null
     private var pending: Job? = null
     private var generation = 0L
 
@@ -78,12 +79,21 @@ internal class MusicViewModel(
         if (feed.loaded || feed.failure != null) loadFeed()
     }
 
+    fun onDeviceActivated() {
+        viewModelScope.launch {
+            feedLoad?.join()
+            val feed = mutableBrowse.value
+            if (!feed.loaded || feed.failure == MusicFailure.NOT_CONFIGURED ||
+                feed.failure == MusicFailure.UNAUTHORIZED) loadFeed()
+        }
+    }
+
     fun loadFeed() {
         val source = repository ?: return
         val previous = mutableBrowse.value
         if (previous.loading) return
         mutableBrowse.value = previous.copy(loading = true, failure = null)
-        viewModelScope.launch {
+        feedLoad = viewModelScope.launch {
             feedStore.restore()
             try {
                 val page = source.firstRecommendations()

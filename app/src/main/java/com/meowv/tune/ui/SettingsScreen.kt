@@ -39,6 +39,8 @@ import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.meowv.tune.music.MusicDevicePhase
+import com.meowv.tune.music.MusicDeviceState
 import com.meowv.tune.R
 import com.meowv.tune.domain.TuneSettings
 import com.meowv.tune.ui.theme.TuneColors
@@ -56,7 +58,8 @@ internal fun SettingsScreen(
     onSettingsChange: ((TuneSettings) -> TuneSettings) -> Unit,
     onRefreshAll: () -> Unit,
     onClearCache: () -> Unit,
-    onOpenUpdate: () -> Unit
+    onOpenUpdate: () -> Unit,
+    musicDevice: MusicDeviceState? = null
 ) {
     var dialog by rememberSaveable { mutableStateOf(SettingsDialog.NONE) }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
@@ -81,6 +84,20 @@ internal fun SettingsScreen(
                     )
                     SettingsDivider()
                     SettingRow(R.drawable.ic_ui_trash, R.string.setting_cache, isCar, onClick = onClearCache)
+                }
+            }
+            if (musicDevice != null) item(key = "music_device") {
+                val status = stringResource(when (musicDevice.phase) {
+                    MusicDevicePhase.CHECKING -> R.string.music_device_checking
+                    MusicDevicePhase.OFFLINE -> R.string.music_device_offline
+                    MusicDevicePhase.PENDING -> R.string.music_device_pending
+                    MusicDevicePhase.ACTIVE -> R.string.music_device_active
+                    MusicDevicePhase.REVOKED -> R.string.music_device_revoked
+                    MusicDevicePhase.UNAVAILABLE -> R.string.music_device_unavailable
+                })
+                SettingsGroup {
+                    SettingRow(R.drawable.ic_menu_music, R.string.setting_music_device, isCar,
+                        subtitle = musicDevice.shortCode?.let { stringResource(R.string.music_device_summary, status, it) } ?: status)
                 }
             }
             item(key = "about_settings") {
@@ -172,7 +189,7 @@ private fun SettingRow(
     enabled: Boolean = true,
     subtitle: String? = null,
     trailing: (@Composable () -> Unit)? = null,
-    onClick: () -> Unit
+    onClick: (() -> Unit)? = null
 ) {
     val interaction = remember { MutableInteractionSource() }
     var focused by remember { mutableStateOf(false) }
@@ -189,7 +206,7 @@ private fun SettingRow(
         .then(if (focused && enabled) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)
         .onFocusChanged { focused = it.isFocused }
         .testTag("setting_$label")
-    val action = if (checked != null) {
+    val action = if (onClick == null) Modifier else if (checked != null) {
         Modifier.toggleable(
             value = checked,
             interactionSource = interaction,

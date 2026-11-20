@@ -26,23 +26,10 @@ internal class MusicApiClient(
     client: OkHttpClient? = null,
     private val now: () -> Instant = Instant::now,
     allowLocalHttp: Boolean = false,
-    private val requestGate: MusicRequestGate = MusicRequestGate()
+    private val requestGate: MusicRequestGate = MusicRequestGate(),
+    private val onUnauthorized: (String) -> Unit = {}
 ) : MusicRepository {
-    private val localHttp = allowLocalHttp && BuildConfig.DEBUG && isDebugMusicHost(baseUrl.host)
-    private val transport = client ?: if (localHttp && !baseUrl.isHttps) OkHttpClient.Builder().proxy(Proxy.NO_PROXY)
-        .connectTimeout(3, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS)
-        .addNetworkInterceptor { chain ->
-            val url = chain.request().url
-            if (url.scheme != baseUrl.scheme || url.host != baseUrl.host || url.port != baseUrl.port) throw IOException("Unexpected music API origin")
-            chain.proceed(chain.request())
-        }.build() else MediaUrlPolicy.client(httpsOnly = true)
-    private val http = transport.newBuilder().followRedirects(false).followSslRedirects(false)
-        .retryOnConnectionFailure(false).callTimeout(8, TimeUnit.SECONDS).cache(null).build()
-
-    init {
-        require((baseUrl.isHttps || localHttp) && baseUrl.username.isEmpty() && baseUrl.password.isEmpty() && baseUrl.query == null && baseUrl.fragment == null)
-        require(baseUrl.encodedPath.endsWith('/'))
-    }
+    private val http = musicHttpClient(baseUrl, allowLocalHttp, client)
 
     override suspend fun search(query: String, limit: Int, cursor: String?): MusicPage {
         if (query.trim().length !in 1..100 || query.any(Char::isISOControl)) throw MusicException(MusicFailure.INVALID_REQUEST)
@@ -125,6 +112,7 @@ internal class MusicApiClient(
                 override fun onResponse(call: Call, response: Response) {
                     try {
                         val result = response.use { value ->
+                            if (value.code == 401) onUnauthorized(token)
                             if (blockOnFailure && value.code == 429) retryAfter(value.header("Retry-After"))?.let { requestGate.block(it) }
                             if (blockOnFailure && value.code in setOf(503, 504)) retryAfter(value.header("Retry-After"))?.let {
                                 requestGate.block(it, if (value.code == 503) MusicFailure.SOURCE_UNAVAILABLE else MusicFailure.SOURCE_TIMEOUT)
@@ -167,6 +155,21 @@ internal class MusicApiClient(
     private fun retryAfter(value: String?): Long? = musicRetryAfterSeconds(value, now())
 
     private companion object { const val MAX_BYTES = 256L * 1024 }
+}
+
+internal fun musicHttpClient(baseUrl: HttpUrl, allowLocalHttp: Boolean, client: OkHttpClient? = null): OkHttpClient {
+    val localHttp = allowLocalHttp && BuildConfig.DEBUG && isDebugMusicHost(baseUrl.host)
+    require((baseUrl.isHttps || localHttp) && baseUrl.username.isEmpty() && baseUrl.password.isEmpty() && baseUrl.query == null && baseUrl.fragment == null)
+    require(baseUrl.encodedPath.endsWith('/'))
+    val transport = client ?: if (localHttp && !baseUrl.isHttps) OkHttpClient.Builder().proxy(Proxy.NO_PROXY)
+        .connectTimeout(3, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS)
+        .addNetworkInterceptor { chain ->
+            val url = chain.request().url
+            if (url.scheme != baseUrl.scheme || url.host != baseUrl.host || url.port != baseUrl.port) throw IOException("Unexpected music API origin")
+            chain.proceed(chain.request())
+        }.build() else MediaUrlPolicy.client(httpsOnly = true)
+    return transport.newBuilder().followRedirects(false).followSslRedirects(false)
+        .retryOnConnectionFailure(false).callTimeout(8, TimeUnit.SECONDS).cache(null).build()
 }
 
 internal fun isDebugMusicHost(host: String): Boolean = host in setOf("localhost", "127.0.0.1", "10.0.2.2", "10.0.3.2") ||

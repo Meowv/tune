@@ -26,6 +26,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -164,8 +166,13 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        val activation = tuneApp.musicActivation
+        if (activation != null) lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) { activation.runWhileForeground() }
+        }
         resumeRadioOnEntry = savedInstanceState == null && !tuneApp.autoPlayAttempted
         setContent {
+            val musicDevice = activation?.state?.collectAsStateWithLifecycle()?.value
             val musicBrowse by musicModel.browse.collectAsStateWithLifecycle()
             val musicState by musicModel.state.collectAsStateWithLifecycle()
             val musicSearch by musicSearchModel.state.collectAsStateWithLifecycle()
@@ -183,6 +190,8 @@ class MainActivity : ComponentActivity() {
                     settings = settings ?: TuneSettings(),
                     musicState = musicState,
                     musicBrowse = musicBrowse,
+                    musicDevice = musicDevice,
+                    onMusicActivated = musicModel::onDeviceActivated,
                     onEnterMusic = musicModel::enter,
                     onLoadMusic = musicModel::loadFeed,
                     onSearchMusic = musicSearchModel::open,

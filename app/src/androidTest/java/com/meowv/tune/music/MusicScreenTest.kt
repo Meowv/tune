@@ -10,6 +10,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlaybackSource
 import com.meowv.tune.domain.PlayerUiState
+import com.meowv.tune.domain.music.MusicFailure
 import com.meowv.tune.domain.music.MusicLyricLine
 import com.meowv.tune.domain.music.MusicTrack
 import com.meowv.tune.ui.MusicScreen
@@ -28,14 +29,31 @@ class MusicScreenTest {
         isCarWindow(screenWidthDp.toFloat(), screenHeightDp.toFloat())
     }
 
-    @Test fun unconfiguredShowsUnavailableWithoutStartOrPlaybackCard() {
+    @Test fun unconfiguredHidesTheNoticeAndRetry() {
         compose.setContent { TuneTheme {
             MusicScreen(isCar, MusicUiState.NotConfigured, MusicFeed(), true, {}, {}, {})
         } }
-        compose.onNodeWithText("音乐服务暂未就绪").assertIsDisplayed()
+        compose.onNodeWithText("音乐服务暂未就绪").assertDoesNotExist()
+        compose.onNodeWithText("重试").assertDoesNotExist()
         compose.onNodeWithTag("music_start").assertDoesNotExist()
         compose.onNodeWithTag("music_current").assertDoesNotExist()
         capture("unconfigured")
+    }
+
+    @Test fun waitingForAccessHidesTheNoticeWithOrWithoutCachedTracks() {
+        val browse = mutableStateOf(MusicFeed(failure = MusicFailure.NOT_CONFIGURED))
+        compose.setContent { TuneTheme {
+            MusicScreen(isCar, MusicUiState.Idle, browse.value, true, {}, {}, {})
+        } }
+        compose.onNodeWithText("音乐服务暂未就绪").assertDoesNotExist()
+        compose.onNodeWithText("重试").assertDoesNotExist()
+        compose.onNodeWithTag("music_feed_loading").assertDoesNotExist()
+
+        val track = MusicTrack("cached", "Cached track", listOf("Test artist"))
+        compose.runOnIdle { browse.value = browse.value.copy(tracks = listOf(track)) }
+        compose.onNodeWithTag("music_feed_track_cached").assertIsDisplayed()
+        compose.onNodeWithText("音乐服务暂未就绪").assertDoesNotExist()
+        compose.onNodeWithText("重试").assertDoesNotExist()
     }
 
     @Test fun listAndCardsDisplayTheSameTrack() {

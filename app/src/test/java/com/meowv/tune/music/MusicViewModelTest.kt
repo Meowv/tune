@@ -55,6 +55,34 @@ class MusicViewModelTest {
         } finally { scope.cancel() }
     }
 
+    @Test fun activationReloadsTheMusicPageAfterItsPendingRequestFinishes() = runBlocking {
+        val initial = CompletableDeferred<Unit>()
+        val track = MusicTrack("a", "A", listOf("Singer"))
+        var requests = 0
+        val repository = object : MusicRepository by FakeMusicRepository(emptyList()) {
+            override suspend fun recommendations(limit: Int, cursor: String?): MusicPage {
+                if (++requests == 1) {
+                    initial.await()
+                    throw MusicException(MusicFailure.NOT_CONFIGURED)
+                }
+                return MusicPage(listOf(track))
+            }
+        }
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val model = MusicViewModel(repository, scope = scope)
+            model.enter()
+            model.onDeviceActivated()
+            assertEquals(1, requests)
+            initial.complete(Unit)
+            assertEquals(2, requests)
+            assertEquals(listOf(track), model.browse.value.tracks)
+            assertNull(model.browse.value.failure)
+        } finally {
+            scope.cancel()
+        }
+    }
+
     @Test fun emptyPartialFeedKeepsTheActionableFailure() = runBlocking {
         val repo = object : MusicRepository by FakeMusicRepository(emptyList()) {
             override suspend fun recommendations(limit: Int, cursor: String?) =

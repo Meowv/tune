@@ -28,5 +28,5 @@ api28-evidence/
 
 /docs
 release-notes.txt
-# Local music service build credentials
+# Local music service URLs
 /music-service.properties

@@ -68,6 +68,7 @@ class TuneTestApplication : TuneApplication() {
         }
     private var testMusicFeed = MusicFeedStore()
     override val musicFeed get() = if (InstrumentationRegistry.getArguments().getString("musicLocalBuild") == "true") super.musicFeed else testMusicFeed
+    override val musicActivation get() = if (InstrumentationRegistry.getArguments().getString("musicLocalBuild") == "true") super.musicActivation else null
     override val musicRepository get() = if (InstrumentationRegistry.getArguments().getString("musicLocalBuild") == "true") super.musicRepository else testMusicRepository
     // liveRadio=true 时使用真实网络与真实解析，用于 T26 公网联调。
     // 首次访问时读取参数：Application 构造阶段 Instrumentation 尚未注册参数。
