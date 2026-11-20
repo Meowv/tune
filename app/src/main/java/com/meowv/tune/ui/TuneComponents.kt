@@ -272,7 +272,6 @@ internal fun MeowvNavigationBar(page: TunePage, modifier: Modifier = Modifier, o
 @Composable
 internal fun MeowvNavigationRail(
     page: TunePage,
-    playerEntry: @Composable () -> Unit,
     onPage: (TunePage) -> Unit
 ) {
     BoxWithConstraints(Modifier.width(180.dp).fillMaxHeight().background(TuneColors.Surface).testTag("side_navigation")) {
@@ -289,22 +288,18 @@ internal fun MeowvNavigationRail(
                     NavigationItem(item, item == page, isCar = true, Modifier.fillMaxWidth(), onPage, showBackground = true)
                 }
             }
-            Spacer(Modifier.height(16.dp))
-            Box(Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) { playerEntry() }
         }
     }
 }
 
 @Composable
 internal fun MeowvBottomDock(page: TunePage, playerEntry: @Composable () -> Unit, onPage: (TunePage) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().height(72.dp).background(TuneColors.Background)
-            .padding(horizontal = 12.dp).testTag("bottom_dock"),
-        verticalAlignment = Alignment.CenterVertically
+    Column(
+        Modifier.fillMaxWidth().background(TuneColors.Background)
+            .padding(horizontal = 12.dp).testTag("bottom_dock")
     ) {
-        Box(Modifier.width(64.dp), contentAlignment = Alignment.Center) { playerEntry() }
-        Spacer(Modifier.width(8.dp))
-        MeowvNavigationBar(page, Modifier.weight(1f), onPage)
+        playerEntry()
+        MeowvNavigationBar(page, onPage = onPage)
     }
 }
 

@@ -403,11 +403,15 @@ class TuneAppTest {
         val list = compose.onNodeWithTag("station_list").getUnclippedBoundsInRoot()
         val car = compose.onAllNodesWithTag("shell_car").fetchSemanticsNodes().isNotEmpty()
         val navigation = compose.onNodeWithTag(if (car) "side_navigation" else "bottom_navigation").getUnclippedBoundsInRoot()
-        if (car) assertTrue("List must start after navigation", list.left >= navigation.right)
-        else assertTrue("List must end before navigation", list.bottom <= navigation.top)
-        compose.onNodeWithTag("global_player").assertDoesNotExist()
-        val minimum = if (compose.onAllNodesWithTag("shell_car").fetchSemanticsNodes().isNotEmpty()) 56.dp else 48.dp
-        listOf("nav_radio", "nav_music", "nav_settings").forEach { tag ->
+        val bar = compose.onNodeWithTag("mini_player_bar").getUnclippedBoundsInRoot()
+        assertTrue("List must end before player", list.bottom <= bar.top)
+        if (car) {
+            assertTrue("Player must start after rail", bar.left >= navigation.right)
+        } else {
+            assertTrue("Player must end before navigation", bar.bottom <= navigation.top)
+        }
+        val minimum = if (car) 56.dp else 48.dp
+        listOf("nav_radio", "nav_music", "nav_settings", "mini_player_toggle").forEach { tag ->
             val bounds = compose.onNodeWithTag(tag).getUnclippedBoundsInRoot()
             assertTrue("$tag width", bounds.right - bounds.left + .5.dp >= minimum)
             assertTrue("$tag height", bounds.bottom - bounds.top + .5.dp >= minimum)
@@ -420,8 +424,27 @@ class TuneAppTest {
     }
 
     @Test
+    fun carPlayerLeavesNavigationReachableAndCentersPlaybackControls() {
+        org.junit.Assume.assumeTrue(compose.onAllNodesWithTag("shell_car").fetchSemanticsNodes().isNotEmpty())
+        playFirstStation()
+        openPlayer()
+        val rail = compose.onNodeWithTag("side_navigation").getUnclippedBoundsInRoot()
+        val player = compose.onNodeWithTag("now_playing_screen").getUnclippedBoundsInRoot()
+        assertTrue(player.left >= rail.right)
+        compose.onNodeWithTag("mini_player_bar").assertDoesNotExist()
+        val info = compose.onNodeWithTag("now_playing_info_column").getUnclippedBoundsInRoot()
+        val play = compose.onNodeWithTag("now_playing_play").getUnclippedBoundsInRoot()
+        assertEquals((info.left.value + info.right.value) / 2, (play.left.value + play.right.value) / 2, 4f)
+        compose.onNodeWithTag("nav_settings").performClick()
+        compose.onNodeWithTag("page_settings").assertIsDisplayed()
+        compose.onNodeWithTag("mini_player_toggle").assertIsDisplayed()
+        compose.onNodeWithTag("now_playing_screen").assertDoesNotExist()
+    }
+
+    @Test
     fun dpadCanMoveBetweenNavigationItemsAndActivateThem() {
         val car = compose.onAllNodesWithTag("shell_car").fetchSemanticsNodes().isNotEmpty()
+        compose.waitUntil(5000) { compose.activity.hasWindowFocus() }
         InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_TAB)
         compose.waitForIdle()
         compose.onNodeWithTag("nav_radio").performSemanticsAction(SemanticsActions.RequestFocus) { it() }

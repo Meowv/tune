@@ -24,11 +24,18 @@ class CircularEntryUiTest {
         val enabled = mutableStateOf(true)
         val connected = mutableStateOf(true)
         val rotation = PlayerRotationState()
+        var toggles = 0
+        var motionEnabled = true
         var opens = 0
         compose.setContent {
             TuneTheme {
+                motionEnabled = rememberMotionEnabled()
                 MeowvBottomDock(page.value, {
-                    CircularPlayerEntry(playback.value, connected.value, rotation, false, enabled.value, { opens++ })
+                    CompactMediaBar(
+                        playback.value, playback.value.station, connected.value, rotation,
+                        isCar = false, enabled = enabled.value, animationMillis = 0,
+                        onToggle = { toggles++ }, onOpen = { opens++ }
+                    )
                 }) { page.value = it }
             }
         }
@@ -55,8 +62,13 @@ class CircularEntryUiTest {
         compose.mainClock.autoAdvance = false
         compose.runOnIdle { playback.value = PlayerUiState(PlaybackPhase.PLAYING, station) }
         compose.mainClock.advanceTimeBy(320)
+        compose.onNodeWithTag("circular_player_entry").assertTextContains("Radio")
+        compose.onNodeWithTag("mini_player_toggle").performClick()
+        assertEquals(1, toggles)
+        assertEquals(1, opens)
         val moving = rotation.angle
-        assertTrue("播放时必须旋转", moving > 0f)
+        if (motionEnabled) assertTrue("播放时必须旋转", moving > 0f)
+        else assertEquals(0f, moving, .001f)
         compose.runOnIdle { playback.value = playback.value.copy(phase = PlaybackPhase.PAUSED) }
         compose.mainClock.advanceTimeBy(32)
         val paused = rotation.angle
@@ -64,7 +76,8 @@ class CircularEntryUiTest {
         assertEquals(paused, rotation.angle, .001f)
         compose.runOnIdle { playback.value = playback.value.copy(phase = PlaybackPhase.PLAYING) }
         compose.mainClock.advanceTimeBy(320)
-        assertTrue(rotation.angle > paused)
+        if (motionEnabled) assertTrue(rotation.angle > paused)
+        else assertEquals(paused, rotation.angle, .001f)
         compose.runOnIdle { enabled.value = false }
         compose.mainClock.advanceTimeBy(32)
         val covered = rotation.angle

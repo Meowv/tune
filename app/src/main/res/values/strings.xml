@@ -34,6 +34,8 @@
   <string name="music_search_empty">没有找到相关歌曲</string>
   <string name="music_search_invalid">请输入 1–100 个字符的歌名或歌手</string>
   <string name="music_search_failed">搜索失败</string>
+  <string name="music_search_history">最近搜索</string>
+  <string name="music_search_history_clear">清空</string>
   <string name="setting_autoplay">自动播放</string>
   <string name="setting_refresh">刷新数据</string>
   <string name="setting_source">数据来源</string>

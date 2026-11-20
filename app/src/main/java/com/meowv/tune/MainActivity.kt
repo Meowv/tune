@@ -98,7 +98,7 @@ class MainActivity : ComponentActivity() {
                     }
                     if (result == null || result.phase == PlaybackPhase.ERROR || result.music?.id != track.id)
                         throw MusicException(result?.musicFailure ?: MusicFailure.PLAYBACK_UNAVAILABLE)
-                })
+                }, historyStore = tuneApp.musicSearchHistory)
         } }
     }
     private val settingsModel by viewModels<SettingsViewModel> {
@@ -243,7 +243,9 @@ class MainActivity : ComponentActivity() {
                     properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
                     MusicSearchScreen(musicSearch, musicSearchModel::queryChanged, musicSearchModel::search,
                         musicSearchModel::more,
-                        { track -> ensureNotificationPermission(); musicSearchModel.select(track) }, musicSearchModel::close, searchList)
+                        { track -> ensureNotificationPermission(); musicSearchModel.select(track) },
+                        musicSearchModel::selectHistory, musicSearchModel::clearHistory,
+                        musicSearchModel::close, searchList)
                 }
             }
         }

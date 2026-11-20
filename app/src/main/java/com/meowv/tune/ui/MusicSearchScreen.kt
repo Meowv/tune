@@ -44,6 +44,8 @@ internal fun MusicSearchScreen(
     onSearch: () -> Unit,
     onMore: () -> Unit,
     onSelect: (MusicTrack) -> Unit,
+    onSelectHistory: (String) -> Unit,
+    onClearHistory: () -> Unit,
     onClose: () -> Unit,
     list: LazyListState = rememberLazyListState()
 ) {
@@ -62,6 +64,7 @@ internal fun MusicSearchScreen(
     }
     val visibleTracks = remember(state.items) { state.items.filter { it.canStartPlayback } }
     val searchFailure = state.failure
+    val showHistory = !state.searched && state.query.isBlank() && state.history.isNotEmpty()
     LaunchedEffect(Unit) { if (!isCar && !state.searched) requester.requestFocus() }
 
     Surface(color = TuneColors.Background, modifier = Modifier.fillMaxSize().testTag("music_search_page")) {
@@ -114,7 +117,34 @@ internal fun MusicSearchScreen(
                 }
 
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    LazyColumn(Modifier.fillMaxSize().testTag("music_search_results"), state = list,
+                    if (showHistory) {
+                        Column(
+                            Modifier.fillMaxWidth().padding(horizontal = horizontal, vertical = TuneSpacing.Medium)
+                                .testTag("music_search_history"),
+                            verticalArrangement = Arrangement.spacedBy(TuneSpacing.Small)
+                        ) {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text(stringResource(R.string.music_search_history), color = TuneColors.Text,
+                                    style = TuneTextStyle, modifier = Modifier.weight(1f))
+                                TextButton(onClick = onClearHistory, modifier = Modifier.testTag("music_search_history_clear")) {
+                                    Text(stringResource(R.string.music_search_history_clear))
+                                }
+                            }
+                            state.history.forEachIndexed { index, query ->
+                                TextButton(
+                                    onClick = { onSelectHistory(query) },
+                                    modifier = Modifier.fillMaxWidth().heightIn(min = touch)
+                                        .testTag("music_search_history_$index"),
+                                    contentPadding = PaddingValues(horizontal = TuneSpacing.Medium)
+                                ) {
+                                    Text(query, color = TuneColors.Text, maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                        modifier = Modifier.fillMaxWidth())
+                                }
+                            }
+                        }
+                    }
+                    if (!showHistory) LazyColumn(Modifier.fillMaxSize().testTag("music_search_results"), state = list,
                         contentPadding = PaddingValues(horizontal = horizontal, vertical = TuneSpacing.Hairline)) {
                         itemsIndexed(visibleTracks, key = { _, track -> track.id }) { index, track ->
                             val selected = state.selectedId == track.id

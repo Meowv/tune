@@ -67,6 +67,10 @@ private val Context.musicDevicePreferences by preferencesDataStore(
     name = "music_device",
     corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
 )
+private val Context.musicSearchHistoryPreferences by preferencesDataStore(
+    name = "music_search_history",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
+)
 private val LastMirror = stringPreferencesKey("last_good_host")
 
 open class TuneApplication : Application(), SingletonImageLoader.Factory {
@@ -95,6 +99,9 @@ open class TuneApplication : Application(), SingletonImageLoader.Factory {
                 android.util.Log.i("MusicRecommendationTrial", it)
             }
         }
+    }
+    internal open val musicSearchHistory by lazy {
+        com.meowv.tune.music.MusicSearchHistoryStore(musicSearchHistoryPreferences)
     }
     internal open val userSettings: SettingsRepository by lazy { settingsRepository(this) }
     private val networkMonitor by lazy { NetworkMonitor(this) }

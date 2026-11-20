@@ -77,14 +77,15 @@ class NowPlayingCompatibilityTest {
         val backdrop = compose.onNodeWithTag("now_playing_backdrop")
             .assertIsDisplayed()
             .getUnclippedBoundsInRoot()
-        assertTrue("背景必须覆盖完整窗口", (
-            kotlin.math.abs((backdrop.top - root.top).value) +
-                kotlin.math.abs((backdrop.bottom - root.bottom).value) +
-                kotlin.math.abs((backdrop.left - root.left).value) +
-                kotlin.math.abs((backdrop.right - root.right).value)
-            ) <= 2f)
         val config = compose.activity.resources.configuration
         val car = isCarWindow(config.screenWidthDp.toFloat(), config.screenHeightDp.toFloat())
+        val expected = if (car) compose.onNodeWithTag("shell_car").getUnclippedBoundsInRoot() else root
+        assertTrue("播放背景应覆盖可用播放区域：$backdrop / $expected", (
+            kotlin.math.abs((backdrop.top - expected.top).value) +
+                kotlin.math.abs((backdrop.bottom - expected.bottom).value) +
+                kotlin.math.abs((backdrop.left - expected.left).value) +
+                kotlin.math.abs((backdrop.right - expected.right).value)
+            ) <= 2f)
         val minimumTouch = if (
             car
         ) 56.dp else 48.dp

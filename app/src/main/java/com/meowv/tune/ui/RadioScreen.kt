@@ -13,6 +13,8 @@ import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -144,6 +146,10 @@ private fun StationList(
     onSelectTarget: (Station) -> Unit,
     onRefresh: () -> Unit
 ) {
+    if (isCar) {
+        StationGrid(isCar, state, playback, selectedId, onPlayback, onLoadMore, onSelectTarget, onRefresh)
+        return
+    }
     val loadMore by rememberUpdatedState(onLoadMore)
     val stationsSize by rememberUpdatedState(state.stations.size)
     val hasMore by rememberUpdatedState(state.hasMore)
@@ -213,13 +219,85 @@ private fun StationList(
 }
 
 @Composable
+private fun StationGrid(
+    isCar: Boolean,
+    state: RadioUiState,
+    playback: PlayerUiState,
+    selectedId: java.util.UUID?,
+    onPlayback: ((PlayerCommand) -> Unit)?,
+    onLoadMore: () -> Unit,
+    onSelectTarget: (Station) -> Unit,
+    onRefresh: () -> Unit
+) {
+    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    val loadMore by rememberUpdatedState(onLoadMore)
+    val stationsSize by rememberUpdatedState(state.stations.size)
+    val hasMore by rememberUpdatedState(state.hasMore)
+    val loading by rememberUpdatedState(state.isLoading)
+    val error by rememberUpdatedState(state.error)
+    LaunchedEffect(gridState) {
+        snapshotFlow {
+            val last = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            hasMore && !loading && error == null && last > 0 && last >= stationsSize - 4
+        }.filter { it }.collect { loadMore() }
+    }
+    Box(Modifier.fillMaxSize()) {
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            modifier = Modifier.fillMaxSize().testTag("station_list"),
+            state = gridState,
+            contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Medium),
+            verticalArrangement = Arrangement.spacedBy(TuneSpacing.Small)
+        ) {
+            if (state.error != null && state.stations.isNotEmpty()) {
+                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }, key = "directory_error") {
+                    DirectoryFeedback(R.string.directory_error, onRefresh)
+                }
+            }
+            items(state.stations.size, key = { state.stations[it].uuid.toString() }) { index ->
+                val station = state.stations[index]
+                StationRow(
+                    station = station,
+                    isCar = isCar,
+                    selected = station.uuid == selectedId,
+                    playback = playback,
+                    onPlayback = onPlayback,
+                    onSelectTarget = onSelectTarget,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            if (state.isLoading && state.stations.isNotEmpty()) {
+                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }, key = "directory_loading") {
+                    DirectoryLoading(Modifier.fillMaxWidth().padding(vertical = 20.dp), size = 22.dp)
+                }
+            }
+        }
+        if (state.stations.isEmpty()) {
+            when {
+                state.isLoading -> DirectoryLoading(Modifier.fillMaxSize())
+                state.error != null -> DirectoryMessage(
+                    R.drawable.ic_ui_info, TuneColors.Error, R.string.directory_error, Modifier.fillMaxSize()
+                ) {
+                    TextButton(onClick = onRefresh) { Text(stringResource(R.string.directory_retry), color = TuneColors.Primary) }
+                }
+                else -> DirectoryMessage(
+                    R.drawable.ic_radio, TuneColors.Muted, R.string.directory_empty, Modifier.fillMaxSize()
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun StationRow(
     station: Station,
     isCar: Boolean,
     selected: Boolean,
     playback: PlayerUiState,
     onPlayback: ((PlayerCommand) -> Unit)?,
-    onSelectTarget: (Station) -> Unit
+    onSelectTarget: (Station) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val title = station.name.ifBlank { stringResource(R.string.station_unnamed) }
     val isCurrent = playback.station?.uuid == station.uuid
@@ -260,7 +338,7 @@ private fun StationRow(
     val markerColor = TuneColors.Primary
     val glyph = TuneSizes.IconMd
     Row(
-        Modifier.fillMaxWidth().height(if (isCar) 72.dp else 78.dp)
+        modifier.fillMaxWidth().height(if (isCar) 72.dp else 78.dp)
             .clip(shape)
             .background(rowBackground)
             .drawBehind {

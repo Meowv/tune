@@ -9,6 +9,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -161,22 +163,48 @@ internal fun MusicScreen(
                     size = 22.dp, tag = "music_feed_loading")
             } else {
                 val horizontal = if (isCar) 24.dp else 16.dp
-                LazyColumn(state = list, modifier = statusModifier.testTag("music_feed"),
-                    contentPadding = PaddingValues(start = horizontal, end = horizontal, bottom = 12.dp)) {
-                    itemsIndexed(browse.tracks, key = { _, track -> track.id }) { index, track ->
-                        val current = track.id == currentId
-                        val rowVisual = if (current) visual else StationPlaybackVisual.None
-                        MusicTrackRow(track, isCar, current, rowVisual,
-                            enabled = connected && !rowVisual.busy, error = playbackError.takeIf { current },
-                            animationsEnabled = animationsEnabled,
-                            modifier = Modifier.testTag("music_feed_track_${track.id}")) {
-                            clickTrack(track)
+                if (isCar) {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
+                        modifier = statusModifier.testTag("music_feed"),
+                        contentPadding = PaddingValues(start = horizontal, end = horizontal, bottom = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Medium),
+                        verticalArrangement = Arrangement.spacedBy(TuneSpacing.Small)
+                    ) {
+                        items(browse.tracks.size, key = { browse.tracks[it].id }) { index ->
+                            val track = browse.tracks[index]
+                            val current = track.id == currentId
+                            val rowVisual = if (current) visual else StationPlaybackVisual.None
+                            MusicTrackRow(track, isCar, current, rowVisual,
+                                enabled = connected && !rowVisual.busy, error = playbackError.takeIf { current },
+                                animationsEnabled = animationsEnabled,
+                                modifier = Modifier.testTag("music_feed_track_${track.id}")) {
+                                clickTrack(track)
+                            }
                         }
-                        if (index < browse.tracks.lastIndex) MusicTrackDivider()
+                        if (browse.loading) item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }, key = "music_feed_loading") {
+                            DirectoryLoading(Modifier.fillMaxWidth().padding(vertical = TuneSpacing.Medium),
+                                size = 22.dp, tag = "music_feed_loading")
+                        }
                     }
-                    if (browse.loading) item(key = "music_feed_loading") {
-                        DirectoryLoading(Modifier.fillMaxWidth().padding(vertical = TuneSpacing.Medium),
-                            size = 22.dp, tag = "music_feed_loading")
+                } else {
+                    LazyColumn(state = list, modifier = statusModifier.testTag("music_feed"),
+                        contentPadding = PaddingValues(start = horizontal, end = horizontal, bottom = 12.dp)) {
+                        itemsIndexed(browse.tracks, key = { _, track -> track.id }) { index, track ->
+                            val current = track.id == currentId
+                            val rowVisual = if (current) visual else StationPlaybackVisual.None
+                            MusicTrackRow(track, isCar, current, rowVisual,
+                                enabled = connected && !rowVisual.busy, error = playbackError.takeIf { current },
+                                animationsEnabled = animationsEnabled,
+                                modifier = Modifier.testTag("music_feed_track_${track.id}")) {
+                                clickTrack(track)
+                            }
+                            if (index < browse.tracks.lastIndex) MusicTrackDivider()
+                        }
+                        if (browse.loading) item(key = "music_feed_loading") {
+                            DirectoryLoading(Modifier.fillMaxWidth().padding(vertical = TuneSpacing.Medium),
+                                size = 22.dp, tag = "music_feed_loading")
+                        }
                     }
                 }
             }

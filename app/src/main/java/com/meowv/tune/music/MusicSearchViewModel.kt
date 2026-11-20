@@ -21,7 +21,8 @@ internal data class MusicSearchState(
     val appendFailure: MusicFailure? = null,
     val selectionFailure: MusicFailure? = null,
     val selecting: Boolean = false,
-    val selectedId: String? = null
+    val selectedId: String? = null,
+    val history: List<String> = emptyList()
 ) {
     val loading: Boolean get() = request != null
 }
@@ -33,13 +34,20 @@ internal enum class MusicSearchWarning { DEFERRED, TIMEOUT, RATE_LIMITED, UNAVAI
 internal class MusicSearchViewModel(
     private val repository: MusicRepository?,
     private val play: suspend (MusicTrack) -> Unit,
-    scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+    private val historyStore: MusicSearchHistoryStore? = null
 ) : ViewModel(scope) {
     private val mutable = MutableStateFlow(MusicSearchState())
     val state = mutable.asStateFlow()
     private var generation = 0L
     private var pending: Job? = null
     private var selection: Job? = null
+
+    init {
+        viewModelScope.launch {
+            historyStore?.read()?.let { values -> mutable.value = mutable.value.copy(history = values) }
+        }
+    }
 
     fun open() { mutable.value = mutable.value.copy(visible = true) }
 
@@ -59,7 +67,28 @@ internal class MusicSearchViewModel(
         mutable.value = MusicSearchState(visible = true, query = value)
     }
 
-    fun search() = load(more = false)
+    fun search() {
+        val query = mutable.value.query.trim()
+        if (query.isNotEmpty()) {
+            viewModelScope.launch {
+                historyStore?.add(query)
+                mutable.value = mutable.value.copy(history = historyStore?.read().orEmpty())
+            }
+        }
+        load(more = false)
+    }
+
+    fun selectHistory(query: String) {
+        queryChanged(query)
+        search()
+    }
+
+    fun clearHistory() {
+        viewModelScope.launch {
+            historyStore?.clear()
+            mutable.value = mutable.value.copy(history = emptyList())
+        }
+    }
     fun more() = load(more = true)
 
     private fun load(more: Boolean) {

@@ -191,8 +191,6 @@ internal fun NowPlayingScreen(
                 } else if (wide) {
                     WideNowPlayingContent(
                         isCar = isCar,
-                        maxWidth = availableWidth,
-                        maxHeight = availableHeight,
                         state = state,
                         media = media,
                         details = details,
@@ -557,7 +555,12 @@ private fun PhoneNowPlayingContent(
                 state,
                 modifier = Modifier.height(if (compact) 28.dp else 34.dp)
             )
-            Spacer(Modifier.weight(if (compact) .12f else .40f))
+            val lowerSpacingWeight = when {
+                compact -> .12f
+                details == null -> .27f
+                else -> .40f
+            }
+            Spacer(Modifier.weight(lowerSpacingWeight))
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 NowPlayingTools(
                     isCar = false,
@@ -577,8 +580,6 @@ private fun PhoneNowPlayingContent(
 @Composable
 private fun WideNowPlayingContent(
     isCar: Boolean,
-    maxWidth: Dp,
-    maxHeight: Dp,
     state: PlayerUiState,
     media: NowPlayingMedia,
     details: (@Composable (Boolean, @Composable () -> Unit) -> Unit)?,
@@ -596,7 +597,13 @@ private fun WideNowPlayingContent(
     onSleepTimer: () -> Unit,
     onCollapse: () -> Unit
 ) {
-    Box(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val gap = if (isCar && maxWidth >= 600.dp) 44.dp else 16.dp
+        val columnsWidth = (maxWidth - gap).coerceAtLeast(0.dp)
+        // 左栏常驻后，先给右侧三个播放键留足宽度。
+        val controlsWidth = (columnsWidth * .48f)
+            .coerceAtLeast(if (isCar) 270.dp else 208.dp)
+            .coerceAtMost(columnsWidth)
         val compact = maxHeight < 360.dp
         val artworkSize = minOf(
             maxWidth * if (isCar) .36f else .34f,
@@ -605,10 +612,10 @@ private fun WideNowPlayingContent(
         ).coerceAtLeast(150.dp)
         Row(
             Modifier.fillMaxSize().focusGroup(),
-            horizontalArrangement = Arrangement.spacedBy(if (isCar) 44.dp else 28.dp),
+            horizontalArrangement = Arrangement.spacedBy(gap),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(Modifier.weight(1.04f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+            Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
                 NowPlayingArtworkGesture(
                     media = media,
                     canNext = canNext,
@@ -621,7 +628,7 @@ private fun WideNowPlayingContent(
                 )
             }
             Column(
-                Modifier.weight(.96f).fillMaxHeight().widthIn(max = if (isCar) 560.dp else 430.dp),
+                Modifier.width(controlsWidth).fillMaxHeight().testTag("now_playing_info_column"),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 if (details == null && !compact) Spacer(Modifier.weight(1f))

@@ -1,7 +1,6 @@
 package com.meowv.tune.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -194,42 +193,62 @@ internal fun TuneApp(
             LaunchedEffect(isCar) { onShellChanged(isCar) }
             val updateSubtitle = updateSubtitle(update, localVersion.versionName)
             val playerEntry: @Composable () -> Unit = {
-                CircularPlayerEntry(playbackState, connected, rotation, isCar, shellEnabled, {
-                    if (playbackState.source == PlaybackSource.RADIO && playbackState.station == null && target != null) onSelectTarget(target)
-                    nowPlayingOpen = true
-                })
-            }
-            Column(
-                Modifier.fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .onGloballyPositioned { onFirstLayout() }
-                    .testTag(if (isCar) "shell_car" else "shell_phone")
-                    .focusProperties {
-                        onEnter = {
-                            if (fullscreenOccupied &&
-                                (!fullscreenTransition.currentState || !fullscreenFocus.requestFocus())) {
-                                cancelFocusChange()
-                            }
+                CompactMediaBar(
+                    state = playbackState,
+                    station = target,
+                    connected = connected,
+                    rotation = rotation,
+                    isCar = isCar,
+                    enabled = shellEnabled,
+                    animationMillis = fullscreenAnimMillis,
+                    onToggle = toggle,
+                    onOpen = {
+                        if (playbackState.source == PlaybackSource.RADIO && playbackState.station == null && target != null) {
+                            onSelectTarget(target)
                         }
+                        nowPlayingOpen = true
                     }
-                    .focusGroup()
-                    .then(
-                        if (!shellEnabled) {
-                            Modifier.semantics { hideFromAccessibility() }
-                        } else Modifier
-                    )
+                )
+            }
+            Row(
+                Modifier.fillMaxSize()
+                    .then(if (isCar) Modifier.windowInsetsPadding(WindowInsets.safeDrawing) else Modifier)
             ) {
-                if (storageError) {
-                    Text(
-                        stringResource(R.string.settings_storage_error), color = TuneColors.Text,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                    )
+                if (isCar && !showUpdate) {
+                    MeowvNavigationRail(page) {
+                        nowPlayingOpen = false
+                        page = it
+                    }
                 }
-                if (isCar) {
-                    Row(Modifier.weight(1f)) {
-                        MeowvNavigationRail(page, playerEntry) { page = it }
+                Box(Modifier.weight(1f).fillMaxHeight()) {
+                    Column(
+                        Modifier.fillMaxSize()
+                            .windowInsetsPadding(WindowInsets.safeDrawing)
+                            .onGloballyPositioned { onFirstLayout() }
+                            .testTag(if (isCar) "shell_car" else "shell_phone")
+                            .focusProperties {
+                                onEnter = {
+                                    if (fullscreenOccupied &&
+                                        (!fullscreenTransition.currentState || !fullscreenFocus.requestFocus())) {
+                                        cancelFocusChange()
+                                    }
+                                }
+                            }
+                            .focusGroup()
+                            .then(
+                                if (!shellEnabled) {
+                                    Modifier.semantics { hideFromAccessibility() }
+                                } else Modifier
+                            )
+                    ) {
+                        if (storageError) {
+                            Text(
+                                stringResource(R.string.settings_storage_error), color = TuneColors.Text,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                            )
+                        }
                         TunePager(
-                            pagerState, Modifier.weight(1f).fillMaxHeight(), pageStates, isCar,
+                            pagerState, Modifier.weight(1f).fillMaxWidth(), pageStates, isCar,
                             settings, displayRadioState, playbackState, connected, directoryRefreshing,
                             updateSubtitle, onPlayback, onSelectTarget, onDisplayModeChange,
                             onSettingsChange, onRefreshRadio, onRefreshAll, onLoadMore,
@@ -238,67 +257,60 @@ internal fun TuneApp(
                             musicBrowse = musicBrowse, onLoadMusic = onLoadMusic, musicDevice = musicDevice,
                             directoryAnimationsEnabled = shellEnabled
                         )
-                    }
-                } else {
-                    TunePager(
-                        pagerState, Modifier.weight(1f).fillMaxWidth(), pageStates, isCar,
-                        settings, displayRadioState, playbackState, connected, directoryRefreshing,
-                        updateSubtitle, onPlayback, onSelectTarget, onDisplayModeChange,
-                        onSettingsChange, onRefreshRadio, onRefreshAll, onLoadMore,
-                        onClearCache, { showUpdate = true }, { showScopePicker = true },
-                        musicState = musicState, onSearchMusic = onSearchMusic,
-                        musicBrowse = musicBrowse, onLoadMusic = onLoadMusic, musicDevice = musicDevice,
-                        directoryAnimationsEnabled = shellEnabled
-                    )
-                }
-                if (!isCar) MeowvBottomDock(page, playerEntry) { page = it }
-            }
-            if (!shellEnabled) {
-                Box(Modifier.fillMaxSize().pointerInput(Unit) {
-                    awaitPointerEventScope {
-                        while (true) awaitPointerEvent().changes.forEach { it.consume() }
-                    }
-                })
-            }
-            AnimatedVisibility(
-                visibleState = fullscreenTransition,
-                enter = slideInVertically(
-                    initialOffsetY = { it },
-                    animationSpec = tween(fullscreenAnimMillis)
-                ) + fadeIn(tween(fullscreenAnimMillis)),
-                exit = slideOutVertically(
-                    targetOffsetY = { it },
-                    animationSpec = tween(fullscreenAnimMillis)
-                ) + fadeOut(tween(fullscreenAnimMillis))
-            ) {
-                NowPlayingScreen(
-                    isCar = isCar,
-                    connected = connected,
-                    state = playbackState,
-                    station = visibleStation,
-                    shuffle = shuffle,
-                    sleepTimer = sleepTimerState,
-                    onCollapse = { nowPlayingOpen = false },
-                    onToggle = toggle,
-                    onNext = next,
-                    onPrevious = previous,
-                    onToggleShuffle = {
-                        onSettingsChange { current ->
-                            current.copy(
-                                playbackOrder = if (current.playbackOrder == PlaybackOrder.SHUFFLE) {
-                                    PlaybackOrder.SEQUENTIAL
-                                } else {
-                                    PlaybackOrder.SHUFFLE
-                                }
-                            )
+                        if (isCar) {
+                            if (!fullscreenOccupied) playerEntry()
+                        } else {
+                            MeowvBottomDock(page, playerEntry) { page = it }
                         }
-                    },
-                    onSetSleepTimer = onSetSleepTimer,
-                    onSeek = { onPlayback(PlayerCommand.Seek(it)) },
-                    onSelectStation = { nowPlayingOpen = false; page = if (playbackState.source == PlaybackSource.MUSIC) TunePage.Music else TunePage.Radio },
-                    modifier = Modifier.fillMaxSize().testTag("now_playing_screen")
-                        .focusRequester(fullscreenFocus).focusGroup()
-                )
+                    }
+                    if (!shellEnabled) {
+                        Box(Modifier.fillMaxSize().pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) awaitPointerEvent().changes.forEach { it.consume() }
+                            }
+                        })
+                    }
+                    androidx.compose.animation.AnimatedVisibility(
+                        visibleState = fullscreenTransition,
+                        enter = slideInVertically(
+                            initialOffsetY = { it },
+                            animationSpec = tween(fullscreenAnimMillis)
+                        ) + fadeIn(tween(fullscreenAnimMillis)),
+                        exit = slideOutVertically(
+                            targetOffsetY = { it },
+                            animationSpec = tween(fullscreenAnimMillis)
+                        ) + fadeOut(tween(fullscreenAnimMillis))
+                    ) {
+                        NowPlayingScreen(
+                            isCar = isCar,
+                            connected = connected,
+                            state = playbackState,
+                            station = visibleStation,
+                            shuffle = shuffle,
+                            sleepTimer = sleepTimerState,
+                            onCollapse = { nowPlayingOpen = false },
+                            onToggle = toggle,
+                            onNext = next,
+                            onPrevious = previous,
+                            onToggleShuffle = {
+                                onSettingsChange { current ->
+                                    current.copy(
+                                        playbackOrder = if (current.playbackOrder == PlaybackOrder.SHUFFLE) {
+                                            PlaybackOrder.SEQUENTIAL
+                                        } else {
+                                            PlaybackOrder.SHUFFLE
+                                        }
+                                    )
+                                }
+                            },
+                            onSetSleepTimer = onSetSleepTimer,
+                            onSeek = { onPlayback(PlayerCommand.Seek(it)) },
+                            onSelectStation = { nowPlayingOpen = false; page = if (playbackState.source == PlaybackSource.MUSIC) TunePage.Music else TunePage.Radio },
+                            modifier = Modifier.fillMaxSize().testTag("now_playing_screen")
+                                .focusRequester(fullscreenFocus).focusGroup()
+                        )
+                    }
+                }
             }
             // 版本页覆盖整个外壳（含播放器与导航），保持主菜单仍是三个。
             if (showUpdate) {
@@ -328,8 +340,8 @@ internal fun TuneApp(
                     .padding(
                         bottom = when {
                             nowPlayingOpen -> 24.dp
-                            isCar -> 16.dp
-                            else -> 88.dp
+                            isCar -> 80.dp
+                            else -> 124.dp
                         }
                     )
             )
