@@ -53,6 +53,20 @@ internal class MusicApiClient(
         return MusicJson.page(execute(Request.Builder().url(url).get(), maxBytes = 1024L * 1024),
             recommendation = true).copy(nextCursor = null)
     }
+    override suspend fun candidates(limit: Int, cursor: String?): MusicPage {
+        val url = baseUrl.newBuilder().addPathSegment("recommendations").addPathSegment("candidates")
+            .addQueryParameter("limit", limit.toString()).apply {
+                if (cursor != null) addQueryParameter("cursor", cursor)
+            }.build()
+        val body = try {
+            execute(Request.Builder().url(url).get(), blockOnFailure = false)
+        } catch (failure: MusicException) {
+            if (failure.failure == MusicFailure.RATE_LIMITED) requestGate.block(failure.retryAfterSeconds)
+            throw failure
+        }
+        return MusicJson.page(body, recommendation = true)
+    }
+
     override suspend fun radioRecommendations(): List<MusicTrack> = try {
         MusicJson.page(request("recommendations/radio", 20, null), recommendation = true).items
     } catch (failure: MusicException) {

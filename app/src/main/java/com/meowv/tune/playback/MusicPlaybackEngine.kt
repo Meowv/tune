@@ -10,6 +10,8 @@ import androidx.media3.datasource.HttpDataSource
 import com.meowv.tune.domain.*
 import com.meowv.tune.domain.music.*
 import com.meowv.tune.music.MusicFeedStore
+import com.meowv.tune.music.MusicListeningHistory
+import com.meowv.tune.music.MusicListeningTracker
 import com.meowv.tune.music.MusicQueueManager
 import com.meowv.tune.music.MusicSelection
 import com.meowv.tune.music.MusicResumePoint
@@ -29,12 +31,14 @@ internal class MusicPlaybackEngine(
     private val network: StateFlow<NetworkState>,
     private val resumeStore: MusicResumeStore,
     private val feedStore: MusicFeedStore,
+    private val listeningHistory: MusicListeningHistory? = null,
     private val publish: (PlayerUiState) -> Unit
 ) : Player.Listener {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val queue = MusicQueueManager(
-        { repository() ?: throw MusicException(MusicFailure.NOT_CONFIGURED) }, feedStore = feedStore
+        { repository() ?: throw MusicException(MusicFailure.NOT_CONFIGURED) }, feedStore = feedStore, listening = listeningHistory
     )
+    private val listening = listeningHistory?.let { MusicListeningTracker(android.os.SystemClock::elapsedRealtime, started = it::started, emit = it::record) }
     private val focus = AudioFocusController(context, ::onAudioFocusEvent)
     private val route = AudioRouteMonitor(context, ::onExternalOutputRemoved)
     private val interruptions = MusicInterruptionState(android.os.SystemClock::elapsedRealtime)
@@ -80,6 +84,7 @@ internal class MusicPlaybackEngine(
         scope.launch {
             while (isActive) {
                 delay(500)
+                if (active && itemMatches()) listening?.observe(player.isPlaying && player.playerError == null)
                 if (active && !loading && itemMatches()) {
                     publishState(state)
                     if (player.isPlaying && android.os.SystemClock.elapsedRealtime() - lastCheckpointAt >= 3_000) {
@@ -148,12 +153,13 @@ internal class MusicPlaybackEngine(
         resumePoint = null
         interruptions.reset()
         if (resetSession || !queue.canNext) queue.reset(seed, track?.id)
-        begin { if (track == null) queue.next() else queue.select(track) }
+        begin(explicit = track != null) { if (track == null) queue.next() else queue.select(track) }
     }
 
     fun next(userInitiated: Boolean = true) {
         if (!active || !mayRequest()) return
         if (userInitiated && state.phase !in setOf(PlaybackPhase.IDLE, PlaybackPhase.ERROR)) state.music?.let {
+            if (!loading && confirmed && itemMatches()) listening?.finish(earlySkip = true)
             queue.skip(it, affectRanking = !loading && confirmed && current?.track?.id == it.id &&
                 state.phase in setOf(PlaybackPhase.PLAYING, PlaybackPhase.PAUSED))
         }
@@ -166,7 +172,7 @@ internal class MusicPlaybackEngine(
     fun previous() {
         if (!active || !queue.canPrevious || !mayRequest(preserveCurrent = true)) return
         interruptions.reset()
-        begin(preserveCurrent = true) { queue.previous() }
+        begin(preserveCurrent = true, explicit = true) { queue.previous() }
     }
 
     private fun begin(
@@ -176,6 +182,7 @@ internal class MusicPlaybackEngine(
         keepRefill: Boolean = false,
         saved: MusicResumePoint? = null,
         prepared: Deferred<Result<PlayableAudio>>? = null,
+        explicit: Boolean = false,
         select: suspend () -> MusicSelection?
     ) {
         val oldState = state
@@ -194,6 +201,7 @@ internal class MusicPlaybackEngine(
         desiredPlay = true
         loading = true
         if (!preserveCurrent) {
+            if (refreshProvider != null || excludedProvider != null) listening?.observe(false) else listening?.finish()
             itemId = null
             player.stop(); player.clearMediaItems()
             focus.abandon()
@@ -206,6 +214,7 @@ internal class MusicPlaybackEngine(
                     ?: throw MusicException(MusicFailure.NO_PLAYABLE_MATCH)
                 ensureActive()
                 selected = true
+                if (refreshProvider == null && excludedProvider == null) listeningHistory?.attempted()
                 if (!preserveCurrent) publishState(state.copy(music = selectedTrack.track))
                 val result = withTimeout(8000) {
                     var selection = selectedTrack
@@ -250,7 +259,8 @@ internal class MusicPlaybackEngine(
                 val duration = playable.durationMs ?: selection.track.durationMs
                 val position = saved?.startPosition(playable.seekable, duration)
                     ?: previousPosition.takeIf { playable.seekable && duration != null && it in 0 until duration } ?: 0
-                prepare(selection, playable, id, position)
+                prepare(selection, playable, id, position, explicit, refreshProvider != null || excludedProvider != null,
+                    automatic = !explicit && saved == null)
             } catch (failure: TimeoutCancellationException) {
                 if (active && id == generation) {
                     val error = MusicException(MusicFailure.SOURCE_TIMEOUT)
@@ -303,7 +313,9 @@ internal class MusicPlaybackEngine(
         }
     }
 
-    private fun prepare(selection: MusicSelection, playable: PlayableAudio, id: Long, positionMs: Long) {
+    private fun prepare(selection: MusicSelection, playable: PlayableAudio, id: Long, positionMs: Long,
+        explicit: Boolean, continuing: Boolean, automatic: Boolean) {
+        listening?.start(selection.track, explicit, continuing, automatic)
         lyricsRequest?.cancel()
         lyricsRequest = null
         current = selection; audio = playable; confirmed = false
@@ -322,6 +334,7 @@ internal class MusicPlaybackEngine(
     }
 
     override fun onEvents(player: Player, events: Player.Events) {
+        if (active && itemMatches()) listening?.observe(player.isPlaying && player.playerError == null)
         if (!active || loading || state.phase == PlaybackPhase.ERROR || !itemMatches()) return
         val error = player.playerError
         when {
@@ -371,6 +384,7 @@ internal class MusicPlaybackEngine(
             player.playbackState == Player.STATE_ENDED -> {
                 if (endedItem != itemId) {
                     endedItem = itemId
+                    listening?.finish(completed = true)
                     resumeStore.save(null)
                     resumePoint = null
                     if (desiredPlay) {
@@ -452,6 +466,7 @@ internal class MusicPlaybackEngine(
     }
 
     fun stop(forget: Boolean = true) {
+        listening?.finish()
         if (forget) resumeStore.save(null)
         resumePoint = null
         invalidate()
@@ -481,6 +496,7 @@ internal class MusicPlaybackEngine(
     }
 
     private fun fail(failure: MusicFailure) {
+        listening?.finish()
         invalidate(); loading = false; desiredPlay = false
         interruptions.reset(); focus.abandon(); player.pause()
         publishState(state.copy(phase = PlaybackPhase.ERROR, musicFailure = failure, canSeek = false))

@@ -79,7 +79,7 @@ class MainActivity : ComponentActivity() {
             MusicViewModel(app.musicRepository,
                 requestPlayback = { seed -> app.playerController.dispatch(PlayerCommand.PlayMusic(seed = seed)) },
                 playback = app.playerController.state,
-                feedStore = app.musicFeed)
+                feedStore = app.musicFeed, listening = app.musicListening)
         } }
     }
     private val musicSearchModel by viewModels<MusicSearchViewModel> {

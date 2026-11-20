@@ -5,6 +5,9 @@ import java.time.Instant
 interface MusicRepository {
     suspend fun search(query: String, limit: Int = 20, cursor: String? = null): MusicPage
     suspend fun recommendations(limit: Int = 20, cursor: String? = null): MusicPage
+
+    suspend fun candidates(limit: Int = 30, cursor: String? = null): MusicPage =
+        MusicPage(emptyList(), strategy = "rolling_warming")
     suspend fun radioRecommendations(): List<MusicTrack> = emptyList()
 
     // 个性化扩展点：将来可依据最近播放曲目召回不同查询词，队列侧无需改动。

@@ -30,6 +30,26 @@ class MusicRepositoryTest {
         assertTrue(resolved.seekable)
     }
 
+    @Test fun candidatePagesSendOnlyPaginationQueryAndKeepDiscoveryIds() = runBlocking {
+        server { server, repo ->
+            val search = fixture.getValue("search").jsonObject
+            val response = JsonObject(search + mapOf(
+                "strategy" to JsonPrimitive("rolling_candidates"),
+                "generatedAt" to JsonPrimitive("2026-11-20T00:00:00Z"),
+                "nextCursor" to JsonPrimitive("next-page"),
+                "discoveryTrackIds" to JsonArray(listOf(JsonPrimitive("original-001")))
+            ))
+            server.enqueue(MockResponse().setBody(response.toString()))
+            val page = repo.candidates(cursor = "first-page")
+            assertEquals("next-page", page.nextCursor)
+            assertEquals(setOf("original-001"), page.discoveryTrackIds)
+            val request = server.takeRequest(1, TimeUnit.SECONDS)!!
+            assertEquals(setOf("limit", "cursor"), request.requestUrl!!.queryParameterNames)
+            assertTrue(request.requestUrl!!.encodedPath.endsWith("/recommendations/candidates"))
+            assertEquals(0L, request.bodySize)
+        }
+    }
+
     @Test fun alternateResolveSendsExclusionAndRejectsThatProviderInTheResponse() = runBlocking {
         server { server, repository ->
             val response = fixture.getValue("resolved").jsonObject

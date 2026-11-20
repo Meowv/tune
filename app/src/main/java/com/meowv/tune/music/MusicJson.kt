@@ -16,7 +16,8 @@ internal object MusicJson {
             partial = if (recommendation && "partial" !in root) false else root.boolean("partial"),
             warnings = if (recommendation && root["warnings"] in listOf(null, JsonNull)) emptyList() else root.array("warnings").map { it.text() },
             strategy = if (recommendation) root.requiredText("strategy") else null,
-            generatedAt = if (recommendation) Instant.parse(root.requiredText("generatedAt")) else null
+            generatedAt = if (recommendation) Instant.parse(root.requiredText("generatedAt")) else null,
+            discoveryTrackIds = (root["discoveryTrackIds"] as? JsonArray)?.map { it.text() }?.toSet().orEmpty()
         )
     }
 
@@ -47,6 +48,8 @@ internal object MusicJson {
     fun encodeFeedSnapshot(snapshot: MusicFeedSnapshot): String = buildJsonObject {
         put("version", snapshot.version)
         put("complete", snapshot.complete)
+        put("rolling", snapshot.rolling)
+        putJsonArray("discoveryTrackIds") { snapshot.discoveryTrackIds.forEach { add(it) } }
         putJsonArray("recommendations") { snapshot.recommendations.forEach { add(storedTrack(it)) } }
         putJsonArray("fallback") { snapshot.fallback.forEach { add(storedTrack(it)) } }
     }.toString()
@@ -58,7 +61,9 @@ internal object MusicJson {
                 version = root.optionalLong("version") ?: error("version"),
                 complete = root.boolean("complete"),
                 recommendations = root.array("recommendations").map { track(it.jsonObject) },
-                fallback = root.array("fallback").map { track(it.jsonObject) }
+                fallback = root.array("fallback").map { track(it.jsonObject) },
+                rolling = (root["rolling"] as? JsonPrimitive)?.booleanOrNull == true,
+                discoveryTrackIds = (root["discoveryTrackIds"] as? JsonArray)?.map { it.text() }?.toSet().orEmpty()
             )
         }
     } catch (_: MusicException) {

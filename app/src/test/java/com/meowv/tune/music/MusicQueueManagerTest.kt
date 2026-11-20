@@ -8,6 +8,27 @@ import org.junit.Test
 class MusicQueueManagerTest {
     private val tracks = (1..4).map { MusicTrack("$it", "Song $it", listOf("qix")) }
 
+    @Test fun renewsAnExpiredRollingCursorWithoutRepeatingTheSeed() = runBlocking {
+        val requests = mutableListOf<String?>()
+        val sample = object : MusicRepository by FakeMusicRepository(tracks) {
+            override suspend fun candidates(limit: Int, cursor: String?): MusicPage {
+                requests += cursor
+                return when (cursor) {
+                    "old" -> throw MusicException(MusicFailure.INVALID_REQUEST)
+                    null -> MusicPage(listOf(tracks[0], tracks[1]), "new", strategy = "rolling_candidates")
+                    "new" -> throw MusicException(MusicFailure.INVALID_REQUEST)
+                    else -> error("unexpected cursor")
+                }
+            }
+            override suspend fun search(query: String, limit: Int, cursor: String?) = MusicPage(emptyList())
+        }
+        val queue = MusicQueueManager({ sample })
+        queue.reset(MusicQueueSeed(listOf(tracks[0]), "old", rolling = true), startAt = tracks[0].id)
+        assertEquals(tracks[1], queue.next()?.track)
+        assertNull(queue.next())
+        assertEquals(listOf("old", null, "new"), requests)
+    }
+
     @Test fun loadsFullRecommendationListBeforeRadioFallback() = runBlocking {
         val all = (1..75).map { MusicTrack(it.toString(), "Song $it", listOf("qix")) }
         var loads = 0

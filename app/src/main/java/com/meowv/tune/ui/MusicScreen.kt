@@ -143,7 +143,7 @@ internal fun MusicScreen(
                     onCommand(PlayerCommand.TogglePause)
                 } else {
                     listSelectionId = song.id.takeIf { mode == RadioDisplayMode.LIST }
-                    onCommand(PlayerCommand.PlayMusic(song, MusicQueueSeed(browse.tracks, null)))
+                    onCommand(PlayerCommand.PlayMusic(song, browse.seed ?: MusicQueueSeed(browse.tracks, null)))
                 }
             }
             if (browse.failure != null) {

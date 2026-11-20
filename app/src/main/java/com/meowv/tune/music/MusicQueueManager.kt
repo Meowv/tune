@@ -22,11 +22,16 @@ internal class MusicQueueManager(
     private val historyLimit: Int = 100,
     private val nowMillis: () -> Long = { System.nanoTime() / 1_000_000 },
     private val epochSeconds: () -> Long = { Instant.now().epochSecond },
-    private val feedStore: MusicFeedStore? = null
+    private val feedStore: MusicFeedStore? = null,
+    private val listening: MusicListeningHistory? = null
 ) {
     private val pending = ArrayDeque<MusicTrack>()
     private val history = mutableListOf<MusicTrack>()
     private val considered = LinkedHashSet<String>()
+    private val recordings = mutableListOf<MusicRecording>()
+    private var rolling = false
+    private var rollingFeedVersion: Long? = null
+    private var retriedCursor = false
     private val played = LinkedHashSet<String>()
     private val skipped = LinkedHashSet<String>()
     private val skipArtists = ArrayDeque<Set<String>>()
@@ -64,7 +69,7 @@ internal class MusicQueueManager(
         !exhausted || fallbackFailure == null && emptyCycles < MAX_EMPTY_CYCLES
     val nextTrack: MusicTrack? get() = if (index < history.lastIndex) history[index + 1] else nextCandidate()
     private val remaining: Int get() = pending.size + (history.lastIndex - index).coerceAtLeast(0)
-    val needsReplenish: Boolean get() = remaining < lowWater && !exhausted
+    val needsReplenish: Boolean get() = (if (rolling) remaining <= 2 else remaining < lowWater) && !exhausted
     val needsFallbackPrefetch: Boolean get() = exhausted && remaining in 1..2 &&
         fallbackFailure == null && emptyCycles < MAX_EMPTY_CYCLES
     val sessionVersion: Long get() = revision
@@ -89,7 +94,7 @@ internal class MusicQueueManager(
 
     fun select(track: MusicTrack): MusicSelection {
         pending.removeAll { it.id == track.id }
-        remember(track.id)
+        remember(track)
         return MusicSelection(++issued, track)
     }
 
@@ -118,26 +123,52 @@ internal class MusicQueueManager(
     suspend fun replenish(minimumOnly: Boolean = false) = load.withLock {
         val owner = revision
         var added = 0
-        // 单次最多读取两页；重复游标或全重复目录不能造成无界补队列。
-        repeat(2) {
+        // 前台仅在没有待播曲目时继续跨过空页，预取仍以两页为限。
+        repeat(if (rolling && minimumOnly) 6 else 2) {
             if (!needsReplenish || minimumOnly && pending.isNotEmpty()) return@withLock
             val requestedCursor = cursor
-            val page = repository().recommendations(batchSize, requestedCursor)
+            val source = repository()
+            val page = try {
+                if (rolling) source.candidates(cursor = requestedCursor) else source.recommendations(batchSize, requestedCursor)
+            } catch (failure: MusicException) {
+                if (rolling && requestedCursor != null && failure.failure == MusicFailure.INVALID_REQUEST && !retriedCursor) {
+                    retriedCursor = true
+                    cursor = null
+                    return@repeat
+                }
+                if (!rolling || failure.failure !in setOf(MusicFailure.INVALID_REQUEST, MusicFailure.TRACK_NOT_FOUND,
+                        MusicFailure.SOURCE_UNAVAILABLE, MusicFailure.SOURCE_TIMEOUT, MusicFailure.INVALID_RESPONSE)) throw failure
+                exhausted = true
+                cursor = null
+                return@withLock
+            }
             currentCoroutineContext().ensureActive()
             if (owner != revision) return@withLock
-            if (page.nextCursor != null && page.items.size > batchSize) throw MusicException(MusicFailure.INVALID_RESPONSE)
+            val pageLimit = if (rolling) 30 else batchSize
+            if (page.nextCursor != null && page.items.size > pageLimit) throw MusicException(MusicFailure.INVALID_RESPONSE)
+            if (rolling && page.strategy == "rolling_warming") {
+                exhausted = true
+                cursor = null
+                return@withLock
+            }
             val known = considered + played + skipped + pending.map { it.id } + history.map { it.id }
-            page.items.distinctBy { it.id }.filter { it.canStartPlayback }.filterNot { it.id in known }.forEach {
+            val eligible = page.items.distinctBy { it.id }.filter { it.canStartPlayback && it.id !in known }
+            val ordered = listening?.rank(eligible, page.discoveryTrackIds, pending.lastOrNull() ?: history.getOrNull(index)) ?: eligible
+            if (owner != revision) return@withLock
+            val accepted = ordered.filterNot(::seenRecording)
+            accepted.forEach {
                 pending.addLast(it)
-                remember(it.id)
+                remember(it)
                 added++
             }
+            if (rolling && accepted.isNotEmpty())
+                rollingFeedVersion?.let { feedStore?.appendFallback(it, accepted, page.discoveryTrackIds) }
             seenCursors.add(requestedCursor)
             while (seenCursors.size > 100) seenCursors.remove(seenCursors.first())
             cursor = page.nextCursor
             exhausted = cursor == null || cursor in seenCursors
         }
-        if (added == 0) { exhausted = true; cursor = null }
+        if (added == 0 && !rolling) { exhausted = true; cursor = null }
     }
 
     suspend fun prefetchFallback() = load.withLock {
@@ -171,7 +202,7 @@ internal class MusicQueueManager(
         }
         var position = checkNotNull(searchPosition)
         val known = considered + played + skipped + pending.map { it.id } + history.map { it.id }
-        fun fresh(track: MusicTrack) = track.canStartPlayback && track.id !in known
+        fun fresh(track: MusicTrack) = track.canStartPlayback && track.id !in known && !seenRecording(track)
 
         val radio = mutableListOf<MusicTrack>()
         val search = mutableListOf<MusicTrack>()
@@ -245,18 +276,31 @@ internal class MusicQueueManager(
         searchBuffer.addAll(search.filter(::fresh))
 
         val added = mutableListOf<MusicTrack>()
-        for (buffer in listOf(radioBuffer, searchBuffer)) {
+        if (listening != null) {
+            val options = (radioBuffer + searchBuffer).filter(::fresh)
+            val ranked = listening.rank(options, options.map { it.id }.toSet(), pending.lastOrNull() ?: history.getOrNull(index))
+            if (owner != revision) return
+            for (track in ranked.take(FALLBACK_BATCH)) {
+                radioBuffer.removeAll { it.id == track.id }
+                searchBuffer.removeAll { it.id == track.id }
+                pending.addLast(track)
+                remember(track)
+                added += track
+            }
+        } else for (buffer in listOf(radioBuffer, searchBuffer)) {
             while (added.size < FALLBACK_BATCH && buffer.isNotEmpty()) {
                 val track = buffer.removeFirst()
                 if (!fresh(track) || track.id in considered) continue
                 pending.addLast(track)
-                remember(track.id)
+                remember(track)
                 added += track
             }
         }
         if (added.isNotEmpty()) {
             emptyCycles = 0
-            if (feedVersion != null) feedStore?.appendFallback(feedVersion, added)
+            val targetVersion = if (rolling) rollingFeedVersion else feedVersion
+            if (targetVersion != null)
+                feedStore?.appendFallback(targetVersion, added, if (listening == null) emptySet() else added.map { it.id }.toSet())
             return
         }
         if (timedOut || radioError != null || searchError != null) {
@@ -286,6 +330,10 @@ internal class MusicQueueManager(
         pending.clear(); history.clear(); considered.clear(); played.clear(); skipped.clear(); seenCursors.clear()
         clearSkipSignal()
         cursor = null; exhausted = false; emptyCycles = 0
+        recordings.clear()
+        rolling = seed?.rolling == true
+        rollingFeedVersion = seed?.feedVersion
+        retriedCursor = false
         searchPosition = null; lastRadioLoad = null; fallbackFailure = null
         fallbackFeedVersion = null
         radioBuffer.clear(); searchBuffer.clear()
@@ -294,14 +342,20 @@ internal class MusicQueueManager(
             val tracks = seed.tracks.filter { it.canStartPlayback }.distinctBy { it.id }
             val selected = tracks.indexOfFirst { it.id == startAt }
             pending.addAll(if (shuffle) tracks.filterNot { it.id == startAt } else tracks.drop(selected + 1))
-            tracks.forEach { remember(it.id) }
+            tracks.forEach(::remember)
             cursor = seed.nextCursor
             exhausted = cursor == null
         }
     }
 
-    private fun remember(id: String) {
-        considered.add(id)
+    private fun seenRecording(track: MusicTrack): Boolean {
+        if (listening == null) return false
+        val recording = MusicRecording.of(track)
+        return recordings.any(recording::matches)
+    }
+
+    private fun remember(track: MusicTrack) {
+        if (considered.add(track.id) && listening != null) recordings.add(MusicRecording.of(track))
     }
 
     private fun remember(window: LinkedHashSet<String>, id: String) {

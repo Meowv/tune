@@ -52,6 +52,10 @@ private val Context.directoryPreferences by preferencesDataStore(
     name = "radio_directory_cache",
     corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
 )
+private val Context.musicListeningPreferences by preferencesDataStore(
+    name = "music_listening",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
+)
 private val Context.installPreferences by preferencesDataStore(
     name = "meowvtune_install",
     corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
@@ -74,6 +78,13 @@ open class TuneApplication : Application(), SingletonImageLoader.Factory {
     internal open val directoryCache by lazy { DirectoryCache(directoryPreferences) }
     internal open val musicResume by lazy { musicResumeStore(this) }
     internal open val musicFeed by lazy { musicFeedStore(this) }
+    internal open val musicListening by lazy {
+        com.meowv.tune.music.MusicListeningHistory(musicListeningPreferences) { summary ->
+            if (BuildConfig.DEBUG) summary.lineSequence().filter(String::isNotEmpty).forEach {
+                android.util.Log.i("MusicRecommendationTrial", it)
+            }
+        }
+    }
     internal open val userSettings: SettingsRepository by lazy { settingsRepository(this) }
     private val networkMonitor by lazy { NetworkMonitor(this) }
     internal open val networkState: StateFlow<NetworkState> get() = networkMonitor.state

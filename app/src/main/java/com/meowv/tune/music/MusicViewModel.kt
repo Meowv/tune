@@ -27,7 +27,8 @@ internal data class MusicFeed(
     val tracks: List<MusicTrack> = emptyList(),
     val loaded: Boolean = false,
     val loading: Boolean = false,
-    val failure: MusicFailure? = null
+    val failure: MusicFailure? = null,
+    val seed: MusicQueueSeed? = null
 )
 
 internal class MusicViewModel(
@@ -35,7 +36,8 @@ internal class MusicViewModel(
     private val requestPlayback: (suspend (MusicQueueSeed?) -> Unit)? = null,
     scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
     playback: StateFlow<PlayerUiState>? = null,
-    private val feedStore: MusicFeedStore = MusicFeedStore()
+    private val feedStore: MusicFeedStore = MusicFeedStore(),
+    private val listening: MusicListeningHistory? = null
 ) : ViewModel(scope) {
     private val mutableState = MutableStateFlow<MusicUiState>(if (repository == null) MusicUiState.NotConfigured else MusicUiState.Idle)
     val state = mutableState.asStateFlow()
@@ -60,7 +62,8 @@ internal class MusicViewModel(
     init {
         if (repository != null) viewModelScope.launch {
             feedStore.snapshot.collect { snapshot ->
-                mutableBrowse.update { it.copy(tracks = snapshot.tracks) }
+                val tracks = ranked(snapshot)
+                mutableBrowse.update { it.copy(tracks = tracks, seed = snapshot.seed(tracks)) }
             }
         }
     }
@@ -83,8 +86,9 @@ internal class MusicViewModel(
         viewModelScope.launch {
             feedStore.restore()
             try {
-                val page = source.recommendations()
-                val tracks = feedStore.updateRecommendations(page).tracks
+                val page = source.firstRecommendations()
+                val snapshot = feedStore.updateRecommendations(page)
+                val tracks = ranked(snapshot)
                 val failure = if (tracks.isEmpty() && page.partial) {
                     when {
                         page.warnings.any { it.endsWith(":rate_limited") } -> MusicFailure.RATE_LIMITED
@@ -92,7 +96,8 @@ internal class MusicViewModel(
                         else -> MusicFailure.SOURCE_UNAVAILABLE
                     }
                 } else null
-                mutableBrowse.value = MusicFeed(feedStore.snapshot.value.tracks, loaded = true, failure = failure)
+                mutableBrowse.value = MusicFeed(tracks, loaded = true, failure = failure, seed = snapshot.seed(tracks))
+                listening?.displayed(tracks)
             } catch (failure: MusicException) {
                 mutableBrowse.update { it.copy(loading = false, failure = failure.failure) }
             }
@@ -107,11 +112,12 @@ internal class MusicViewModel(
         pending = viewModelScope.launch {
             try {
                 if (requestPlayback != null) {
-                    val feed = mutableBrowse.value
-                    requestPlayback(feed.tracks.takeIf { it.isNotEmpty() }?.let { MusicQueueSeed(it, null) })
+                    val feed = feedStore.restore()
+                    val tracks = ranked(feed)
+                    requestPlayback(feed.seed(tracks))
                     return@launch
                 }
-                val track = source.recommendations().items.firstOrNull { it.canStartPlayback }
+                val track = source.firstRecommendations().items.firstOrNull { it.canStartPlayback }
                 ensureActive()
                 if (current != generation) return@launch
                 mutableState.value = if (track == null) MusicUiState.Empty else MusicUiState.Ready(track)
@@ -123,6 +129,40 @@ internal class MusicViewModel(
                 if (current == generation) mutableState.value = MusicUiState.Error(failure.failure)
             }
         }
+    }
+
+    private fun MusicFeedSnapshot.seed(tracks: List<MusicTrack>) =
+        tracks.takeIf { it.isNotEmpty() }?.let { MusicQueueSeed(it, nextCursor, rolling, version) }
+
+    private suspend fun ranked(feed: MusicFeedSnapshot) =
+        listening?.rank(feed.tracks, feed.discoveryTrackIds) ?: feed.tracks
+
+    private suspend fun MusicRepository.firstRecommendations(): MusicPage {
+        if (listening == null) return recommendations()
+        val first = try {
+            candidates()
+        } catch (failure: MusicException) {
+            if (failure.failure !in setOf(MusicFailure.TRACK_NOT_FOUND, MusicFailure.SOURCE_UNAVAILABLE,
+                    MusicFailure.SOURCE_TIMEOUT, MusicFailure.INVALID_RESPONSE)) throw failure
+            return recommendations()
+        }
+        if (first.strategy != "rolling_candidates") {
+            return if (first.strategy == "rolling_warming") recommendations() else first
+        }
+
+        // 权益过滤可能留下空页，保留其他已读候选，避免首次刷新阻塞太久。
+        var page = first
+        withTimeoutOrNull(2_000) {
+            repeat(2) {
+                val cursor = page.nextCursor ?: return@withTimeoutOrNull
+                if (listening.freshCount(page.items) >= 20) return@withTimeoutOrNull
+                val next = try { candidates(cursor = cursor) } catch (_: MusicException) { return@withTimeoutOrNull }
+                page = page.copy(items = (page.items + next.items).distinctBy { it.id },
+                    nextCursor = next.nextCursor?.takeUnless { it == cursor },
+                    discoveryTrackIds = page.discoveryTrackIds + next.discoveryTrackIds)
+            }
+        }
+        return if (page.items.isEmpty() && page.nextCursor == null) recommendations() else page
     }
 
     fun cancel() {

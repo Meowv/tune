@@ -41,7 +41,8 @@ data class MusicPage(
     val partial: Boolean = false,
     val warnings: List<String> = emptyList(),
     val strategy: String? = null,
-    val generatedAt: Instant? = null
+    val generatedAt: Instant? = null,
+    val discoveryTrackIds: Set<String> = emptySet()
 )
 
 enum class MusicFailure {
@@ -55,4 +56,9 @@ class MusicException(val failure: MusicFailure, val retryAfterSeconds: Long? = n
 
 internal val MusicTrack.canStartPlayback: Boolean get() = availability in setOf("candidate", "available")
 
-data class MusicQueueSeed(val tracks: List<MusicTrack>, val nextCursor: String?)
+data class MusicQueueSeed(
+    val tracks: List<MusicTrack>,
+    val nextCursor: String?,
+    val rolling: Boolean = false,
+    val feedVersion: Long? = null
+)

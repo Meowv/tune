@@ -73,7 +73,7 @@ class RadioPlaybackService : MediaSessionService() {
             { state -> coordinator?.publishRadio(state) ?: app.playerController.publish(state) }
         )
         val music = MusicPlaybackEngine(this, player, { app.musicRepository }, app.networkState,
-            app.musicResume, app.musicFeed) { state -> coordinator?.publishMusic(state) }
+            app.musicResume, app.musicFeed, app.musicListening) { state -> coordinator?.publishMusic(state) }
         scope.launch {
             app.userSettings.settings.map { it.playbackOrder }.distinctUntilChanged()
                 .collect { music.setShuffle(it == PlaybackOrder.SHUFFLE) }

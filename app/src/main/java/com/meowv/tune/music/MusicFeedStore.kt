@@ -20,7 +20,10 @@ internal data class MusicFeedSnapshot(
     val version: Long = 0,
     val complete: Boolean = false,
     val recommendations: List<MusicTrack> = emptyList(),
-    val fallback: List<MusicTrack> = emptyList()
+    val fallback: List<MusicTrack> = emptyList(),
+    val rolling: Boolean = false,
+    val nextCursor: String? = null,
+    val discoveryTrackIds: Set<String> = emptySet()
 ) {
     val tracks: List<MusicTrack> = (recommendations + fallback).distinctBy { it.id }
 }
@@ -37,18 +40,29 @@ internal class MusicFeedStore(private val preferences: DataStore<Preferences>? =
     suspend fun updateRecommendations(page: MusicPage): MusicFeedSnapshot = update { previous ->
         val tracks = page.items.filter { it.canStartPlayback }.distinctBy { it.id }
         if (page.partial && (previous.complete || tracks.isEmpty())) return@update previous
-        val changed = !page.partial && previous.complete &&
+        val rolling = page.strategy == "rolling_candidates"
+        val changed = previous.rolling != rolling || !page.partial && previous.complete &&
             previous.recommendations.mapTo(HashSet()) { it.id } != tracks.mapTo(HashSet()) { it.id }
-        if (changed) {
-            MusicFeedSnapshot(version = previous.version + 1, complete = true, recommendations = tracks)
-        } else previous.copy(complete = !page.partial, recommendations = tracks)
+        return@update previous.copy(
+            version = if (changed) previous.version + 1 else previous.version,
+            complete = !page.partial,
+            recommendations = tracks,
+            fallback = if (changed) emptyList() else previous.fallback,
+            rolling = rolling,
+            nextCursor = if (rolling) page.nextCursor else null,
+            discoveryTrackIds = page.discoveryTrackIds + if (changed) emptySet() else
+                previous.discoveryTrackIds.intersect(previous.fallback.map { it.id }.toSet())
+        )
     }
 
-    suspend fun appendFallback(version: Long, tracks: List<MusicTrack>): MusicFeedSnapshot = update { previous ->
+    suspend fun appendFallback(version: Long, tracks: List<MusicTrack>, discoveryIds: Set<String> = emptySet()): MusicFeedSnapshot = update { previous ->
         if (version != previous.version) return@update previous
         val existing = previous.tracks.mapTo(HashSet()) { it.id }
         val added = tracks.filter { it.canStartPlayback && existing.add(it.id) }
-        if (added.isEmpty()) previous else previous.copy(fallback = previous.fallback + added)
+        if (added.isEmpty()) previous else previous.copy(
+            fallback = previous.fallback + added,
+            discoveryTrackIds = previous.discoveryTrackIds + discoveryIds.intersect(added.map { it.id }.toSet())
+        )
     }
 
     suspend fun refreshFallback(version: Long, originalId: String, track: MusicTrack) = update { previous ->
