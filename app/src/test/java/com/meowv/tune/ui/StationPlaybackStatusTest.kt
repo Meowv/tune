@@ -4,6 +4,7 @@ import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlaybackSource
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.Station
+import com.meowv.tune.domain.music.MusicTrack
 import java.util.UUID
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -16,10 +17,12 @@ class StationPlaybackStatusTest {
         val playing = PlayerUiState(PlaybackPhase.PLAYING, station)
         assertEquals(StationPlaybackVisual.None, stationPlaybackVisual(UUID(0, 2), playing, true))
         assertEquals(StationPlaybackVisual.None, stationPlaybackVisual(station.uuid, playing.copy(station = null), true))
-        assertEquals(
-            StationPlaybackVisual.None,
-            stationPlaybackVisual(station.uuid, playing.copy(source = PlaybackSource.MUSIC), true)
+        val playingMusic = PlayerUiState(
+            phase = PlaybackPhase.PLAYING,
+            source = PlaybackSource.MUSIC,
+            music = MusicTrack("track-1", "Song", listOf("Artist"))
         )
+        assertEquals(StationPlaybackVisual.None, stationPlaybackVisual(station.uuid, playingMusic, true))
     }
 
     @Test
