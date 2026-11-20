@@ -103,10 +103,13 @@ internal class MusicPlaybackEngine(
     suspend fun rememberedPlayback(): MusicResumePoint? =
         if (repository() == null) null else resumeStore.read()
 
-    fun restore(point: MusicResumePoint) {
+    fun restore(point: MusicResumePoint, autoPlay: Boolean) {
         queue.reset()
         resumePoint = point
-        if (point.playOnEntry && NetworkPolicy.evaluate(network.value) == NetworkDecision.ALLOWED) {
+        // 「自动播放」关闭时只恢复上下文不发声；网络受限同样降级为暂停态。
+        if (autoPlay && point.playOnEntry &&
+            NetworkPolicy.evaluate(network.value) == NetworkDecision.ALLOWED
+        ) {
             continueRemembered(point)
         } else {
             showRemembered(point)
@@ -123,7 +126,8 @@ internal class MusicPlaybackEngine(
         loading = false
         resumePoint = point
         publishState(PlayerUiState(source = PlaybackSource.MUSIC, phase = PlaybackPhase.PAUSED,
-            music = point.track, musicFailure = failure, error = failure?.let { TuneError.PLAYBACK }))
+            music = point.track, positionMs = point.positionMs, durationMs = point.track.durationMs,
+            musicFailure = failure, error = failure?.let { TuneError.PLAYBACK }))
     }
 
     fun checkpoint() {

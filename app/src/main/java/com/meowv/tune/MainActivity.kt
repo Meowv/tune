@@ -301,7 +301,11 @@ class MainActivity : ComponentActivity() {
         mediaLease = controller.acquire()
         playbackEntryJob = lifecycleScope.launch {
             withTimeoutOrNull(5000) { controller.connected.first { it } } ?: return@launch
-            val restoredMusic = controller.restoreMusicOnEntry()
+            // 「自动播放」是全局开关：关闭时音乐也只恢复上下文、不自动发声。
+            val autoPlay = withTimeoutOrNull(1_000) {
+                settingsModel.settings.filterNotNull().first().autoPlay
+            } ?: false
+            val restoredMusic = controller.restoreMusicOnEntry(autoPlay)
             if (resumeRadioOnEntry && !tuneApp.autoPlayAttempted) {
                 resumeRadioOnEntry = false
                 tuneApp.autoPlayAttempted = true

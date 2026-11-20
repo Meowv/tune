@@ -18,7 +18,7 @@ internal class PlaybackCoordinator(
     fun publishRadio(state: PlayerUiState) { if (activeSource == PlaybackSource.RADIO) publish(state) }
     fun publishMusic(state: PlayerUiState) { if (activeSource == PlaybackSource.MUSIC) publish(state) }
 
-    suspend fun restoreMusicOnEntry(): Boolean {
+    suspend fun restoreMusicOnEntry(autoPlay: Boolean): Boolean {
         if (entryHandled) return activeSource == PlaybackSource.MUSIC
         val point = music.rememberedPlayback()
         // 读盘期间可能有用户操作，以用户刚刚选择的来源为准。
@@ -26,7 +26,7 @@ internal class PlaybackCoordinator(
         entryHandled = true
         if (point == null) return false
         selectMusic()
-        music.restore(point)
+        music.restore(point, autoPlay)
         return true
     }
 

@@ -37,7 +37,7 @@ class MusicProcessRecreationTest {
         assumeTrue(InstrumentationRegistry.getArguments().getString("musicProcessPhase") == "prepare")
         installRepository()
         withContext(Dispatchers.Main) { app.musicResume.save(null) }
-        app.userSettings.update { it.copy(autoPlay = false) }
+        app.userSettings.update { it.copy(autoPlay = true) }
         ActivityScenario.launch(MainActivity::class.java).use {
             withTimeout(5000) { connection.connected.first { it } }
             connection.dispatch(PlayerCommand.PlayMusic(track))
@@ -57,7 +57,7 @@ class MusicProcessRecreationTest {
         assertNotEquals(marker.readText().toInt(), Process.myPid())
         val renewedId = "process-renewed"
         installRepository(renewedId)
-        assertFalse(app.userSettings.settings.first().autoPlay)
+        assertTrue(app.userSettings.settings.first().autoPlay)
         ActivityScenario.launch(MainActivity::class.java).use {
             withTimeout(5000) { connection.connected.first { it } }
             try {

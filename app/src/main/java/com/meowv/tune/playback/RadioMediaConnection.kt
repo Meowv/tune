@@ -38,7 +38,8 @@ internal class RadioMediaConnection(
 
     internal var coordinator: PlaybackCoordinator? = null
 
-    internal suspend fun restoreMusicOnEntry(): Boolean = coordinator?.restoreMusicOnEntry() == true
+    internal suspend fun restoreMusicOnEntry(autoPlay: Boolean): Boolean =
+        coordinator?.restoreMusicOnEntry(autoPlay) == true
 
     internal fun checkpointMusic() { coordinator?.music?.checkpoint() }
 
