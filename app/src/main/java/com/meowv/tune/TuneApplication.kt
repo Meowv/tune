@@ -30,6 +30,7 @@ import coil3.SingletonImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import com.meowv.tune.settings.settingsRepository
 import com.meowv.tune.settings.musicResumeStore
+import com.meowv.tune.settings.musicFeedStore
 import com.meowv.tune.update.HttpUpdateRepository
 import com.meowv.tune.update.UpdateClient
 import com.meowv.tune.update.UpdateRepository
@@ -72,6 +73,7 @@ open class TuneApplication : Application(), SingletonImageLoader.Factory {
 
     internal open val directoryCache by lazy { DirectoryCache(directoryPreferences) }
     internal open val musicResume by lazy { musicResumeStore(this) }
+    internal open val musicFeed by lazy { musicFeedStore(this) }
     internal open val userSettings: SettingsRepository by lazy { settingsRepository(this) }
     private val networkMonitor by lazy { NetworkMonitor(this) }
     internal open val networkState: StateFlow<NetworkState> get() = networkMonitor.state

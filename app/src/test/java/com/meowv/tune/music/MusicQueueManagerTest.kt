@@ -30,6 +30,42 @@ class MusicQueueManagerTest {
         assertEquals(1, radio)
     }
 
+    @Test fun retainsOnlyTracksAppendedToThePlaybackQueue() = runBlocking {
+        val original = tracks.first()
+        val candidates = (1..13).map { MusicTrack("fallback-$it", "Fallback $it", listOf("qix")) }
+        val feed = MusicFeedStore()
+        feed.updateRecommendations(MusicPage(listOf(original)))
+        val source = object : MusicRepository by FakeMusicRepository(emptyList()) {
+            override suspend fun radioRecommendations() = listOf(original) + candidates
+        }
+        val queue = MusicQueueManager({ source }, feedStore = feed)
+        queue.reset(MusicQueueSeed(listOf(original), null), startAt = original.id)
+        assertEquals(candidates.first(), queue.next()?.track)
+        assertEquals(listOf(original) + candidates.take(12), feed.snapshot.value.tracks)
+    }
+
+    @Test fun fallbackThatFinishesAfterRecommendationRefreshCannotReappearInTheFeed() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val feed = MusicFeedStore()
+        feed.updateRecommendations(MusicPage(listOf(tracks[0])))
+        val source = object : MusicRepository by FakeMusicRepository(emptyList()) {
+            override suspend fun radioRecommendations(): List<MusicTrack> {
+                started.complete(Unit)
+                release.await()
+                return listOf(tracks[2], tracks[3])
+            }
+        }
+        val queue = MusicQueueManager({ source }, feedStore = feed)
+        queue.reset(MusicQueueSeed(listOf(tracks[0]), null), startAt = tracks[0].id)
+        val next = async { queue.next() }
+        started.await()
+        feed.updateRecommendations(MusicPage(listOf(tracks[1])))
+        release.complete(Unit)
+        assertEquals(tracks[2], next.await()?.track)
+        assertEquals(listOf(tracks[1]), feed.snapshot.value.tracks)
+    }
+
     @Test fun radioThenSearchFillAnExhaustedQueueAndStopAfterTwoEmptyRounds() = runBlocking {
         var radioCalls = 0
         val searchCursors = mutableListOf<String?>()

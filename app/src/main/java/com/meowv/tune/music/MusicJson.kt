@@ -41,25 +41,50 @@ internal object MusicJson {
     fun encodeResumePoint(point: MusicResumePoint): String = buildJsonObject {
         put("positionMs", point.positionMs)
         put("playOnEntry", point.playOnEntry)
-        putJsonObject("track") {
-            val track = point.track
-            put("id", track.id)
-            put("title", track.title)
-            put("album", track.album)
-            put("durationMs", track.durationMs)
-            put("coverUrl", track.coverUrl?.substringBefore('?')?.substringBefore('#'))
-            put("availability", track.availability)
-            putJsonArray("artists") { track.artists.forEach { add(it) } }
-            putJsonArray("sources") {
-                track.matches.forEach { match ->
-                    add(buildJsonObject {
-                        put("providerId", match.providerId)
-                        put("sourceTrackId", match.sourceTrackId)
-                    })
-                }
+        put("track", storedTrack(point.track))
+    }.toString()
+
+    fun encodeFeedSnapshot(snapshot: MusicFeedSnapshot): String = buildJsonObject {
+        put("version", snapshot.version)
+        put("complete", snapshot.complete)
+        putJsonArray("recommendations") { snapshot.recommendations.forEach { add(storedTrack(it)) } }
+        putJsonArray("fallback") { snapshot.fallback.forEach { add(storedTrack(it)) } }
+    }.toString()
+
+    fun decodeFeedSnapshot(body: String): MusicFeedSnapshot? = try {
+        parse {
+            val root = Json.parseToJsonElement(body).jsonObject
+            MusicFeedSnapshot(
+                version = root.optionalLong("version") ?: error("version"),
+                complete = root.boolean("complete"),
+                recommendations = root.array("recommendations").map { track(it.jsonObject) },
+                fallback = root.array("fallback").map { track(it.jsonObject) }
+            )
+        }
+    } catch (_: MusicException) {
+        null
+    }
+
+    private fun storedTrack(track: MusicTrack): JsonObject = buildJsonObject {
+        put("id", track.id)
+        put("title", track.title)
+        put("album", track.album)
+        put("durationMs", track.durationMs)
+        put("coverUrl", track.coverUrl?.substringBefore('?')?.substringBefore('#'))
+        put("isrc", track.isrc)
+        put("availability", track.availability)
+        putJsonArray("artists") { track.artists.forEach { add(it) } }
+        putJsonArray("sources") {
+            track.matches.forEach { match ->
+                add(buildJsonObject {
+                    put("providerId", match.providerId)
+                    put("sourceTrackId", match.sourceTrackId)
+                    put("confidence", match.confidence)
+                    put("edition", match.edition)
+                })
             }
         }
-    }.toString()
+    }
 
     fun decodeResumePoint(body: String): MusicResumePoint? = try {
         parse {

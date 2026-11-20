@@ -11,6 +11,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.meowv.tune.domain.*
 import com.meowv.tune.music.MusicResumeStore
+import com.meowv.tune.music.MusicFeedStore
 import java.util.UUID
 import kotlinx.serialization.json.*
 import com.meowv.tune.radio.RadioBrowserMapping
@@ -25,6 +26,13 @@ fun settingsRepository(context: Context): SettingsRepository =
     DataStoreSettingsRepository(context.applicationContext.tunePreferences)
 
 internal fun musicResumeStore(context: Context) = MusicResumeStore(context.applicationContext.tunePreferences)
+
+private val Context.musicFeedPreferences by preferencesDataStore(
+    name = "music_feed",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
+)
+
+internal fun musicFeedStore(context: Context) = MusicFeedStore(context.applicationContext.musicFeedPreferences)
 
 internal class DataStoreSettingsRepository(private val store: DataStore<Preferences>) : SettingsRepository {
     override val settings = store.data.map(::decode)

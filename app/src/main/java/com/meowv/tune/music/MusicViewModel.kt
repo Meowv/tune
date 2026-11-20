@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 sealed interface MusicUiState {
     data object NotConfigured : MusicUiState
@@ -33,7 +34,8 @@ internal class MusicViewModel(
     private val repository: MusicRepository?,
     private val requestPlayback: (suspend (MusicQueueSeed?) -> Unit)? = null,
     scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
-    playback: StateFlow<PlayerUiState>? = null
+    playback: StateFlow<PlayerUiState>? = null,
+    private val feedStore: MusicFeedStore = MusicFeedStore()
 ) : ViewModel(scope) {
     private val mutableState = MutableStateFlow<MusicUiState>(if (repository == null) MusicUiState.NotConfigured else MusicUiState.Idle)
     val state = mutableState.asStateFlow()
@@ -55,9 +57,22 @@ internal class MusicViewModel(
     private val mutableBrowse = MutableStateFlow(MusicFeed())
     val browse = mutableBrowse.asStateFlow()
 
+    init {
+        if (repository != null) viewModelScope.launch {
+            feedStore.snapshot.collect { snapshot ->
+                mutableBrowse.update { it.copy(tracks = snapshot.tracks) }
+            }
+        }
+    }
+
     fun enter() {
         val feed = mutableBrowse.value
         if (!feed.loaded && feed.failure == null) loadFeed()
+    }
+
+    fun onForeground() {
+        val feed = mutableBrowse.value
+        if (feed.loaded || feed.failure != null) loadFeed()
     }
 
     fun loadFeed() {
@@ -66,9 +81,10 @@ internal class MusicViewModel(
         if (previous.loading) return
         mutableBrowse.value = previous.copy(loading = true, failure = null)
         viewModelScope.launch {
+            feedStore.restore()
             try {
                 val page = source.recommendations()
-                val tracks = page.items.filter { it.canStartPlayback }.distinctBy { it.id }
+                val tracks = feedStore.updateRecommendations(page).tracks
                 val failure = if (tracks.isEmpty() && page.partial) {
                     when {
                         page.warnings.any { it.endsWith(":rate_limited") } -> MusicFailure.RATE_LIMITED
@@ -76,9 +92,9 @@ internal class MusicViewModel(
                         else -> MusicFailure.SOURCE_UNAVAILABLE
                     }
                 } else null
-                mutableBrowse.value = MusicFeed(tracks, loaded = true, failure = failure)
+                mutableBrowse.value = MusicFeed(feedStore.snapshot.value.tracks, loaded = true, failure = failure)
             } catch (failure: MusicException) {
-                mutableBrowse.value = previous.copy(loading = false, failure = failure.failure)
+                mutableBrowse.update { it.copy(loading = false, failure = failure.failure) }
             }
         }
     }

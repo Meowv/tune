@@ -6,6 +6,30 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MusicViewModelTest {
+    @Test fun restoresAndObservesTheFeedWhileRecommendationRefreshFails() = runBlocking {
+        val original = MusicTrack("a", "A", listOf("Singer"))
+        val fallback = MusicTrack("b", "B", listOf("Singer"))
+        val feed = MusicFeedStore()
+        val version = feed.updateRecommendations(MusicPage(listOf(original))).version
+        val release = CompletableDeferred<Unit>()
+        val repo = object : MusicRepository by FakeMusicRepository(emptyList()) {
+            override suspend fun recommendations(limit: Int, cursor: String?): MusicPage {
+                release.await()
+                throw MusicException(MusicFailure.CONNECTION)
+            }
+        }
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val model = MusicViewModel(repo, scope = scope, feedStore = feed)
+            model.enter()
+            assertEquals(listOf(original), model.browse.value.tracks)
+            feed.appendFallback(version, listOf(fallback))
+            release.complete(Unit)
+            assertEquals(MusicFailure.CONNECTION, model.browse.value.failure)
+            assertEquals(listOf(original, fallback), model.browse.value.tracks)
+        } finally { scope.cancel() }
+    }
+
     @Test fun browseUsesOneRequestAndKeepsAllPlayableCandidates() = runBlocking {
         var requests = 0
         val repo = object : MusicRepository {

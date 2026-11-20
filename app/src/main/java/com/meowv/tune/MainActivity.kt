@@ -60,6 +60,7 @@ import kotlinx.coroutines.flow.map
 class MainActivity : ComponentActivity() {
     private val tuneApp get() = application as TuneApplication
     private var firstFrameReady = false
+    private var hasEnteredForeground = false
     private var carShell = false
     private var mediaLease: AutoCloseable? = null
     private var playbackEntryJob: Job? = null
@@ -77,7 +78,8 @@ class MainActivity : ComponentActivity() {
             val app = tuneApp
             MusicViewModel(app.musicRepository,
                 requestPlayback = { seed -> app.playerController.dispatch(PlayerCommand.PlayMusic(seed = seed)) },
-                playback = app.playerController.state)
+                playback = app.playerController.state,
+                feedStore = app.musicFeed)
         } }
     }
     private val musicSearchModel by viewModels<MusicSearchViewModel> {
@@ -293,6 +295,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        if (hasEnteredForeground) musicModel.onForeground()
+        hasEnteredForeground = true
         val controller = tuneApp.playerController
         mediaLease = controller.acquire()
         playbackEntryJob = lifecycleScope.launch {

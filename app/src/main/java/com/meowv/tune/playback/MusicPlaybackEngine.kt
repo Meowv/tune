@@ -9,6 +9,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.datasource.HttpDataSource
 import com.meowv.tune.domain.*
 import com.meowv.tune.domain.music.*
+import com.meowv.tune.music.MusicFeedStore
 import com.meowv.tune.music.MusicQueueManager
 import com.meowv.tune.music.MusicSelection
 import com.meowv.tune.music.MusicResumePoint
@@ -27,10 +28,13 @@ internal class MusicPlaybackEngine(
     private val repository: () -> MusicRepository?,
     private val network: StateFlow<NetworkState>,
     private val resumeStore: MusicResumeStore,
+    private val feedStore: MusicFeedStore,
     private val publish: (PlayerUiState) -> Unit
 ) : Player.Listener {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val queue = MusicQueueManager({ repository() ?: throw MusicException(MusicFailure.NOT_CONFIGURED) })
+    private val queue = MusicQueueManager(
+        { repository() ?: throw MusicException(MusicFailure.NOT_CONFIGURED) }, feedStore = feedStore
+    )
     private val focus = AudioFocusController(context, ::onAudioFocusEvent)
     private val route = AudioRouteMonitor(context, ::onExternalOutputRemoved)
     private val interruptions = MusicInterruptionState(android.os.SystemClock::elapsedRealtime)
@@ -201,19 +205,26 @@ internal class MusicPlaybackEngine(
                 if (!preserveCurrent) publishState(state.copy(music = selectedTrack.track))
                 val result = withTimeout(8000) {
                     var selection = selectedTrack
+                    var retainedVersion: Long? = null
                     val source = repository() ?: throw MusicException(MusicFailure.NOT_CONFIGURED)
-                    val ahead = prepared?.await()?.getOrThrow()
-                    ensureActive()
-                    val cached = ahead?.takeIf { it.trackId == selection.track.id && nextPreparation.fresh(it) }
-                    if (ahead != null && cached == null) refreshed = true
                     var playable = try {
+                        val ahead = prepared?.await()?.getOrThrow()
+                        ensureActive()
+                        val cached = ahead?.takeIf { it.trackId == selection.track.id && nextPreparation.fresh(it) }
+                        if (ahead != null && cached == null) refreshed = true
                         if (excludedProvider != null) source.resolveAlternate(selection.track.id, excludedProvider)
                         else cached ?: source.resolve(selection.track.id, refreshProvider ?: ahead?.providerId)
                     } catch (failure: MusicException) {
-                        if (saved == null || failure.failure !in MissingTrack) throw failure
-                        val fresh = source.findRememberedTrack(saved.track)
+                        if (failure.failure !in MissingTrack || excludedProvider != null) throw failure
+                        val feed = feedStore.restore()
+                        val retained = feed.fallback.firstOrNull { it.id == selection.track.id }
+                        val rememberedTrack = saved?.track
+                            ?: retained
+                            ?: throw failure
+                        val fresh = source.findRememberedTrack(rememberedTrack)
                         ensureActive()
-                        selection = queue.select(fresh)
+                        selection = selection.copy(track = fresh)
+                        if (retained != null && retained != fresh) retainedVersion = feed.version
                         source.resolve(fresh.id)
                     }
                     ensureActive()
@@ -223,6 +234,7 @@ internal class MusicPlaybackEngine(
                     }
                     if (playable.trackId != selection.track.id || playable.providerId == excludedProvider || !nextPreparation.fresh(playable) ||
                         !com.meowv.tune.music.MusicAudioUrlPolicy.allows(playable.url)) throw MusicException(MusicFailure.INVALID_RESPONSE)
+                    retainedVersion?.let { feedStore.refreshFallback(it, selectedTrack.track.id, selection.track) }
                     selection to playable
                 }
                 ensureActive()

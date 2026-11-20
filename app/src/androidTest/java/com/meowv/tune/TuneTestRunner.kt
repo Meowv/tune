@@ -14,6 +14,7 @@ import com.meowv.tune.domain.Station
 import com.meowv.tune.domain.StationPage
 import com.meowv.tune.domain.TuneError
 import com.meowv.tune.domain.TuneFailure
+import com.meowv.tune.music.MusicFeedStore
 import com.meowv.tune.radio.DirectoryValue
 import com.meowv.tune.radio.DirectoryCache
 import com.meowv.tune.settings.DataStoreSettingsRepository
@@ -61,6 +62,12 @@ class TuneTestRunner : AndroidJUnitRunner() {
 class TuneTestApplication : TuneApplication() {
     internal val musicMediaRequests = ConcurrentHashMap<String, AtomicInteger>()
     internal var testMusicRepository: com.meowv.tune.domain.music.MusicRepository? = null
+        set(value) {
+            if (field == null && value != null) testMusicFeed = MusicFeedStore()
+            field = value
+        }
+    private var testMusicFeed = MusicFeedStore()
+    override val musicFeed get() = if (InstrumentationRegistry.getArguments().getString("musicLocalBuild") == "true") super.musicFeed else testMusicFeed
     override val musicRepository get() = if (InstrumentationRegistry.getArguments().getString("musicLocalBuild") == "true") super.musicRepository else testMusicRepository
     // liveRadio=true 时使用真实网络与真实解析，用于 T26 公网联调。
     // 首次访问时读取参数：Application 构造阶段 Instrumentation 尚未注册参数。

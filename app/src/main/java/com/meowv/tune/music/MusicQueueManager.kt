@@ -21,7 +21,8 @@ internal class MusicQueueManager(
     private val lowWater: Int = 8,
     private val historyLimit: Int = 100,
     private val nowMillis: () -> Long = { System.nanoTime() / 1_000_000 },
-    private val epochSeconds: () -> Long = { Instant.now().epochSecond }
+    private val epochSeconds: () -> Long = { Instant.now().epochSecond },
+    private val feedStore: MusicFeedStore? = null
 ) {
     private val pending = ArrayDeque<MusicTrack>()
     private val history = mutableListOf<MusicTrack>()
@@ -50,6 +51,7 @@ internal class MusicQueueManager(
     private val searchBuffer = ArrayDeque<MusicTrack>()
     private var lastRadioLoad: Long? = null
     private var fallbackFailure: MusicException? = null
+    private var fallbackFeedVersion: Long? = null
     private var emptyCycles = 0
     private var issued = 0L
     private var committed = -1L
@@ -144,6 +146,16 @@ internal class MusicQueueManager(
 
     private suspend fun refillRound(countEmpty: Boolean = true) {
         val owner = revision
+        val feedVersion = feedStore?.restore()?.version
+        if (owner != revision) return
+        if (fallbackFeedVersion != feedVersion) {
+            // 推荐换批以后，之前预取但未入队的候选不能追加到新列表。
+            fallbackFeedVersion = feedVersion
+            radioBuffer.clear()
+            searchBuffer.clear()
+            searchPosition = null
+            lastRadioLoad = null
+        }
         val source = repository()
         val context = history.getOrNull(index)
         var hour = Math.floorDiv(epochSeconds(), 3600L)
@@ -232,18 +244,19 @@ internal class MusicQueueManager(
         radioBuffer.addAll(radio.filter(::fresh))
         searchBuffer.addAll(search.filter(::fresh))
 
-        var added = 0
+        val added = mutableListOf<MusicTrack>()
         for (buffer in listOf(radioBuffer, searchBuffer)) {
-            while (added < FALLBACK_BATCH && buffer.isNotEmpty()) {
+            while (added.size < FALLBACK_BATCH && buffer.isNotEmpty()) {
                 val track = buffer.removeFirst()
                 if (!fresh(track) || track.id in considered) continue
                 pending.addLast(track)
                 remember(track.id)
-                added++
+                added += track
             }
         }
-        if (added > 0) {
+        if (added.isNotEmpty()) {
             emptyCycles = 0
+            if (feedVersion != null) feedStore?.appendFallback(feedVersion, added)
             return
         }
         if (timedOut || radioError != null || searchError != null) {
@@ -274,6 +287,7 @@ internal class MusicQueueManager(
         clearSkipSignal()
         cursor = null; exhausted = false; emptyCycles = 0
         searchPosition = null; lastRadioLoad = null; fallbackFailure = null
+        fallbackFeedVersion = null
         radioBuffer.clear(); searchBuffer.clear()
         index = -1; randomNext = null
         if (seed != null) {
