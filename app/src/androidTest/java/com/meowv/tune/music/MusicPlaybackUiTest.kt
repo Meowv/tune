@@ -101,10 +101,17 @@ class MusicPlaybackUiTest {
                 withTimeout(6000) { connection.state.first { it.phase == PlaybackPhase.PLAYING && it.music?.id == "ui-2" } }
                 capture("cards")
                 listMode.performClick()
+                compose.onNodeWithTag("music_feed_track_ui-1").performClick()
+                withTimeout(6000) { connection.state.first { it.phase == PlaybackPhase.PLAYING && it.music?.id == "ui-1" } }
+                cardMode.performClick()
+                compose.onNodeWithTag("music_feed_card_ui-1").assertIsSelected()
+                listMode.performClick()
+                compose.onNodeWithTag("music_feed_track_ui-2").performClick()
+                withTimeout(6000) { connection.state.first { it.phase == PlaybackPhase.PLAYING && it.music?.id == "ui-2" } }
                 capture("page")
                 compose.onNodeWithTag("circular_player_entry").performClick()
                 compose.onNodeWithTag("now_playing_screen").assertExists()
-                val toggle = compose.onNodeWithTag("music_toggle")
+                val toggle = compose.onNodeWithTag("now_playing_play")
                 val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
                 val keyTime = SystemClock.uptimeMillis()
                 assertTrue(automation.injectInputEvent(KeyEvent(keyTime, keyTime, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_TAB, 0), true))
@@ -112,10 +119,10 @@ class MusicPlaybackUiTest {
                 compose.waitForIdle()
                 toggle.performSemanticsAction(SemanticsActions.RequestFocus) { it() }
                 toggle.assertIsFocused().performKeyInput { pressKey(Key.DirectionRight) }
-                compose.onNodeWithTag("music_next").assertIsFocused()
+                compose.onNodeWithTag("now_playing_next").assertIsFocused()
                 toggle.assertIsDisplayed().performClick()
                 withTimeout(3000) { connection.state.first { state -> state.phase == PlaybackPhase.PAUSED } }
-                compose.onNodeWithTag("music_seek").performScrollTo().performTouchInput {
+                compose.onNodeWithTag("music_seek").assertIsDisplayed().performTouchInput {
                     swipe(Offset(width * .25f, center.y), Offset(width * .75f, center.y), 200)
                 }
                 assertTrue(connection.state.value.canSeek)
@@ -125,12 +132,17 @@ class MusicPlaybackUiTest {
                 compose.waitUntil(5000) { compose.onNode(orderLabel and hasText("随机播放"), useUnmergedTree = true).isDisplayed() }
                 compose.onNodeWithTag("now_playing_shuffle").performClick()
                 compose.waitUntil(5000) { compose.onNode(orderLabel and hasText("顺序播放"), useUnmergedTree = true).isDisplayed() }
-                compose.onNodeWithTag("music_next").assertIsDisplayed().performClick()
+                val artwork = compose.onNodeWithTag("now_playing_artwork")
+                artwork.assertIsDisplayed().performTouchInput { swipeLeft() }
                 withTimeout(6000) { connection.state.first { state -> state.phase == PlaybackPhase.PLAYING && state.music?.id == "ui-3" } }
-                compose.onNodeWithTag("music_toggle").assertIsDisplayed().performClick()
+                artwork.performTouchInput { swipeRight() }
+                withTimeout(6000) { connection.state.first { state -> state.phase == PlaybackPhase.PLAYING && state.music?.id == "ui-2" } }
+                compose.onNodeWithTag("now_playing_next").assertIsDisplayed().performClick()
+                withTimeout(6000) { connection.state.first { state -> state.phase == PlaybackPhase.PLAYING && state.music?.id == "ui-3" } }
+                toggle.assertIsDisplayed().performClick()
                 withTimeout(3000) { connection.state.first { state -> state.phase == PlaybackPhase.PAUSED } }
                 capture("immersive")
-                compose.onNodeWithTag("now_playing_collapse").assertIsDisplayed().performClick()
+                artwork.assertIsDisplayed().performTouchInput { swipeDown() }
                 try {
                     compose.waitUntil(5000) {
                         compose.onAllNodesWithTag("now_playing_screen").fetchSemanticsNodes().isEmpty() && feed.isDisplayed()

@@ -73,7 +73,7 @@ class MusicNeteaseIntegrationTest {
                     val index = MusicLyrics.activeLine(seeked.musicLyrics, seeked.positionMs!!)
                     assertTrue(index >= 0)
                     compose.onNodeWithTag("circular_player_entry").performClick()
-                    compose.onNodeWithTag("music_artwork").assertExists()
+                    compose.onNodeWithTag("now_playing_artwork").assertExists()
                     compose.onNodeWithTag("music_lyrics").performScrollTo().assertIsDisplayed()
                     compose.onNodeWithTag("now_playing_collapse").performClick()
                     player.dispatch(PlayerCommand.Stop)

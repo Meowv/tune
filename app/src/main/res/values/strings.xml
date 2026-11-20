@@ -147,6 +147,7 @@
   <string name="now_playing_current_state">%1$s，%2$s</string>
   <string name="now_playing_collapse">收起播放页</string>
   <string name="now_playing_artwork">电台台标：%1$s</string>
+  <string name="now_playing_music_artwork">歌曲封面：%1$s</string>
   <string name="now_playing_pause_accessibility">暂停播放</string>
   <string name="now_playing_resume_accessibility">继续播放</string>
   <string name="now_playing_sleep_timer">睡眠定时</string>

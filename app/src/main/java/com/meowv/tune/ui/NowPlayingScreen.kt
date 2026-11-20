@@ -14,6 +14,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -72,10 +73,12 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.focused
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -88,7 +91,6 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.meowv.tune.R
 import com.meowv.tune.domain.PlaybackSource
-import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.Station
@@ -126,17 +128,27 @@ internal fun NowPlayingScreen(
     val phase = state.phase
     val buffering = phase == PlaybackPhase.RESOLVING ||
         phase == PlaybackPhase.RETRYING || phase == PlaybackPhase.BUFFERING
-    val controlsLocked = buffering
-    val canChangeStation = connected && !controlsLocked
+    val canChangeMedia = connected && !buffering
     val onNextCurrent by rememberUpdatedState(onNext)
     val onPreviousCurrent by rememberUpdatedState(onPrevious)
     var sleepPanelOpen by rememberSaveable { mutableStateOf(false) }
     var customSleepOpen by rememberSaveable { mutableStateOf(false) }
+    val isMusic = state.source == PlaybackSource.MUSIC
+    val media = if (isMusic) {
+        val track = state.music
+        NowPlayingMedia(track?.id.orEmpty(), track?.title ?: stringResource(R.string.menu_music), track?.coverUrl, true)
+    } else station?.let {
+        NowPlayingMedia(it.uuid, it.name.ifBlank { stringResource(R.string.station_unnamed) }, it.iconUrl, false)
+    }
+    val details: (@Composable (Boolean, @Composable () -> Unit) -> Unit)? = if (isMusic) {
+        { compact, title -> MusicNowPlayingDetails(state, isCar, connected, compact, onSeek, title) }
+    } else null
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val windowWidth = maxWidth
         val windowHeight = maxHeight
-        val wide = isCar || isNowPlayingWide(windowWidth.value, windowHeight.value)
+        val wide = isCar || isNowPlayingWide(windowWidth.value, windowHeight.value) ||
+            (windowWidth >= 560.dp && windowWidth > windowHeight)
         NowPlayingBackdrop(
             wide = wide,
             modifier = Modifier.fillMaxSize().testTag("now_playing_backdrop")
@@ -159,25 +171,10 @@ internal fun NowPlayingScreen(
                 NowPlayingTopBar(
                     isCar = isCar,
                     animationMillis = animationMillis,
-                    onCollapse = onCollapse
+                    onCollapse = onCollapse,
+                    compact = availableHeight < 360.dp
                 )
-                if (state.source == PlaybackSource.MUSIC) {
-                    MusicNowPlayingContent(isCar, state, connected, { command ->
-                        when (command) {
-                            PlayerCommand.TogglePause -> onToggle()
-                            PlayerCommand.Next -> onNext()
-                            PlayerCommand.Previous -> onPrevious()
-                            is PlayerCommand.Seek -> onSeek(command.positionMs)
-                            else -> Unit
-                        }
-                    }, Modifier.weight(1f))
-                    Spacer(Modifier.height(if (availableHeight < 360.dp) TuneSpacing.Hairline else TuneSpacing.Small))
-                    NowPlayingTools(isCar, shuffle, sleepTimer, animationMillis, onToggleShuffle,
-                        { sleepPanelOpen = true },
-                        Modifier.align(Alignment.CenterHorizontally).widthIn(max = if (isCar) 560.dp else 540.dp)
-                            .fillMaxWidth().padding(bottom = TuneSpacing.Small),
-                        compact = true)
-                } else if (station == null) {
+                if (media == null) {
                     Column(
                         Modifier.weight(1f).fillMaxWidth().testTag("now_playing_empty"),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -197,17 +194,18 @@ internal fun NowPlayingScreen(
                         maxWidth = availableWidth,
                         maxHeight = availableHeight,
                         state = state,
-                        station = station,
+                        media = media,
+                        details = details,
                         connected = connected,
                         buffering = buffering,
                         animationMillis = animationMillis,
-                        canNext = connected && state.canNext && !controlsLocked,
-                        canPrevious = connected && state.canPrevious && !controlsLocked,
+                        canNext = canChangeMedia && state.canNext,
+                        canPrevious = canChangeMedia && state.canPrevious,
                         shuffle = shuffle,
                         sleepTimer = sleepTimer,
                         onToggle = onToggle,
-                        onNext = { if (canChangeStation) onNextCurrent() },
-                        onPrevious = { if (canChangeStation) onPreviousCurrent() },
+                        onNext = { if (canChangeMedia) onNextCurrent() },
+                        onPrevious = { if (canChangeMedia) onPreviousCurrent() },
                         onToggleShuffle = onToggleShuffle,
                         onSleepTimer = { sleepPanelOpen = true },
                         onCollapse = onCollapse
@@ -215,17 +213,18 @@ internal fun NowPlayingScreen(
                 } else {
                     PhoneNowPlayingContent(
                         state = state,
-                        station = station,
+                        media = media,
+                        details = details,
                         connected = connected,
                         buffering = buffering,
                         animationMillis = animationMillis,
-                        canNext = connected && state.canNext && !controlsLocked,
-                        canPrevious = connected && state.canPrevious && !controlsLocked,
+                        canNext = canChangeMedia && state.canNext,
+                        canPrevious = canChangeMedia && state.canPrevious,
                         shuffle = shuffle,
                         sleepTimer = sleepTimer,
                         onToggle = onToggle,
-                        onNext = { if (canChangeStation) onNextCurrent() },
-                        onPrevious = { if (canChangeStation) onPreviousCurrent() },
+                        onNext = { if (canChangeMedia) onNextCurrent() },
+                        onPrevious = { if (canChangeMedia) onPreviousCurrent() },
                         onToggleShuffle = onToggleShuffle,
                         onSleepTimer = { sleepPanelOpen = true },
                         onCollapse = onCollapse
@@ -435,9 +434,10 @@ private fun NowPlayingBackdrop(wide: Boolean, modifier: Modifier = Modifier) {
 private fun NowPlayingTopBar(
     isCar: Boolean,
     animationMillis: Int,
-    onCollapse: () -> Unit
+    onCollapse: () -> Unit,
+    compact: Boolean
 ) {
-    Box(Modifier.fillMaxWidth().height(if (isCar) 68.dp else 58.dp)) {
+    Box(Modifier.fillMaxWidth().height(if (compact && !isCar) 48.dp else if (isCar) 68.dp else 58.dp)) {
         NowPlayingIconButton(
             icon = R.drawable.ic_ui_chevron_down,
             description = stringResource(R.string.now_playing_collapse),
@@ -485,7 +485,8 @@ private fun NowPlayingTopBar(
 @Composable
 private fun PhoneNowPlayingContent(
     state: PlayerUiState,
-    station: Station,
+    media: NowPlayingMedia,
+    details: (@Composable (Boolean, @Composable () -> Unit) -> Unit)?,
     connected: Boolean,
     buffering: Boolean,
     animationMillis: Int,
@@ -502,6 +503,8 @@ private fun PhoneNowPlayingContent(
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val compact = maxHeight < 560.dp
+        val compactDetails = maxHeight < 360.dp
+        val detailsHeight = maxHeight * .48f
         Column(
             Modifier.fillMaxSize().focusGroup(),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -516,7 +519,7 @@ private fun PhoneNowPlayingContent(
                     if (compact) 230.dp else 280.dp
                 ).coerceAtLeast(1.dp)
                 NowPlayingArtworkGesture(
-                    station = station,
+                    media = media,
                     canNext = canNext,
                     canPrevious = canPrevious,
                     animationMillis = animationMillis,
@@ -527,12 +530,16 @@ private fun PhoneNowPlayingContent(
                 )
             }
             Spacer(Modifier.height(if (compact) 6.dp else 14.dp))
-            StationTitle(
-                station = station,
-                isCar = false,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(Modifier.height(if (compact) 8.dp else 50.dp))
+            if (details == null) {
+                NowPlayingTitle(media, isCar = false, Modifier.fillMaxWidth(), compactDetails)
+            } else {
+                Box(Modifier.widthIn(max = 430.dp).fillMaxWidth().heightIn(max = detailsHeight)) {
+                    details(compactDetails) {
+                        NowPlayingTitle(media, isCar = false, Modifier.fillMaxWidth(), compactDetails)
+                    }
+                }
+            }
+            Spacer(Modifier.height(if (compact || details != null) 8.dp else 50.dp))
             TransportControls(
                 state = state,
                 connected = connected,
@@ -573,7 +580,8 @@ private fun WideNowPlayingContent(
     maxWidth: Dp,
     maxHeight: Dp,
     state: PlayerUiState,
-    station: Station,
+    media: NowPlayingMedia,
+    details: (@Composable (Boolean, @Composable () -> Unit) -> Unit)?,
     connected: Boolean,
     buffering: Boolean,
     animationMillis: Int,
@@ -589,6 +597,7 @@ private fun WideNowPlayingContent(
     onCollapse: () -> Unit
 ) {
     Box(Modifier.fillMaxSize()) {
+        val compact = maxHeight < 360.dp
         val artworkSize = minOf(
             maxWidth * if (isCar) .36f else .34f,
             maxHeight * .68f,
@@ -601,7 +610,7 @@ private fun WideNowPlayingContent(
         ) {
             Box(Modifier.weight(1.04f).fillMaxHeight(), contentAlignment = Alignment.Center) {
                 NowPlayingArtworkGesture(
-                    station = station,
+                    media = media,
                     canNext = canNext,
                     canPrevious = canPrevious,
                     animationMillis = animationMillis,
@@ -615,13 +624,23 @@ private fun WideNowPlayingContent(
                 Modifier.weight(.96f).fillMaxHeight().widthIn(max = if (isCar) 560.dp else 430.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Spacer(Modifier.weight(1f))
-                StationTitle(
-                    station = station,
-                    isCar = isCar,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(if (isCar) 22.dp else 14.dp))
+                if (details == null && !compact) Spacer(Modifier.weight(1f))
+                Column(
+                    Modifier.fillMaxWidth().then(
+                        if (details != null || compact) {
+                            Modifier.weight(1f)
+                        } else Modifier
+                    ),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Bottom
+                ) {
+                    if (details == null) {
+                        NowPlayingTitle(media, isCar, Modifier.fillMaxWidth(), compact)
+                    } else {
+                        details(compact) { NowPlayingTitle(media, isCar, Modifier.fillMaxWidth(), compact) }
+                    }
+                }
+                Spacer(Modifier.height(if (compact) 4.dp else if (isCar) 22.dp else 14.dp))
                 TransportControls(
                     state = state,
                     connected = connected,
@@ -633,10 +652,13 @@ private fun WideNowPlayingContent(
                     onToggle = onToggle,
                     onNext = onNext,
                     onPrevious = onPrevious,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    compact = compact
                 )
-                NowPlayingNotice(state, modifier = Modifier.height(34.dp))
-                Spacer(Modifier.weight(1f))
+                if (!compact || state.error != null || state.musicFailure != null || state.phase == PlaybackPhase.ERROR) {
+                    NowPlayingNotice(state, modifier = if (compact) Modifier else Modifier.height(34.dp))
+                }
+                if (!compact) Spacer(Modifier.weight(if (details == null) 1f else .32f))
                 NowPlayingTools(
                     isCar = isCar,
                     shuffle = shuffle,
@@ -644,17 +666,18 @@ private fun WideNowPlayingContent(
                     animationMillis = animationMillis,
                     onToggleShuffle = onToggleShuffle,
                     onSleepTimer = onSleepTimer,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    compact = compact
                 )
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(if (compact) 4.dp else 10.dp))
             }
         }
     }
 }
 
 @Composable
-private fun StationTitle(station: Station, isCar: Boolean, modifier: Modifier) {
-    val title = station.name.ifBlank { stringResource(R.string.station_unnamed) }
+private fun NowPlayingTitle(media: NowPlayingMedia, isCar: Boolean, modifier: Modifier, compact: Boolean = false) {
+    val title = media.title
     val motionEnabled = rememberMotionEnabled()
     Box(
         modifier.testTag("now_playing_title"),
@@ -669,9 +692,9 @@ private fun StationTitle(station: Station, isCar: Boolean, modifier: Modifier) {
                 current,
                 modifier = Modifier.fillMaxWidth(),
                 color = TuneColors.Text,
-                fontSize = if (isCar) 34.sp else 30.sp,
+                fontSize = if (compact) 22.sp else if (isCar) 34.sp else 30.sp,
                 fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
+                maxLines = if (compact) 1 else 2,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
                 style = TuneTextStyle
@@ -680,9 +703,11 @@ private fun StationTitle(station: Station, isCar: Boolean, modifier: Modifier) {
     }
 }
 
+private data class NowPlayingMedia(val key: Any, val title: String, val artworkUrl: String?, val isMusic: Boolean)
+
 @Composable
 private fun NowPlayingArtworkGesture(
-    station: Station,
+    media: NowPlayingMedia,
     canNext: Boolean,
     canPrevious: Boolean,
     animationMillis: Int,
@@ -703,7 +728,9 @@ private fun NowPlayingArtworkGesture(
     val currentNext by rememberUpdatedState(onNext)
     val currentPrevious by rememberUpdatedState(onPrevious)
     val currentCollapse by rememberUpdatedState(onCollapse)
-    val description = stringResource(R.string.now_playing_artwork, station.name)
+    val description = stringResource(
+        if (media.isMusic) R.string.now_playing_music_artwork else R.string.now_playing_artwork, media.title
+    )
 
     Box(
         modifier
@@ -713,7 +740,7 @@ private fun NowPlayingArtworkGesture(
             }
             .testTag("now_playing_artwork")
             .semantics { contentDescription = description }
-            .pointerInput(station.uuid) {
+            .pointerInput(media.key) {
                 var totalX = 0f
                 var totalY = 0f
                 var horizontal = false
@@ -787,17 +814,17 @@ private fun NowPlayingArtworkGesture(
         contentAlignment = Alignment.Center
     ) {
         Crossfade(
-            targetState = station,
+            targetState = media,
             animationSpec = tween(if (animationMillis > 0) 180 else 0),
-            label = "now_playing_station"
+            label = "now_playing_media"
         ) { current ->
-            StationArtwork(current, Modifier.fillMaxSize())
+            NowPlayingArtwork(current, Modifier.fillMaxSize())
         }
     }
 }
 
 @Composable
-private fun StationArtwork(station: Station, modifier: Modifier) {
+private fun NowPlayingArtwork(media: NowPlayingMedia, modifier: Modifier) {
     val shape = TuneShapes.Card
     Box(modifier, contentAlignment = Alignment.Center) {
         Box(
@@ -837,22 +864,24 @@ private fun StationArtwork(station: Station, modifier: Modifier) {
                 ),
             contentAlignment = Alignment.Center
         ) {
-            val url = station.iconUrl
-            if (url.isNullOrBlank()) {
+            val url = media.artworkUrl
+            if (url.isNullOrBlank() && media.isMusic) {
+                Image(painterResource(R.drawable.music_record), null, Modifier.fillMaxSize(.64f))
+            } else if (url.isNullOrBlank()) {
                 TuneIcon(
                     R.drawable.ic_radio,
                     Modifier.fillMaxSize(.42f),
                     TuneColors.Primary.copy(alpha = .9f)
                 )
             } else {
-                val fallback = painterResource(R.drawable.ic_radio)
+                val fallback = painterResource(if (media.isMusic) R.drawable.music_record else R.drawable.ic_radio)
                 AsyncImage(
                     model = url,
                     contentDescription = null,
-                    modifier = Modifier.fillMaxSize().padding(14.dp),
+                    modifier = Modifier.fillMaxSize().padding(if (media.isMusic) 0.dp else 14.dp),
                     placeholder = fallback,
                     error = fallback,
-                    contentScale = ContentScale.Fit
+                    contentScale = if (media.isMusic) ContentScale.Crop else ContentScale.Fit
                 )
             }
         }
@@ -871,8 +900,10 @@ private fun TransportControls(
     onToggle: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    compact: Boolean = false
 ) {
+    val isMusic = state.source == PlaybackSource.MUSIC
     Box(modifier, contentAlignment = Alignment.Center) {
         Row(
             Modifier.widthIn(max = if (isCar) 430.dp else 350.dp).fillMaxWidth(),
@@ -881,7 +912,7 @@ private fun TransportControls(
         ) {
             NowPlayingIconButton(
                 icon = R.drawable.ic_now_playing_previous,
-                description = stringResource(R.string.player_previous),
+                description = stringResource(if (isMusic) R.string.music_previous else R.string.player_previous),
                 isCar = isCar,
                 tag = "now_playing_previous",
                 enabled = canPrevious,
@@ -895,11 +926,12 @@ private fun TransportControls(
                 buffering = buffering,
                 isCar = isCar,
                 animationMillis = animationMillis,
+                compact = compact,
                 onClick = onToggle
             )
             NowPlayingIconButton(
                 icon = R.drawable.ic_now_playing_next,
-                description = stringResource(R.string.player_next),
+                description = stringResource(if (isMusic) R.string.music_next else R.string.player_next),
                 isCar = isCar,
                 tag = "now_playing_next",
                 enabled = canNext,
@@ -918,6 +950,7 @@ private fun WaveformPlaybackControl(
     buffering: Boolean,
     isCar: Boolean,
     animationMillis: Int,
+    compact: Boolean,
     onClick: () -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -929,7 +962,7 @@ private fun WaveformPlaybackControl(
         label = "now_playing_wave_press"
     )
     val playing = state.phase == PlaybackPhase.PLAYING
-    val failed = state.error != null && !buffering
+    val failed = !buffering && (state.error != null || state.phase == PlaybackPhase.ERROR)
     val label = when {
         buffering -> stringResource(R.string.playback_buffering)
         failed -> stringResource(R.string.directory_retry)
@@ -945,7 +978,7 @@ private fun WaveformPlaybackControl(
     Box(
         Modifier.size(
             width = if (isCar) 142.dp else 112.dp,
-            height = if (isCar) 82.dp else 68.dp
+            height = if (compact && !isCar) 56.dp else if (isCar) 82.dp else 68.dp
         )
             .graphicsLayer {
                 scaleX = scale
@@ -957,6 +990,7 @@ private fun WaveformPlaybackControl(
                 if (focused) Modifier.border(2.dp, TuneColors.Primary, shape)
                 else Modifier
             )
+            .onFocusChanged { focused = it.isFocused }
             .clickable(
                 enabled = enabled,
                 role = Role.Button,
@@ -964,7 +998,6 @@ private fun WaveformPlaybackControl(
                 indication = null,
                 onClick = onClick
             )
-            .onFocusChanged { focused = it.isFocused }
             .testTag("now_playing_play")
             .semantics {
                 role = Role.Button
@@ -1161,7 +1194,8 @@ internal fun NowPlayingIconButton(
 
 @Composable
 private fun NowPlayingNotice(state: PlayerUiState, modifier: Modifier = Modifier) {
-    val text = playbackErrorText(state.error, state.statusCode)
+    val text = if (state.source == PlaybackSource.MUSIC) musicPlaybackErrorText(state)
+        else playbackErrorText(state.error, state.statusCode)
     val motionEnabled = rememberMotionEnabled()
     Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Crossfade(
@@ -1177,7 +1211,8 @@ private fun NowPlayingNotice(state: PlayerUiState, modifier: Modifier = Modifier
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
-                    style = TuneTextStyle
+                    style = TuneTextStyle,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
                 )
             }
         }
@@ -1215,18 +1250,14 @@ private fun NowPlayingTools(
     val sleepDescription = remaining?.let {
         stringResource(R.string.now_playing_sleep_accessibility_active, it)
     } ?: stringResource(R.string.now_playing_sleep_accessibility)
-    val shell = if (compact) {
+    val height = if (compact) {
         Modifier.heightIn(min = if (isCar) 64.dp else 60.dp).height(IntrinsicSize.Min)
-            .clip(shape).background(TuneColors.Surface.copy(alpha = .82f))
-            .border(1.dp, TuneColors.BorderSoft, shape)
-    } else {
-        Modifier.height(if (isCar) 80.dp else 76.dp).clip(shape)
+    } else Modifier.height(if (isCar) 80.dp else 76.dp)
+    Row(
+        modifier.then(height).clip(shape)
             .background(Brush.verticalGradient(listOf(TuneColors.Surface.copy(alpha = .88f), TuneColors.Player.copy(alpha = .72f))))
             .border(1.dp, Brush.linearGradient(listOf(TuneColors.PrimaryLight.copy(alpha = .3f),
                 TuneColors.BorderSoft.copy(alpha = .78f), TuneColors.Accent.copy(alpha = .12f))), shape)
-    }
-    Row(
-        modifier.then(shell)
             .focusGroup()
             .testTag("now_playing_tools"),
         verticalAlignment = Alignment.CenterVertically

@@ -1,224 +1,149 @@
 package com.meowv.tune.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
-import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.meowv.tune.R
 import com.meowv.tune.domain.PlaybackPhase
-import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.music.MusicFailure
 import com.meowv.tune.music.MusicLyrics
 import com.meowv.tune.ui.theme.TuneColors
-import com.meowv.tune.ui.theme.TuneShapes
 import com.meowv.tune.ui.theme.TuneSizes
 import com.meowv.tune.ui.theme.TuneSpacing
 import com.meowv.tune.ui.theme.TuneTextStyle
+import kotlin.math.abs
 
 @Composable
-internal fun MusicNowPlayingContent(
-    isCar: Boolean,
+internal fun MusicNowPlayingDetails(
     state: PlayerUiState,
+    isCar: Boolean,
     connected: Boolean,
-    onCommand: (PlayerCommand) -> Unit,
-    modifier: Modifier = Modifier
+    compact: Boolean,
+    onSeek: (Long) -> Unit,
+    title: @Composable () -> Unit
 ) {
-    BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        val wide = maxWidth >= 560.dp && (isCar || maxWidth > maxHeight)
-        val height = maxHeight
-        val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
-        val coverSize = if (wide) {
-            minOf(maxWidth * .36f, height * .60f / fontScale, if (isCar) 380.dp else 300.dp)
-        } else {
-            minOf(maxWidth * .72f, height * .45f / fontScale, 280.dp)
-        }
-        val artwork: @Composable () -> Unit = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(TuneSpacing.Small)) {
-                if (coverSize >= 32.dp) {
-                    MusicCover(state.music, Modifier.size(coverSize).testTag("music_artwork"), TuneShapes.Player)
-                }
-                Text(state.music?.title ?: stringResource(R.string.menu_music), color = TuneColors.Text,
-                    style = TuneTextStyle, fontSize = if (isCar) 28.sp else 24.sp,
-                    lineHeight = if (isCar) 34.sp else 30.sp, fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.fillMaxWidth().testTag("music_title"))
-                state.music?.artists?.takeIf { it.isNotEmpty() }?.let { artists ->
-                    Text(artists.joinToString(" / "), color = TuneColors.Muted, style = TuneTextStyle,
-                        fontSize = if (isCar) 17.sp else 14.sp, textAlign = TextAlign.Center,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
+    val artists = state.music?.artists.orEmpty()
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        // 先给进度条留出触控空间，标题和歌词共用剩余高度。
+        Column(
+            Modifier.fillMaxWidth().weight(1f, fill = false).clipToBounds(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            title()
+            if (artists.isNotEmpty() && (!compact || state.musicLyrics.isEmpty())) {
+                Text(
+                    artists.joinToString(" / "), color = TuneColors.Muted, style = TuneTextStyle,
+                    fontSize = if (isCar) 17.sp else 14.sp, textAlign = TextAlign.Center,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (state.musicLyrics.isNotEmpty()) {
+                key(state.music?.id) { MusicLyricPreview(state, isCar, compact) }
             }
         }
-
-        if (wide) {
-            Row(Modifier.fillMaxSize().focusGroup(), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(if (isCar) 44.dp else 28.dp)) {
-                Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min = height),
-                        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                        artwork()
-                    }
-                }
-                val lowerSpace = ((height - 320.dp) * .35f / fontScale).coerceIn(0.dp, 104.dp)
-                MusicPlaybackControls(isCar, state, connected, onCommand, Modifier.weight(1f).fillMaxHeight(),
-                    lowerSpace = lowerSpace)
-            }
-        } else {
-            MusicPlaybackControls(isCar, state, connected, onCommand,
-                Modifier.widthIn(max = 540.dp).fillMaxSize().focusGroup(), artwork)
-        }
+        MusicSeek(state, connected, inlineTimes = compact, onSeek)
     }
 }
 
 @Composable
-private fun MusicPlaybackControls(
-    isCar: Boolean,
-    state: PlayerUiState,
-    connected: Boolean,
-    onCommand: (PlayerCommand) -> Unit,
-    modifier: Modifier,
-    artwork: (@Composable () -> Unit)? = null,
-    lowerSpace: Dp = 0.dp
-) {
-    val animationMillis = if (rememberMotionEnabled()) 220 else 0
-    val buffering = state.phase in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.BUFFERING, PlaybackPhase.RETRYING)
-    val failure = musicPlaybackErrorText(state)
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(TuneSpacing.Small)) {
-        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-            val contentHeight = maxHeight
-            Column(
-                Modifier.widthIn(max = if (isCar) 560.dp else 430.dp).fillMaxWidth()
-                    .verticalScroll(rememberScrollState()).heightIn(min = contentHeight)
-                    .padding(vertical = TuneSpacing.Hairline),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(TuneSpacing.Small, Alignment.Bottom)
-            ) {
-                artwork?.invoke()
-                if (state.musicLyrics.isNotEmpty()) {
-                    val index = MusicLyrics.activeLine(state.musicLyrics, state.positionMs ?: 0)
-                    Column(Modifier.fillMaxWidth().testTag("music_lyrics"),
-                        verticalArrangement = Arrangement.spacedBy(TuneSpacing.Hairline),
-                        horizontalAlignment = Alignment.CenterHorizontally) {
-                        state.musicLyrics.getOrNull(index)?.let {
-                            Text(it.text, color = TuneColors.Text, style = TuneTextStyle, fontSize = if (isCar) 22.sp else 17.sp,
-                                fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 2,
-                                overflow = TextOverflow.Ellipsis)
-                        }
-                        state.musicLyrics.getOrNull(index + 1)?.let {
-                            Text(it.text, color = TuneColors.Muted, style = TuneTextStyle, fontSize = if (isCar) 17.sp else 14.sp,
-                                textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
-                }
-                MusicSeek(state, connected, onCommand)
-                if (failure != null) {
-                    Text(failure, color = TuneColors.Error, style = TuneTextStyle, fontSize = if (isCar) 15.sp else 13.sp,
-                        textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite })
-                }
-            }
-        }
-        Row(
-            Modifier.widthIn(max = if (isCar) 430.dp else 350.dp).fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+private fun MusicLyricPreview(state: PlayerUiState, isCar: Boolean, compact: Boolean) {
+    val lines = state.musicLyrics
+    val index = MusicLyrics.activeLine(lines, state.positionMs ?: 0)
+    val animationMillis = if (rememberMotionEnabled()) 160 else 0
+    AnimatedContent(
+        targetState = index,
+        modifier = Modifier.fillMaxWidth().clipToBounds().testTag("music_lyrics"),
+        transitionSpec = {
+            val direction = if (targetState > initialState) 1 else -1
+            slideInVertically(tween(animationMillis)) { it * direction } togetherWith
+                slideOutVertically(tween(animationMillis)) { -it * direction }
+        },
+        label = "music_lyric_line"
+    ) { lineIndex ->
+        Column(
+            Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(TuneSpacing.Hairline),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            NowPlayingIconButton(R.drawable.ic_now_playing_previous, stringResource(R.string.music_previous),
-                isCar, "music_previous", animationMillis, if (isCar) 34.dp else 30.dp,
-                enabled = connected && state.canPrevious, onClick = { onCommand(PlayerCommand.Previous) })
-            var focused by remember { mutableStateOf(false) }
-            val toggleIcon = when {
-                state.phase == PlaybackPhase.ERROR -> R.drawable.ic_refresh
-                state.phase == PlaybackPhase.PLAYING -> R.drawable.ic_music_pause
-                else -> R.drawable.ic_radio_play
+            lines.getOrNull(lineIndex)?.let {
+                Text(
+                    it.text, color = TuneColors.Text, style = TuneTextStyle,
+                    fontSize = if (compact) 14.sp else if (isCar) 22.sp else 17.sp,
+                    fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
+                    maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis
+                )
             }
-            val toggleLabel = stringResource(when {
-                buffering -> R.string.action_cancel
-                state.phase == PlaybackPhase.ERROR -> R.string.music_retry
-                state.phase == PlaybackPhase.PLAYING -> R.string.action_pause
-                else -> R.string.action_play
-            })
-            val status = playbackVisualLabel(playbackVisual(state.phase, connected))
-            FilledIconButton(
-                onClick = { onCommand(PlayerCommand.TogglePause) },
-                enabled = connected,
-                shape = TuneShapes.Station,
-                modifier = Modifier.size(if (isCar) 80.dp else 64.dp)
-                    .then(if (focused) Modifier.border(2.dp, TuneColors.PrimaryLight, TuneShapes.Station) else Modifier)
-                    .onFocusChanged { focused = it.isFocused }
-                    .semantics { if (status != null) stateDescription = status }
-                    .testTag("music_toggle")
-            ) {
-                if (buffering) {
-                    Box(contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(Modifier.size(34.dp), color = TuneColors.Background,
-                            strokeWidth = 2.dp, strokeCap = StrokeCap.Round)
-                        Icon(painterResource(R.drawable.ic_close), toggleLabel, Modifier.size(TuneSizes.IconXs))
-                    }
-                } else {
-                    Icon(painterResource(toggleIcon), toggleLabel, Modifier.size(if (isCar) 30.dp else 26.dp))
+            if (!compact || lineIndex < 0) {
+                lines.getOrNull(lineIndex + 1)?.let {
+                    Text(
+                        it.text, color = TuneColors.Muted, style = TuneTextStyle,
+                        fontSize = if (isCar && !compact) 17.sp else 14.sp,
+                        textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
-            NowPlayingIconButton(R.drawable.ic_now_playing_next, stringResource(R.string.music_next),
-                isCar, "music_next", animationMillis, if (isCar) 34.dp else 30.dp,
-                enabled = connected && state.canNext, onClick = { onCommand(PlayerCommand.Next) })
         }
-        if (lowerSpace > 0.dp) Spacer(Modifier.height(lowerSpace))
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MusicSeek(state: PlayerUiState, connected: Boolean, onCommand: (PlayerCommand) -> Unit) {
+private fun MusicSeek(state: PlayerUiState, connected: Boolean, inlineTimes: Boolean, onSeek: (Long) -> Unit) {
     val duration = state.durationMs?.takeIf { it > 0 } ?: return
     var drag by remember(state.music?.id, duration, state.canSeek) { mutableStateOf<Float?>(null) }
     val position = (drag?.toLong() ?: state.positionMs ?: 0).coerceIn(0, duration)
     val description = stringResource(R.string.music_seek_description,
         position / 60_000, position / 1000 % 60, duration / 60_000, duration / 1000 % 60)
-    val sliderModifier = Modifier.fillMaxWidth().semantics { stateDescription = description }
-    Column(Modifier.fillMaxWidth().padding(horizontal = TuneSpacing.Small)) {
+    val seekTrack: @Composable (Modifier) -> Unit = { modifier ->
+        val sliderModifier = modifier.semantics { stateDescription = description }
         if (state.canSeek) {
             val interaction = remember { MutableInteractionSource() }
             val focused by interaction.collectIsFocusedAsState()
             Slider(
                 value = position.toFloat(),
                 onValueChange = { drag = it },
-                onValueChangeFinished = { drag?.let { onCommand(PlayerCommand.Seek(it.toLong())) }; drag = null },
+                onValueChangeFinished = {
+                    drag?.let { onSeek(it.toLong()) }
+                    drag = null
+                },
                 valueRange = 0f..duration.toFloat(),
                 enabled = connected,
-                modifier = sliderModifier.heightIn(min = TuneSizes.Touch).testTag("music_seek"),
+                modifier = sliderModifier.heightIn(min = TuneSizes.Touch)
+                    .ignoreVerticalSeekDrag(connected).testTag("music_seek"),
                 interactionSource = interaction,
                 thumb = {
                     Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
@@ -243,11 +168,53 @@ private fun MusicSeek(state: PlayerUiState, connected: Boolean, onCommand: (Play
             LinearProgressIndicator(progress = { position.toFloat() / duration },
                 modifier = sliderModifier.padding(vertical = TuneSpacing.Medium).height(4.dp).testTag("music_progress"))
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(musicTime(position), color = TuneColors.Text, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
-            Text(musicTime(duration), color = TuneColors.Muted, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+    }
+    val layout = Modifier.fillMaxWidth().padding(horizontal = TuneSpacing.Small)
+    if (inlineTimes) {
+        Row(
+            layout, horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Small),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            PlaybackTime(position, TuneColors.Text)
+            seekTrack(Modifier.weight(1f))
+            PlaybackTime(duration, TuneColors.Muted)
+        }
+    } else {
+        Column(layout) {
+            seekTrack(Modifier.fillMaxWidth())
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                PlaybackTime(position, TuneColors.Text)
+                PlaybackTime(duration, TuneColors.Muted)
+            }
         }
     }
+}
+
+private fun Modifier.ignoreVerticalSeekDrag(enabled: Boolean): Modifier {
+    if (!enabled) return this
+    return pointerInput(Unit) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            var verticalDrag: Boolean? = null
+            do {
+                val change = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id }
+                    ?: break
+                if (verticalDrag == null) {
+                    val offset = change.position - down.position
+                    if (maxOf(abs(offset.x), abs(offset.y)) > viewConfiguration.touchSlop) {
+                        verticalDrag = abs(offset.y) > abs(offset.x)
+                    }
+                }
+                // Slider 会把轨道内未消费的纵向拖动识别成点击。
+                if (verticalDrag == true) change.consume()
+            } while (change.pressed)
+        }
+    }
+}
+
+@Composable
+private fun PlaybackTime(positionMs: Long, color: Color) {
+    Text(musicTime(positionMs), color = color, fontSize = 13.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
 }
 
 @Composable

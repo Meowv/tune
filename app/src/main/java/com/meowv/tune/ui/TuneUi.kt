@@ -177,7 +177,7 @@ internal fun TuneApp(
         nowPlayingOpen = false
     }
     val motionEnabled = rememberMotionEnabled()
-    val fullscreenAnimMillis = if (motionEnabled) (if (playbackState.source == PlaybackSource.MUSIC) 220 else 280) else 0
+    val fullscreenAnimMillis = if (motionEnabled) 280 else 0
 
     Surface(color = TuneColors.Background) {
         BoxWithConstraints(Modifier.fillMaxSize()) {

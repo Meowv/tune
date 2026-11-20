@@ -39,12 +39,15 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -71,6 +74,7 @@ import com.meowv.tune.ui.theme.TuneSizes
 import com.meowv.tune.ui.theme.TuneSpacing
 import com.meowv.tune.ui.theme.TuneTextStyle
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 
 @Composable
 internal fun MusicScreen(
@@ -90,6 +94,17 @@ internal fun MusicScreen(
     val list = rememberLazyListState()
     var mode by rememberSaveable { mutableStateOf(RadioDisplayMode.LIST) }
     var previewId by rememberSaveable { mutableStateOf<String?>(null) }
+    var listSelectionId by rememberSaveable { mutableStateOf<String?>(null) }
+    val listTrackToCenter = listSelectionId?.takeIf {
+        it == currentId && playback?.phase == PlaybackPhase.PLAYING
+    }
+
+    LaunchedEffect(currentId, playback?.phase, playback?.operationFailure) {
+        if (playback?.phase == PlaybackPhase.ERROR || playback?.operationFailure != null ||
+            playback?.phase == PlaybackPhase.PLAYING && currentId != listSelectionId) {
+            listSelectionId = null
+        }
+    }
 
     Surface(color = TuneColors.Background, modifier = Modifier.fillMaxSize().testTag("page_music")) {
         Column(Modifier.fillMaxSize()) {
@@ -127,6 +142,7 @@ internal fun MusicScreen(
                 if (song.id == currentId && visual in setOf(StationPlaybackVisual.Playing, StationPlaybackVisual.Paused)) {
                     onCommand(PlayerCommand.TogglePause)
                 } else {
+                    listSelectionId = song.id.takeIf { mode == RadioDisplayMode.LIST }
                     onCommand(PlayerCommand.PlayMusic(song, MusicQueueSeed(browse.tracks, null)))
                 }
             }
@@ -136,7 +152,10 @@ internal fun MusicScreen(
 
             if (mode == RadioDisplayMode.CARD) {
                 MusicCards(browse.tracks, currentId, visual, playbackError, connected, isCar,
-                    previewId, { previewId = it }, animationsEnabled, statusModifier, clickTrack)
+                    previewId, listTrackToCenter, { id ->
+                        previewId = id
+                        if (id == listTrackToCenter) listSelectionId = null
+                    }, animationsEnabled, statusModifier, clickTrack)
                 if (browse.loading) DirectoryLoading(Modifier.fillMaxWidth().padding(bottom = TuneSpacing.Small),
                     size = 22.dp, tag = "music_feed_loading")
             } else {
@@ -177,6 +196,7 @@ private fun MusicCards(
     connected: Boolean,
     isCar: Boolean,
     previewId: String?,
+    listTrackToCenter: String?,
     onPreview: (String) -> Unit,
     animationsEnabled: Boolean,
     modifier: Modifier,
@@ -184,19 +204,25 @@ private fun MusicCards(
 ) {
     val currentIndex = tracks.indexOfFirst { it.id == currentId }
     val retainedIndex = tracks.indexOfFirst { it.id == previewId }
+    val prioritizeCurrent = listTrackToCenter != null && currentIndex >= 0
     val pager = rememberPagerState(
-        initialPage = if (retainedIndex >= 0) retainedIndex else currentIndex.coerceAtLeast(0)
+        initialPage = when {
+            prioritizeCurrent -> currentIndex
+            retainedIndex >= 0 -> retainedIndex
+            else -> currentIndex.coerceAtLeast(0)
+        }
     ) { tracks.size }
     val animate = rememberMotionEnabled()
     val reportPreview by rememberUpdatedState(onPreview)
     var observedPlaybackId by remember { mutableStateOf(currentId) }
 
-    LaunchedEffect(pager, tracks, currentId) {
+    LaunchedEffect(pager, tracks, currentId, listTrackToCenter) {
+        if (prioritizeCurrent) snapshotFlow { !pager.isScrollInProgress }.first { it }
         val followsPlayback = currentId != observedPlaybackId && previewId == observedPlaybackId && currentIndex >= 0
         observedPlaybackId = currentId
         if (!pager.isScrollInProgress) {
             val target = when {
-                followsPlayback -> currentIndex
+                prioritizeCurrent || followsPlayback -> currentIndex
                 retainedIndex >= 0 -> retainedIndex
                 else -> currentIndex.coerceAtLeast(0)
             }
@@ -238,15 +264,21 @@ private fun MusicCards(
                         page.offset + layout.pageSize <= layout.viewportEndOffset
                 }
             }
+            val showContent = fullyVisible || pager.isScrollInProgress
             Box(Modifier.fillMaxHeight().width(width), contentAlignment = BiasAlignment(0f, -.12f)) {
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                    val card = Modifier.fillMaxWidth().height(height)
-                    if (fullyVisible) {
+                    Box(Modifier.fillMaxWidth().height(height)) {
+                        val cardTag = if (showContent) Modifier.testTag("music_feed_card_${track.id}") else Modifier
                         MusicCard(track, isCar, current, cardVisual, connected && !cardVisual.busy,
-                            card.semantics { if (index == pager.settledPage) selected = true }
-                                .testTag("music_feed_card_${track.id}")) { onPlay(track) }
-                    } else {
-                        Spacer(card.border(1.dp, TuneColors.BorderSoft, TuneShapes.Card).testTag("music_card_preview"))
+                            interactive = fullyVisible && !pager.isScrollInProgress,
+                            modifier = Modifier.matchParentSize().then(cardTag)
+                                .graphicsLayer { alpha = if (showContent) 1f else 0f }
+                                .semantics {
+                                    if (fullyVisible && index == pager.settledPage) selected = true
+                                }
+                        ) { onPlay(track) }
+                        if (!showContent) Spacer(Modifier.matchParentSize()
+                            .border(1.dp, TuneColors.BorderSoft, TuneShapes.Card).testTag("music_card_preview"))
                     }
                     Spacer(Modifier.height(statusGap))
                     when {
@@ -275,17 +307,21 @@ private fun MusicCard(
     current: Boolean,
     visual: StationPlaybackVisual,
     enabled: Boolean,
+    interactive: Boolean,
     modifier: Modifier,
     onClick: () -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
     val status = playbackVisualLabel(visual)
     val action = stringResource(musicActionLabel(visual))
-    Surface(shape = TuneShapes.Card, color = TuneColors.Raised,
-        border = if (focused) BorderStroke(2.dp, TuneColors.Primary) else null,
-        modifier = modifier.clip(TuneShapes.Card).onFocusChanged { focused = it.isFocused }
+    val interaction = if (interactive) {
+        Modifier.onFocusChanged { focused = it.isFocused }
             .clickable(enabled = enabled, onClickLabel = action, role = Role.Button, onClick = onClick)
-            .semantics { if (status != null) stateDescription = status }) {
+            .semantics { if (status != null) stateDescription = status }
+    } else Modifier.clearAndSetSemantics { hideFromAccessibility() }
+    Surface(shape = TuneShapes.Card, color = TuneColors.Raised,
+        border = if (interactive && focused) BorderStroke(2.dp, TuneColors.Primary) else null,
+        modifier = modifier.clip(TuneShapes.Card).then(interaction)) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val compact = maxHeight < 280.dp
             val pad = if (compact) TuneSpacing.Large else TuneSpacing.Section
