@@ -175,14 +175,17 @@ class MediaSessionControlTest {
 
     @Test fun returningToForegroundKeepsTheSameSession() = runBlocking {
         withPlayer { scenario ->
-            playStation(1)
+            // 普通测试音源只有 12 秒，生命周期切换在慢模拟器上可能正好遇到曲终。
+            val station = station(901).copy(name = "session-handoff.mp3")
+            connection.dispatch(PlayerCommand.Play(station))
+            awaitStation(901)
             val media = connect()
-            val itemId = onMain { media.currentMediaItem?.mediaId }
+            val token = onMain { media.connectedToken }
             scenario.moveToState(Lifecycle.State.CREATED)
-            delay(500)
             scenario.moveToState(Lifecycle.State.RESUMED)
             withTimeout(5000) { connection.connected.first { it } }
-            assertEquals(itemId, onMain { media.currentMediaItem?.mediaId })
+            assertEquals(token, onMain { media.connectedToken })
+            assertEquals(station.uuid.toString(), onMain { media.currentMediaItem?.mediaId })
             assertEquals(PlaybackPhase.PLAYING, connection.state.value.phase)
         }
     }

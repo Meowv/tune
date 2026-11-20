@@ -1,17 +1,25 @@
 package com.meowv.tune
 
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.meowv.tune.update.install.ApkInstaller
 import com.meowv.tune.update.install.ApkVerifier
 import com.meowv.tune.update.install.ExpectedApk
 import com.meowv.tune.update.install.InstallException
 import com.meowv.tune.update.install.InstallFailure
 import java.io.File
 import java.security.MessageDigest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -42,6 +50,32 @@ class ApkVerifierTest {
     @Test
     fun installedApkPasses() = runBlocking {
         verifier.verify(installedCopy, expectedFor(installedCopy))
+    }
+
+    @Test
+    fun verifiedDebugApkOpensSystemConfirmationAndCancels() = runBlocking<Unit> {
+        assumeTrue(InstrumentationRegistry.getArguments().getString("testInstallerHandoff") == "true")
+        verifier.verify(installedCopy, expectedFor(installedCopy))
+        val installer = ApkInstaller(context)
+        assertTrue(installer.canRequestInstall())
+        val events = Channel<ApkInstaller.Outcome>(Channel.UNLIMITED)
+        ActivityScenario.launch(MainActivity::class.java).use {
+            try {
+                withContext(Dispatchers.Main) { installer.install(installedCopy) { events.trySend(it) } }
+                assertEquals(ApkInstaller.Outcome.UserActionRequired, withTimeout(15000) { events.receive() })
+                val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+                withTimeout(10000) {
+                    while (!automation.rootInActiveWindow?.packageName.toString().contains("packageinstaller")) {
+                        delay(100)
+                    }
+                }
+                automation.executeShellCommand("input keyevent KEYCODE_BACK").close()
+                assertEquals(ApkInstaller.Outcome.Cancelled, withTimeout(10000) { events.receive() })
+            } finally {
+                withContext(Dispatchers.Main) { installer.close() }
+                events.close()
+            }
+        }
     }
 
     @Test

@@ -143,6 +143,8 @@ internal fun NowPlayingScreen(
     BoxWithConstraints(modifier.fillMaxSize()) {
         val windowWidth = maxWidth
         val windowHeight = maxHeight
+        val safeDrawing = WindowInsets.safeDrawing
+        val topInset = with(LocalDensity.current) { safeDrawing.getTop(this).toDp() }
         val wide = isCar || isNowPlayingWide(windowWidth.value, windowHeight.value) ||
             (windowWidth >= 560.dp && windowWidth > windowHeight)
         NowPlayingBackdrop(
@@ -209,6 +211,9 @@ internal fun NowPlayingScreen(
                         state = state,
                         media = media,
                         details = details,
+                        radioTitleTop = if (details == null && windowHeight >= 700.dp) {
+                            windowHeight * .53f - topInset - PhoneNowPlayingTopBarHeight
+                        } else null,
                         connected = connected,
                         buffering = buffering,
                         animationMillis = animationMillis,
@@ -425,6 +430,8 @@ private fun NowPlayingBackdrop(wide: Boolean, modifier: Modifier = Modifier) {
     }
 }
 
+private val PhoneNowPlayingTopBarHeight = 58.dp
+
 @Composable
 private fun NowPlayingTopBar(
     isCar: Boolean,
@@ -432,7 +439,7 @@ private fun NowPlayingTopBar(
     onCollapse: () -> Unit,
     compact: Boolean
 ) {
-    Box(Modifier.fillMaxWidth().height(if (compact && !isCar) 48.dp else if (isCar) 68.dp else 58.dp)) {
+    Box(Modifier.fillMaxWidth().height(if (compact && !isCar) 48.dp else if (isCar) 68.dp else PhoneNowPlayingTopBarHeight)) {
         NowPlayingIconButton(
             icon = R.drawable.ic_ui_chevron_down,
             description = stringResource(R.string.now_playing_collapse),
@@ -482,6 +489,7 @@ private fun PhoneNowPlayingContent(
     state: PlayerUiState,
     media: NowPlayingMedia,
     details: (@Composable (Boolean, @Composable () -> Unit) -> Unit)?,
+    radioTitleTop: Dp?,
     connected: Boolean,
     buffering: Boolean,
     animationMillis: Int,
@@ -500,12 +508,17 @@ private fun PhoneNowPlayingContent(
         val compact = maxHeight < 560.dp
         val compactDetails = maxHeight < 360.dp
         val detailsHeight = maxHeight * .48f
+        val artworkGap = if (compact) 6.dp else 14.dp
+        val artworkSlot = radioTitleTop
+            ?.let { (it - artworkGap).coerceIn(0.dp, maxHeight * .60f) }
         Column(
             Modifier.fillMaxSize().focusGroup(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             BoxWithConstraints(
-                Modifier.fillMaxWidth().weight(1f),
+                Modifier.fillMaxWidth().then(
+                    if (artworkSlot == null) Modifier.weight(1f) else Modifier.height(artworkSlot)
+                ),
                 contentAlignment = Alignment.Center
             ) {
                 val artworkSize = minOf(
@@ -524,7 +537,7 @@ private fun PhoneNowPlayingContent(
                     onCollapse = onCollapse
                 )
             }
-            Spacer(Modifier.height(if (compact) 6.dp else 14.dp))
+            Spacer(Modifier.height(artworkGap))
             if (details == null) {
                 NowPlayingTitle(media, isCar = false, Modifier.fillMaxWidth(), compactDetails)
             } else {
@@ -534,7 +547,13 @@ private fun PhoneNowPlayingContent(
                     }
                 }
             }
-            Spacer(Modifier.height(if (compact || details != null) 8.dp else 50.dp))
+            val controlsGap = when {
+                details != null -> 8.dp
+                !compact -> 50.dp
+                artworkSlot != null -> 16.dp
+                else -> 8.dp
+            }
+            Spacer(Modifier.height(controlsGap))
             TransportControls(
                 state = state,
                 connected = connected,
@@ -553,6 +572,7 @@ private fun PhoneNowPlayingContent(
                 modifier = Modifier.height(if (compact) 28.dp else 34.dp)
             )
             val lowerSpacingWeight = when {
+                artworkSlot != null -> 1f
                 compact -> .12f
                 details == null -> .27f
                 else -> .40f
