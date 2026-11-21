@@ -19,6 +19,9 @@ import com.meowv.tune.domain.RadioScope
 import com.meowv.tune.domain.ScopeMode
 import com.meowv.tune.domain.Station
 import com.meowv.tune.domain.StationPage
+import com.meowv.tune.domain.music.MusicTrack
+import com.meowv.tune.domain.music.PlayableAudio
+import com.meowv.tune.music.FakeMusicRepository
 import com.meowv.tune.playback.RadioPlaybackService
 import java.io.FileInputStream
 import java.util.UUID
@@ -187,6 +190,60 @@ class MediaSessionControlTest {
             assertEquals(token, onMain { media.connectedToken })
             assertEquals(station.uuid.toString(), onMain { media.currentMediaItem?.mediaId })
             assertEquals(PlaybackPhase.PLAYING, connection.state.value.phase)
+        }
+    }
+
+    @Test fun removingTaskStopsRadioAndClearsMediaNotification() = runBlocking<Unit> {
+        app.userSettings.update { it.copy(autoPlay = false) }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            withTimeout(5000) { connection.connected.first { it } }
+            withTimeout(5000) { app.radioQueue.activeScope.first { it != null } }
+            val station = station(901).copy(name = "session-handoff.mp3")
+            connection.dispatch(PlayerCommand.Play(station))
+            awaitStation(901)
+            awaitNotification()
+
+            scenario.onActivity { it.finishAndRemoveTask() }
+            awaitPlaybackStopped()
+        }
+    }
+
+    @Test fun removingTaskStopsMusicAndPreservesPausedResumePoint() = runBlocking<Unit> {
+        val track = MusicTrack("task-removal", "Task removal test", listOf("Test artist"))
+        val audio = PlayableAudio(track.id, "test", track.id, 1.0,
+            "https://test.example/session-handoff.mp3", "audio/mpeg", 96000, seekable = true)
+        app.testMusicRepository = FakeMusicRepository(listOf(track), mapOf(track.id to audio))
+        app.userSettings.update { it.copy(autoPlay = false) }
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                withTimeout(5000) { connection.connected.first { it } }
+                connection.dispatch(PlayerCommand.PlayMusic(track))
+                val playing = withTimeout(8000) {
+                    connection.state.first {
+                        it.music?.id == track.id && it.phase == PlaybackPhase.PLAYING &&
+                            (it.positionMs ?: 0) > 0
+                    }
+                }
+                awaitNotification()
+
+                scenario.onActivity { it.finishAndRemoveTask() }
+                awaitPlaybackStopped()
+                val point = requireNotNull(app.musicResume.read())
+                assertEquals(track.id, point.track.id)
+                assertTrue(point.positionMs >= requireNotNull(playing.positionMs))
+                assertFalse(point.playOnEntry)
+            }
+        } finally {
+            app.testMusicRepository = null
+            app.musicResume.save(null)
+        }
+    }
+
+    private suspend fun awaitPlaybackStopped() {
+        withTimeout(5000) {
+            connection.state.first { it.phase == PlaybackPhase.IDLE }
+            val manager = app.getSystemService(NotificationManager::class.java)
+            while (manager.activeNotifications.isNotEmpty()) delay(50)
         }
     }
 

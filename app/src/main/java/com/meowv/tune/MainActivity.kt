@@ -364,7 +364,12 @@ class MainActivity : ComponentActivity() {
             isAppearanceLightStatusBars = false
             isAppearanceLightNavigationBars = false
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            if (carShell) hide(WindowInsetsCompat.Type.systemBars()) else show(WindowInsetsCompat.Type.systemBars())
+            show(WindowInsetsCompat.Type.statusBars())
+            if (carShell) {
+                hide(WindowInsetsCompat.Type.navigationBars())
+            } else {
+                show(WindowInsetsCompat.Type.navigationBars())
+            }
         }
     }
 }

@@ -160,8 +160,8 @@ class RadioPlaybackService : MediaSessionService() {
         session.takeIf { canConnect(controllerInfo) }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        (application as TuneApplication).playerController.checkpointMusic()
-        super.onTaskRemoved(rootIntent)
+        (application as TuneApplication).playerController.coordinator?.stopAfterTaskRemoval()
+        pauseAllPlayersAndStopSelf()
     }
 
     override fun onDestroy() {

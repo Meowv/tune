@@ -81,5 +81,16 @@ internal class PlaybackCoordinator(
     override fun onSessionNext() { if (activeSource == PlaybackSource.MUSIC) music.next() else radio.next() }
     override fun onSessionPrevious() { if (activeSource == PlaybackSource.MUSIC) music.previous() else radio.previous() }
     override fun onSessionStop() { if (activeSource == PlaybackSource.MUSIC) music.stop() else radio.stop() }
+
+    fun stopAfterTaskRemoval() {
+        if (activeSource == PlaybackSource.MUSIC) {
+            // 关闭任务视为主动暂停，保留断点并关闭恢复时的自动起播。
+            music.pause()
+            music.stop(forget = false)
+        } else {
+            radio.stop()
+        }
+    }
+
     fun close() { music.close(); radio.close() }
 }

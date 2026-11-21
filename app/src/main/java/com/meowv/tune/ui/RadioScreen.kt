@@ -722,7 +722,11 @@ internal fun ScopePicker(
             val view = androidx.compose.ui.platform.LocalView.current
             DisposableEffect(view) {
                 val window = (view.parent as DialogWindowProvider).window
-                WindowCompat.getInsetsController(window, view).hide(WindowInsetsCompat.Type.systemBars())
+                WindowCompat.getInsetsController(window, view).apply {
+                    isAppearanceLightStatusBars = false
+                    show(WindowInsetsCompat.Type.statusBars())
+                    hide(WindowInsetsCompat.Type.navigationBars())
+                }
                 onDispose { }
             }
             Surface(

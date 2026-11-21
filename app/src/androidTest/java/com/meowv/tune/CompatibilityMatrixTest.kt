@@ -1,5 +1,7 @@
 package com.meowv.tune
 
+import android.os.Build
+import android.view.View
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
@@ -7,6 +9,8 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.meowv.tune.domain.RadioDisplayMode
 import kotlinx.coroutines.runBlocking
@@ -49,9 +53,11 @@ class CompatibilityMatrixTest {
             compose.onAllNodesWithTag("global_player").fetchSemanticsNodes().isEmpty()
         )
 
-        val navigationTag = if (
-            compose.onAllNodesWithTag("shell_car").fetchSemanticsNodes().isNotEmpty()
-        ) "side_navigation" else "bottom_navigation"
+        val isCar = compose.onAllNodesWithTag("shell_car").fetchSemanticsNodes().isNotEmpty()
+        compose.waitUntil("状态栏可见，车机模式隐藏底部系统导航栏", 5000) {
+            compose.runOnUiThread { systemBarsMatchShell(isCar) }
+        }
+        val navigationTag = if (isCar) "side_navigation" else "bottom_navigation"
         val navigation = compose.onNodeWithTag(navigationTag).getUnclippedBoundsInRoot()
         assertTrue("导航不得侵入状态栏", navigation.top >= 0.dp)
 
@@ -66,5 +72,19 @@ class CompatibilityMatrixTest {
             val height = (bounds.bottom - bounds.top).value
             assertTrue("$tag 触控热区过小：${width}x$height", width >= 44f && height >= 44f)
         }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun systemBarsMatchShell(isCar: Boolean): Boolean {
+        val decor = compose.activity.window.decorView
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            // 旧系统通过 DecorView 的标记控制系统栏，Insets 的可见性为兼容推断。
+            val flags = decor.systemUiVisibility
+            return flags and View.SYSTEM_UI_FLAG_FULLSCREEN == 0 &&
+                (flags and View.SYSTEM_UI_FLAG_HIDE_NAVIGATION != 0) == isCar
+        }
+        val insets = ViewCompat.getRootWindowInsets(decor) ?: return false
+        return insets.isVisible(WindowInsetsCompat.Type.statusBars()) &&
+            insets.isVisible(WindowInsetsCompat.Type.navigationBars()) == !isCar
     }
 }
