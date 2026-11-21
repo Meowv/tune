@@ -28,11 +28,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalConfiguration
@@ -54,13 +50,14 @@ import androidx.core.view.WindowInsetsCompat
 import com.meowv.tune.R
 import com.meowv.tune.domain.*
 import com.meowv.tune.radio.CountryOptions
+import com.meowv.tune.ui.theme.TuneBrushes
 import com.meowv.tune.ui.theme.TuneColors
+import com.meowv.tune.ui.theme.TuneMotion
 import com.meowv.tune.ui.theme.TuneShapes
 import com.meowv.tune.ui.theme.TuneSizes
 import com.meowv.tune.ui.theme.TuneSpacing
 import com.meowv.tune.ui.theme.TuneTextStyle
-import androidx.compose.ui.graphics.graphicsLayer
-import kotlin.math.abs
+import com.meowv.tune.ui.theme.TuneTypography
 import kotlinx.coroutines.delay
 import java.text.Collator
 import java.util.Locale
@@ -120,7 +117,8 @@ private fun RadioDirectory(
         // 滚动位置提到 Crossfade 之外，列表↔卡片来回切换不会回到顶部。
         val listState = rememberLazyGridState()
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            Crossfade(targetState = displayMode, animationSpec = tween(200), label = "display_mode") { mode ->
+            val duration = if (rememberMotionEnabled()) TuneMotion.ColorChange else 0
+            Crossfade(targetState = displayMode, animationSpec = tween(duration), label = "display_mode") { mode ->
                 when (mode) {
                     RadioDisplayMode.LIST -> StationList(
                         isCar, state, playback, selectedId, listState, onPlayback, onLoadMore, onSelectTarget, onRefresh
@@ -163,7 +161,8 @@ private fun StationList(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(directoryColumnCount(isCar, maxWidth.value, maxHeight.value)),
-            horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Medium),
+            horizontalArrangement = Arrangement.spacedBy(if (isCar) TuneSpacing.Section else TuneSpacing.Medium),
+            verticalArrangement = Arrangement.spacedBy(TuneSpacing.Hairline),
             modifier = Modifier.fillMaxSize().testTag("station_list"),
             state = listState,
             contentPadding = PaddingValues(
@@ -187,13 +186,7 @@ private fun StationList(
                         onPlayback = onPlayback,
                         onSelectTarget = onSelectTarget
                     )
-                    if (index < state.stations.lastIndex) {
-                        // 分割线与台名左缘对齐（行内边距 + 台标 + 间距），不压在台标下方。
-                        HorizontalDivider(
-                            modifier = Modifier.padding(start = 76.dp),
-                            color = TuneColors.Divider.copy(alpha = .55f), thickness = .5.dp
-                        )
-                    }
+                    if (station.uuid != selectedId && index < state.stations.lastIndex) MediaRowDivider(isCar)
                 }
             }
             // 翻页加载沿用列表底部的小环，不打断已加载内容。
@@ -258,31 +251,15 @@ private fun StationRow(
         else -> stringResource(R.string.action_play)
     }
     val shape = TuneShapes.Station
-    // 选中背景平滑过渡：普通透明 → 淡紫高亮，左缘细紫色指示条保持不变。
-    val rowBackground by animateColorAsState(
-        if (selected) TuneColors.Primary.copy(alpha = .10f) else Color.Transparent,
-        animationSpec = tween(220), label = "station_row_background"
-    )
-    // 未播放用灰紫实心三角，当前台用品牌紫实心暂停：实心比线性三角更有分量，车机上也能一眼看清。
     val tint = if (selected) TuneColors.Primary else TuneColors.IconIdle
-    val markerColor = TuneColors.Primary
     val glyph = TuneSizes.IconMd
+    var focused by remember { mutableStateOf(false) }
     Row(
-        Modifier.fillMaxWidth().height(if (isCar) 72.dp else 78.dp)
+        Modifier.fillMaxWidth().heightIn(min = if (isCar) 72.dp else 66.dp)
             .clip(shape)
-            .background(rowBackground)
-            .drawBehind {
-                if (selected) {
-                    val barWidth = 3.dp.toPx()
-                    val barHeight = (if (isCar) 30.dp else 26.dp).toPx()
-                    drawRoundRect(
-                        color = markerColor,
-                        topLeft = Offset(0f, (size.height - barHeight) / 2f),
-                        size = Size(barWidth, barHeight),
-                        cornerRadius = CornerRadius(barWidth / 2f)
-                    )
-                }
-            }
+            .mediaRowHighlight(selected, isCar)
+            .then(if (focused) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)
+            .onFocusChanged { focused = it.isFocused }
             .selectable(
                 selected = selected,
                 enabled = action != null,
@@ -291,16 +268,16 @@ private fun StationRow(
             )
             .testTag("station_${station.uuid}")
             .semantics { stateDescription?.let { this.stateDescription = it } }
-            .padding(start = if (isCar) 12.dp else 10.dp, end = if (isCar) 8.dp else 4.dp),
+            .padding(start = mediaRowStartPadding(isCar), end = if (isCar) 8.dp else 4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(if (isCar) 16.dp else 12.dp)
+        horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Medium)
     ) {
-        StationBadge(station, if (isCar) 48.dp else 54.dp)
+        StationBadge(station, mediaRowArtworkSize(isCar))
         Text(
             title, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-            color = TuneColors.Text, fontSize = if (isCar) 20.sp else 17.sp,
+            color = TuneColors.Text,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            style = TuneTextStyle
+            style = TuneTypography.rowTitle(isCar)
         )
         // 播放状态与选中状态分离：播放中走波形，缓冲转小圈，失败给重试键，其余一律播放键。
         // 图标不带底色，48dp 热区独立响应，涟漪只落在按钮范围内，不铺满整行。
@@ -409,13 +386,12 @@ private fun CardMode(
         if (pagerState.settledPage >= queue.lastIndex - 2) onLoadMore()
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val statusGap = if (isCar) TuneSpacing.Large else TuneSpacing.Medium
+        val statusGap = TuneSpacing.Small
         val statusHeight = if (isCar) 28.dp else 22.dp
-        val width = (if (isCar) 366.dp else 262.dp).coerceAtMost(maxWidth - 48.dp)
-        // 状态区先占位，所有页面保持同高；高度吃紧时由卡片内部缩小台标。
-        val height = (if (isCar) 366.dp else 308.dp)
-            .coerceAtMost((maxHeight - statusHeight - statusGap - 24.dp).coerceAtLeast(0.dp))
-        val side = ((maxWidth - width) / 2).coerceAtLeast(16.dp)
+        val width = minOf(if (isCar) 290.dp else 263.dp, (maxWidth - 48.dp).coerceAtLeast(1.dp))
+        val height = minOf(if (isCar) 313.dp else 356.dp, width * (if (isCar) 1.08f else 1.36f),
+            (maxHeight - statusHeight - statusGap - TuneSpacing.Wide).coerceAtLeast(1.dp))
+        val side = (maxWidth - width) / 2
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxSize().testTag("station_cards"),
@@ -441,13 +417,11 @@ private fun CardMode(
                     },
                     interactive = page == pagerState.settledPage && !pagerState.isScrollInProgress,
                     modifier = Modifier.fillMaxWidth().height(height).testTag("station_card_${station.uuid}")
-                        .graphicsLayer {
-                            val distance = abs((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
-                            alpha = 1f - distance * .6f
-                            scaleX = 1f - distance * .08f
-                            scaleY = scaleX
+                        .mediaCardDepth(isCar) {
+                            (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
                         }
                 )
+                MediaPagerPosition(page, queue.size, visibleOnPage = page == pagerState.settledPage)
                 Spacer(Modifier.height(statusGap))
                 StationPlaybackStatus(
                     visual = stationPlaybackVisual(station.uuid, playback, connected),
@@ -467,19 +441,24 @@ private fun StationCard(
     station: Station, isCar: Boolean, showCountry: Boolean,
     onClick: () -> Unit, modifier: Modifier, interactive: Boolean
 ) {
+    var focused by remember { mutableStateOf(false) }
     BoxWithConstraints(
-        modifier.clip(TuneShapes.Card).background(TuneColors.Raised)
-            .clickable(enabled = interactive, onClick = onClick)
+        modifier.mediaCardSurface(interactive && focused)
+            .then(
+                if (interactive) Modifier.onFocusChanged { focused = it.isFocused }
+                    .clickable(role = Role.Button, onClick = onClick)
+                else Modifier.clearAndSetSemantics { hideFromAccessibility() }
+            )
     ) {
         val padding = if (maxHeight < 280.dp) TuneSpacing.Large else TuneSpacing.Section
-        val nameLine = if (isCar) 32.sp else 27.sp
+        val nameLine = if (isCar) 25.sp else 23.sp
         val nameBlock = with(LocalDensity.current) { nameLine.toDp() * 2 }
         val countryHeight = if (showCountry && station.countryCode != null) {
             with(LocalDensity.current) { (if (isCar) 20.sp else 18.sp).toDp() } + TuneSpacing.Small
         } else 0.dp
         val artworkGap = if (isCar) TuneSpacing.Large else TuneSpacing.Medium
         val artwork = (maxHeight - padding * 2 - nameBlock - countryHeight - artworkGap)
-            .coerceIn(0.dp, if (isCar) 194.dp else 148.dp)
+            .coerceIn(0.dp, if (isCar) 180.dp else 178.dp)
             .coerceAtMost((maxWidth - padding * 2).coerceAtLeast(0.dp))
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding),
@@ -496,22 +475,21 @@ private fun StationCard(
                     station.name.ifBlank { stringResource(R.string.station_unnamed) },
                     modifier = Modifier.fillMaxWidth(),
                     color = TuneColors.Text,
-                    fontSize = if (isCar) 26.sp else 22.sp,
+                    fontSize = if (isCar) 20.sp else 18.sp,
                     lineHeight = nameLine,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
-                    style = TuneTextStyle
+                    style = TuneTypography.pageTitle(isCar)
                 )
             }
             if (showCountry) station.countryCode?.let {
                 Spacer(Modifier.height(TuneSpacing.Small))
                 Text(
                     it.displayName(CountryLocale),
-                    color = TuneColors.Muted, fontSize = if (isCar) 14.sp else 12.sp,
-                    lineHeight = if (isCar) 20.sp else 18.sp,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis, style = TuneTextStyle
+                    color = TuneColors.Muted,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, style = TuneTypography.secondary(isCar)
                 )
             }
         }
@@ -565,7 +543,7 @@ internal fun DirectoryActionChip(
             if (focused) 2.dp else 1.dp,
             if (focused) TuneColors.Primary else TuneColors.BorderSoft
         ),
-        modifier = modifier.heightIn(min = if (isCar) 52.dp else 48.dp)
+        modifier = modifier.heightIn(min = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
             .onFocusChanged { focused = it.isFocused }
             .semantics { contentDescription = description }
     ) {
@@ -576,11 +554,11 @@ internal fun DirectoryActionChip(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(if (isCar) 8.dp else 6.dp)
         ) {
-            TuneIcon(icon, Modifier.size(if (isCar) TuneSizes.IconMd else TuneSizes.IconSm), TuneColors.Primary)
+            TuneIcon(icon, Modifier.size(if (isCar) TuneSizes.IconMd else TuneSizes.IconSm), TuneColors.IconIdle)
             Text(
-                label, color = TuneColors.Text, fontSize = if (isCar) 17.sp else 13.sp,
-                fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                style = TuneTextStyle, modifier = Modifier.weight(1f, fill = false)
+                label, color = if (trailing == null) TuneColors.Muted else TuneColors.Text,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                style = TuneTypography.control(isCar), modifier = Modifier.weight(1f, fill = false)
             )
             if (trailing != null) TuneIcon(trailing, Modifier.size(if (isCar) 18.dp else TuneSizes.IconXs), TuneColors.Muted)
         }
@@ -589,9 +567,9 @@ internal fun DirectoryActionChip(
 
 @Composable
 internal fun LayoutSwitcher(mode: RadioDisplayMode, onChange: (RadioDisplayMode) -> Unit, isCar: Boolean) {
-    // 触控格保持 48/52dp；选中块 40/44dp，四周留 4dp 内边距，两块之间自然形成分隔。
     val cell = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch
     val tile = if (isCar) 44.dp else 40.dp
+    val duration = if (rememberMotionEnabled()) TuneMotion.ColorChange else 0
     // 两个图标同尺寸：列表是横线+点，卡片是双层菱形，22dp 下视觉面积才对齐。
     val icon = TuneSizes.IconMd
     Row(
@@ -608,11 +586,11 @@ internal fun LayoutSwitcher(mode: RadioDisplayMode, onChange: (RadioDisplayMode)
             )
             val itemBackground by animateColorAsState(
                 if (selected) TuneColors.Segment else Color.Transparent,
-                animationSpec = tween(180), label = "layout_item_background"
+                animationSpec = tween(duration), label = "layout_item_background"
             )
             val iconColor by animateColorAsState(
                 if (selected) TuneColors.Primary else TuneColors.Muted,
-                animationSpec = tween(180), label = "layout_item_icon"
+                animationSpec = tween(duration), label = "layout_item_icon"
             )
             Box(
                 Modifier.size(cell)
@@ -729,9 +707,10 @@ internal fun ScopePicker(
                 }
                 onDispose { }
             }
-            Surface(
-                Modifier.widthIn(max = 660.dp).fillMaxWidth(.9f).height(height),
-                shape = TuneShapes.Dialog, color = TuneColors.Surface
+            Box(
+                Modifier.widthIn(max = 580.dp).fillMaxWidth(.9f).height(height)
+                    .clip(TuneShapes.Dialog).background(TuneBrushes.Dialog)
+                    .border(1.dp, TuneColors.Border, TuneShapes.Dialog)
             ) {
                 ScopeOptions(isCar, scope, countries, onRetry, onDismiss, onSelect)
             }
@@ -778,19 +757,20 @@ private fun ScopeOptions(
     ) {
         Row(Modifier.fillMaxWidth().heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                stringResource(R.string.scope_label), color = TuneColors.Text, fontSize = 20.sp,
-                fontWeight = FontWeight.SemiBold, style = TuneTextStyle,
+                stringResource(R.string.scope_label), color = TuneColors.Text,
+                style = TuneTypography.pageTitle(isCar),
                 modifier = Modifier.weight(1f).semantics { heading() }
             )
             IconButton(
                 onClick = onDismiss,
-                modifier = Modifier.testTag("scope_close").semantics { contentDescription = closeLabel }
+                modifier = Modifier.size(if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
+                    .testTag("scope_close").semantics { contentDescription = closeLabel }
             ) {
                 TuneIcon(R.drawable.ic_close, Modifier.size(22.dp), TuneColors.Muted)
             }
         }
         LazyVerticalGrid(
-            columns = if (isCar) GridCells.Adaptive(156.dp) else GridCells.Fixed(1),
+            columns = if (isCar) GridCells.Adaptive(152.dp) else GridCells.Fixed(1),
             modifier = Modifier.weight(1f).fillMaxWidth().focusGroup().testTag("scope_options"),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(if (isCar) 8.dp else 2.dp)
@@ -828,7 +808,11 @@ private fun ScopeOption(isCar: Boolean, tag: String, label: String, selected: Bo
         Modifier.fillMaxWidth().heightIn(min = 56.dp)
             .clip(shape)
             .background(if (selected) TuneColors.Primary.copy(alpha = .15f) else if (isCar) TuneColors.Raised else TuneColors.Surface)
-            .then(if (focused) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)
+            .border(
+                if (focused) 2.dp else 1.dp,
+                if (focused || selected) TuneColors.Primary else TuneColors.BorderSoft,
+                shape
+            )
             .onFocusChanged { focused = it.isFocused }
             .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect)
             .testTag("scope_$tag").semantics { contentDescription = label }
@@ -836,8 +820,8 @@ private fun ScopeOption(isCar: Boolean, tag: String, label: String, selected: Bo
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            label, color = if (selected) TuneColors.Primary else TuneColors.Text, fontSize = 16.sp,
-            style = TuneTextStyle, modifier = Modifier.weight(1f).clearAndSetSemantics { }
+            label, color = if (selected) TuneColors.PrimaryLight else TuneColors.Text,
+            style = TuneTypography.rowTitle(isCar), modifier = Modifier.weight(1f).clearAndSetSemantics { }
         )
         if (selected) TuneIcon(R.drawable.ic_check, Modifier.size(22.dp))
     }

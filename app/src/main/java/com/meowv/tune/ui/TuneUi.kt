@@ -28,7 +28,9 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.hideFromAccessibility
@@ -237,7 +239,18 @@ internal fun TuneApp(
                     .then(if (isCar) Modifier.windowInsetsPadding(WindowInsets.safeDrawing) else Modifier)
             ) {
                 if (isCar) {
-                    MeowvNavigationRail(page) {
+                    val density = LocalDensity.current
+                    val direction = LocalLayoutDirection.current
+                    val insets = WindowInsets.safeDrawing
+                    val horizontalInsets = with(density) {
+                        (insets.getLeft(density, direction) + insets.getRight(density, direction)).toDp()
+                    }
+                    val railWidth = ((windowWidth - horizontalInsets) * .16f).coerceIn(144.dp, 176.dp)
+                    MeowvNavigationRail(
+                        page,
+                        railWidth,
+                        if (musicSearchOpen) Modifier.imePadding() else Modifier
+                    ) {
                         if (musicSearchOpen) onCloseMusicSearch()
                         showUpdate = false
                         nowPlayingOpen = false
@@ -372,8 +385,8 @@ internal fun TuneApp(
                     .padding(
                         bottom = when {
                             nowPlayingOpen -> 24.dp
-                            isCar -> 80.dp
-                            else -> 124.dp
+                            isCar -> CarMiniPlayerHeight + 8.dp
+                            else -> PhoneMiniPlayerHeight + PhoneNavigationHeight + 11.dp
                         }
                     )
             )

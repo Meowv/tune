@@ -25,7 +25,6 @@ import com.meowv.tune.domain.ScopeMode
 import com.meowv.tune.domain.Station
 import com.meowv.tune.domain.StationPage
 import com.meowv.tune.domain.TuneSettings
-import com.meowv.tune.ui.isCarWindow
 import java.util.UUID
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -77,8 +76,7 @@ class NowPlayingCompatibilityTest {
         val backdrop = compose.onNodeWithTag("now_playing_backdrop")
             .assertIsDisplayed()
             .getUnclippedBoundsInRoot()
-        val config = compose.activity.resources.configuration
-        val car = isCarWindow(config.screenWidthDp.toFloat(), config.screenHeightDp.toFloat())
+        val car = compose.onAllNodesWithTag("side_navigation").fetchSemanticsNodes().isNotEmpty()
         val expected = if (car) compose.onNodeWithTag("shell_car").getUnclippedBoundsInRoot() else root
         assertTrue("播放背景应覆盖可用播放区域：$backdrop / $expected", (
             kotlin.math.abs((backdrop.top - expected.top).value) +
@@ -115,7 +113,25 @@ class NowPlayingCompatibilityTest {
         ) <= 1.5f)
         compose.onNodeWithTag("now_playing_artwork")
             .assertContentDescriptionEquals("电台台标：Test station 1")
-        compose.onNodeWithTag("now_playing_brand").assertIsDisplayed()
+        if (car) {
+            compose.onNodeWithTag("car_rail_brand").assertIsDisplayed()
+            compose.onNodeWithTag("car_rail_brand_logo", useUnmergedTree = true).assertIsDisplayed()
+            compose.onNodeWithTag("now_playing_brand").assertDoesNotExist()
+            val details = compose.onNodeWithTag("now_playing_info_column").getUnclippedBoundsInRoot()
+            val collapse = compose.onNodeWithTag("now_playing_collapse").getUnclippedBoundsInRoot()
+            assertTrue("车机收起按钮应位于详情栏右上角：$collapse / $details",
+                collapse.left >= details.left &&
+                    kotlin.math.abs((collapse.right - details.right).value) <= 1f &&
+                    kotlin.math.abs((collapse.top - details.top).value) <= 1f)
+        } else {
+            compose.onNodeWithTag("now_playing_brand").assertIsDisplayed()
+            compose.onNodeWithTag("now_playing_brand_logo", useUnmergedTree = true).assertIsDisplayed()
+        }
+        val mainControl = compose.onNodeWithTag("now_playing_play").getUnclippedBoundsInRoot()
+        val controlWidth = mainControl.right - mainControl.left
+        val controlHeight = mainControl.bottom - mainControl.top
+        assertTrue("圆形主控应保持等宽高：$mainControl",
+            kotlin.math.abs((controlWidth - controlHeight).value) <= 1f)
         compose.onNodeWithTag("now_playing_volume").assertDoesNotExist()
         val shuffleLabel = compose.onNodeWithTag(
             "now_playing_shuffle_label",
@@ -153,10 +169,11 @@ class NowPlayingCompatibilityTest {
                 .getUnclippedBoundsInRoot()
             val titleRatio = (title.top - root.top).value / height
             val controlsRatio = (controls.top - root.top).value / height
-            val toolsRatio = (tools.top - root.top).value / height
+            val safeContent = compose.onNodeWithTag("now_playing_safe_content").getUnclippedBoundsInRoot()
+            val toolsBottomGap = safeContent.bottom - tools.bottom
             assertTrue("标题位置应位于 48%–55%：$titleRatio", titleRatio in .48f..0.55f)
             assertTrue("主控位置应位于 58%–68%：$controlsRatio", controlsRatio in .58f..0.68f)
-            assertTrue("工具条位置应位于 78%–87%：$toolsRatio", toolsRatio in .78f..0.87f)
+            assertTrue("工具条应靠近内容安全区底部：$toolsBottomGap", toolsBottomGap in 0.dp..16.dp)
         }
 
         runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }

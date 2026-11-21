@@ -19,6 +19,8 @@ internal data class MusicSearchState(
     val sourceWarnings: Map<String, MusicSearchWarning> = emptyMap(),
     val failure: MusicFailure? = null,
     val appendFailure: MusicFailure? = null,
+    val restartRequired: Boolean = false,
+    val resultVersion: Int = 0,
     val selectionFailure: MusicFailure? = null,
     val selecting: Boolean = false,
     val selectedId: String? = null,
@@ -27,7 +29,7 @@ internal data class MusicSearchState(
     val loading: Boolean get() = request != null
 }
 
-internal enum class MusicSearchRequest { INITIAL, APPEND }
+internal enum class MusicSearchRequest { INITIAL, APPEND, RESTART }
 
 internal enum class MusicSearchWarning { DEFERRED, TIMEOUT, RATE_LIMITED, UNAVAILABLE }
 
@@ -67,7 +69,9 @@ internal class MusicSearchViewModel(
         mutable.value = MusicSearchState(visible = true, query = value, history = mutable.value.history)
     }
 
-    fun search() = load(more = false)
+    fun search() = load(
+        if (mutable.value.restartRequired) MusicSearchRequest.RESTART else MusicSearchRequest.INITIAL
+    )
 
     fun selectHistory(query: String) {
         queryChanged(query)
@@ -80,36 +84,39 @@ internal class MusicSearchViewModel(
             mutable.value = mutable.value.copy(history = emptyList())
         }
     }
-    fun more() = load(more = true)
+    fun more() = load(MusicSearchRequest.APPEND)
 
-    private fun load(more: Boolean) {
+    private fun load(request: MusicSearchRequest) {
         val old = mutable.value
         if (old.loading || old.selecting || !old.visible) return
-        val cursor = if (more) old.nextCursor ?: return else null
-        if (more && old.items.size >= 200) return
+        val append = request == MusicSearchRequest.APPEND
+        val cursor = if (append) old.nextCursor ?: return else null
+        if (append && old.items.size >= 200) return
         val source = repository ?: run {
-            mutable.value = old.withLoadFailure(more, MusicFailure.NOT_CONFIGURED)
+            mutable.value = old.withLoadFailure(request, MusicFailure.NOT_CONFIGURED)
             return
         }
         val query = old.query.trim()
         if (query.length !in 1..100 || query.any(Char::isISOControl)) {
-            mutable.value = old.withLoadFailure(more, MusicFailure.INVALID_REQUEST)
+            mutable.value = old.withLoadFailure(request, MusicFailure.INVALID_REQUEST)
             return
         }
         val id = ++generation
+        val keepResults = request != MusicSearchRequest.INITIAL
         mutable.value = old.copy(
-            request = if (more) MusicSearchRequest.APPEND else MusicSearchRequest.INITIAL,
+            request = request,
             failure = null, appendFailure = null, selectionFailure = null, selectedId = null, searched = true,
-            partial = more && old.partial, sourceWarnings = if (more) old.sourceWarnings else emptyMap(),
-            items = if (more) old.items else emptyList(), nextCursor = cursor
+            partial = keepResults && old.partial,
+            sourceWarnings = if (keepResults) old.sourceWarnings else emptyMap(),
+            items = if (keepResults) old.items else emptyList(), nextCursor = cursor
         )
         pending = viewModelScope.launch {
             try {
                 val page = source.search(query, 20, cursor)
                 ensureActive()
                 if (id != generation) return@launch
-                val items = mergeResults(if (more) old.items else emptyList(), page.items)
-                val warnings = if (more) old.sourceWarnings.filterValues { it != MusicSearchWarning.DEFERRED }.toMutableMap()
+                val items = mergeResults(if (append) old.items else emptyList(), page.items)
+                val warnings = if (append) old.sourceWarnings.filterValues { it != MusicSearchWarning.DEFERRED }.toMutableMap()
                     else mutableMapOf()
                 for (warning in page.warnings) {
                     val provider = warning.substringBefore(':')
@@ -123,24 +130,35 @@ internal class MusicSearchViewModel(
                     }
                 }
                 mutable.value = mutable.value.copy(items = items, request = null,
+                    restartRequired = false,
+                    resultVersion = if (request == MusicSearchRequest.RESTART) old.resultVersion + 1 else old.resultVersion,
                     nextCursor = page.nextCursor?.takeUnless { it == cursor || items.size >= 200 },
                     sourceWarnings = warnings, partial = page.partial || warnings.isNotEmpty() ||
-                        more && old.partial && old.sourceWarnings.isEmpty())
-                if (!more && historyStore != null) {
+                        append && old.partial && old.sourceWarnings.isEmpty())
+                if (!append && historyStore != null) {
                     historyStore.add(query)
                     mutable.value = mutable.value.copy(history = historyStore.read())
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: MusicException) {
                 ensureActive()
-                if (id == generation) mutable.value = mutable.value.withLoadFailure(more, failure.failure)
+                if (id == generation) mutable.value = mutable.value.withLoadFailure(request, failure.failure)
             }
         }
     }
 
-    private fun MusicSearchState.withLoadFailure(more: Boolean, reason: MusicFailure): MusicSearchState =
-        if (more) copy(request = null, appendFailure = reason)
-        else copy(request = null, failure = reason)
+    private fun MusicSearchState.withLoadFailure(
+        request: MusicSearchRequest,
+        reason: MusicFailure
+    ): MusicSearchState = when (request) {
+        MusicSearchRequest.INITIAL -> copy(request = null, failure = reason)
+        MusicSearchRequest.APPEND -> if (reason == MusicFailure.INVALID_REQUEST) {
+            copy(request = null, nextCursor = null, restartRequired = true)
+        } else {
+            copy(request = null, appendFailure = reason)
+        }
+        MusicSearchRequest.RESTART -> copy(request = null, appendFailure = reason)
+    }
 
     private fun mergeResults(previous: List<MusicTrack>, incoming: List<MusicTrack>): List<MusicTrack> {
         val merged = previous.toMutableList()

@@ -1,9 +1,5 @@
 package com.meowv.tune.ui
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -30,15 +26,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -67,6 +57,7 @@ import com.meowv.tune.ui.theme.TuneShapes
 import com.meowv.tune.ui.theme.TuneSizes
 import com.meowv.tune.ui.theme.TuneSpacing
 import com.meowv.tune.ui.theme.TuneTextStyle
+import com.meowv.tune.ui.theme.TuneTypography
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 
@@ -107,7 +98,7 @@ internal fun MusicScreen(
                 DirectoryToolbar(isCar) {
                     val search = stringResource(R.string.music_search)
                     DirectoryActionChip(search, search, R.drawable.ic_ui_search, isCar,
-                        Modifier.weight(1f, fill = false).padding(end = TuneSpacing.Medium)
+                        Modifier.weight(1f).padding(end = TuneSpacing.Medium)
                             .testTag("music_search_open"), onClick = onSearch)
                     LayoutSwitcher(mode, { mode = it }, isCar)
                 }
@@ -160,8 +151,8 @@ internal fun MusicScreen(
                         modifier = Modifier.fillMaxSize().testTag("music_feed"),
                         state = list,
                         contentPadding = PaddingValues(start = horizontal, end = horizontal, bottom = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Medium),
-                        verticalArrangement = Arrangement.spacedBy(TuneSpacing.Small)
+                        horizontalArrangement = Arrangement.spacedBy(if (isCar) TuneSpacing.Section else TuneSpacing.Medium),
+                        verticalArrangement = Arrangement.spacedBy(TuneSpacing.Hairline)
                     ) {
                         items(browse.tracks.size, key = { browse.tracks[it].id }) { index ->
                             val track = browse.tracks[index]
@@ -174,7 +165,7 @@ internal fun MusicScreen(
                                     modifier = Modifier.testTag("music_feed_track_${track.id}")) {
                                     clickTrack(track)
                                 }
-                                if (index < browse.tracks.lastIndex) MusicTrackDivider()
+                                if (!current && index < browse.tracks.lastIndex) MusicTrackDivider(isCar)
                             }
                         }
                         if (browse.loading) item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }, key = "music_feed_loading") {
@@ -243,13 +234,11 @@ private fun MusicCards(
 
     BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         val statusHeight = if (isCar) 28.dp else 22.dp
-        val statusGap = if (isCar) TuneSpacing.Large else TuneSpacing.Medium
+        val statusGap = TuneSpacing.Small
         val viewport = if (isCar) maxWidth else minOf(maxWidth, 400.dp)
-        val peek = if (tracks.size > 1) 16.dp else 0.dp
-        val width = if (isCar) minOf(366.dp, (viewport - 48.dp).coerceAtLeast(1.dp))
-            else (viewport - (peek + TuneSpacing.Medium) * 2).coerceAtLeast(1.dp)
-        val height = minOf(if (isCar) 366.dp else 340.dp, width * 1.18f,
-            (maxHeight - statusHeight - statusGap - TuneSpacing.Section).coerceAtLeast(1.dp))
+        val width = minOf(if (isCar) 290.dp else 263.dp, (viewport - 48.dp).coerceAtLeast(1.dp))
+        val height = minOf(if (isCar) 313.dp else 356.dp, width * (if (isCar) 1.08f else 1.36f),
+            (maxHeight - statusHeight - statusGap - TuneSpacing.Wide).coerceAtLeast(1.dp))
         HorizontalPager(
             state = pager,
             pageSize = PageSize.Fixed(width),
@@ -269,27 +258,26 @@ private fun MusicCards(
                         page.offset + layout.pageSize <= layout.viewportEndOffset
                 }
             }
-            val showContent = fullyVisible || pager.isScrollInProgress
+            val active = fullyVisible && index == pager.settledPage
+            val showContent = active || pager.isScrollInProgress
             Box(Modifier.fillMaxHeight().width(width), contentAlignment = BiasAlignment(0f, -.12f)) {
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(Modifier.fillMaxWidth().height(height)) {
                         val cardTag = if (showContent) Modifier.testTag("music_feed_card_${track.id}") else Modifier
                         MusicCard(track, isCar, current, cardVisual, connected && !cardVisual.busy,
-                            interactive = fullyVisible && !pager.isScrollInProgress,
+                            interactive = active && !pager.isScrollInProgress,
                             modifier = Modifier.matchParentSize().then(cardTag)
-                                .graphicsLayer {
-                                    alpha = if (showContent) 1f else .4f
-                                    scaleX = if (showContent) 1f else .92f
-                                    scaleY = scaleX
+                                .mediaCardDepth(isCar) {
+                                    (pager.currentPage - index) + pager.currentPageOffsetFraction
                                 }
                                 .semantics {
-                                    if (fullyVisible && index == pager.settledPage) selected = true
+                                    if (active) selected = true
                                 }
                         ) { onPlay(track) }
                     }
                     Spacer(Modifier.height(statusGap))
                     when {
-                        !fullyVisible -> Spacer(Modifier.height(statusHeight))
+                        !active -> Spacer(Modifier.height(statusHeight))
                         current && playbackError != null -> Text(
                             playbackError, color = TuneColors.Error, textAlign = TextAlign.Center,
                             fontSize = if (isCar) 14.sp else 13.sp, style = TuneTextStyle,
@@ -301,6 +289,7 @@ private fun MusicCards(
                             modifier = Modifier.fillMaxWidth().height(statusHeight)
                         )
                     }
+                    MediaPagerPosition(index, tracks.size, visibleOnPage = active)
                 }
             }
         }
@@ -326,13 +315,11 @@ private fun MusicCard(
             .clickable(enabled = enabled, onClickLabel = action, role = Role.Button, onClick = onClick)
             .semantics { if (status != null) stateDescription = status }
     } else Modifier.clearAndSetSemantics { hideFromAccessibility() }
-    Surface(shape = TuneShapes.Card, color = TuneColors.Raised,
-        border = if (interactive && focused) BorderStroke(2.dp, TuneColors.Primary) else null,
-        modifier = modifier.clip(TuneShapes.Card).then(interaction)) {
+    Box(modifier.mediaCardSurface(interactive && focused).then(interaction)) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val compact = maxHeight < 280.dp
             val pad = if (compact) TuneSpacing.Large else TuneSpacing.Section
-            val cover = minOf(if (isCar) 194.dp else 148.dp, maxWidth - pad * 2, maxHeight - pad * 2 - 76.dp)
+            val cover = minOf(if (isCar) 180.dp else 178.dp, maxWidth - pad * 2, maxHeight - pad * 2 - 76.dp)
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(pad),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                 if (cover >= 32.dp) {
@@ -340,12 +327,12 @@ private fun MusicCard(
                     Spacer(Modifier.height(TuneSpacing.Medium))
                 }
                 Text(track.title, color = if (current) TuneColors.PrimaryLight else TuneColors.Text,
-                    style = TuneTextStyle, fontSize = if (isCar) 26.sp else 22.sp,
-                    lineHeight = if (isCar) 32.sp else 27.sp, fontWeight = FontWeight.SemiBold,
+                    style = TuneTypography.pageTitle(isCar), fontSize = if (isCar) 20.sp else 18.sp,
+                    lineHeight = if (isCar) 25.sp else 23.sp,
                     textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(TuneSpacing.Hairline))
                 Text(track.artists.joinToString(" / "), color = TuneColors.Muted,
-                    style = TuneTextStyle, fontSize = if (isCar) 16.sp else 14.sp,
+                    style = TuneTypography.secondary(isCar),
                     textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
@@ -377,39 +364,28 @@ internal fun MusicTrackRow(
     onClick: () -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
-    val animate = rememberMotionEnabled()
-    val fill by animateColorAsState(if (current) TuneColors.Primary.copy(alpha = .10f) else Color.Transparent,
-        tween(if (animate) 220 else 0), label = "music_row_selection")
     val shape = TuneShapes.Station
     val status = playbackVisualLabel(visual)
     val action = stringResource(musicActionLabel(visual))
     Row(
-        modifier.fillMaxWidth().heightIn(min = if (isCar) 72.dp else 78.dp)
-            .clip(shape).background(fill)
-            .drawBehind {
-                if (current) {
-                    val width = 3.dp.toPx()
-                    val height = (if (isCar) 30.dp else 26.dp).toPx()
-                    drawRoundRect(TuneColors.Primary, Offset(0f, (size.height - height) / 2),
-                        Size(width, height), CornerRadius(width / 2))
-                }
-            }
+        modifier.fillMaxWidth().heightIn(min = if (isCar) 72.dp else 66.dp)
+            .clip(shape).mediaRowHighlight(current, isCar)
             .then(if (focused) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .clickable(enabled = enabled && track.canStartPlayback, onClickLabel = action, role = Role.Button, onClick = onClick)
             .semantics { if (status != null) stateDescription = status }
-            .padding(start = if (isCar) 12.dp else 10.dp, end = if (isCar) 8.dp else 4.dp, top = 8.dp, bottom = 8.dp),
+            .padding(start = mediaRowStartPadding(isCar), end = if (isCar) 8.dp else 4.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(if (isCar) 16.dp else 12.dp)
+        horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Medium)
     ) {
-        MusicCover(track, Modifier.size(if (isCar) 48.dp else 54.dp))
+        MusicCover(track, Modifier.size(mediaRowArtworkSize(isCar)))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(track.title, color = TuneColors.Text, style = TuneTextStyle,
-                fontSize = if (isCar) 20.sp else 17.sp, fontWeight = if (current) FontWeight.SemiBold else FontWeight.Medium,
-                maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(track.artists.joinToString(" / "), style = TuneTextStyle, color = TuneColors.Muted,
-                fontSize = if (isCar) 15.sp else 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (error != null) Text(error, color = TuneColors.Error, fontSize = if (isCar) 14.sp else 12.sp, style = TuneTextStyle)
+            Text(track.title, color = TuneColors.Text, style = TuneTypography.rowTitle(isCar),
+                fontWeight = if (current) FontWeight.SemiBold else FontWeight.Medium,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(track.artists.joinToString(" / "), style = TuneTypography.secondary(isCar), color = TuneColors.Muted,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (error != null) Text(error, color = TuneColors.Error, style = TuneTypography.secondary(isCar))
         }
         Box(
             Modifier.size(if (isCar) TuneSizes.TouchCar else TuneSizes.Touch).testTag("music_track_action_${track.id}"),
@@ -432,7 +408,4 @@ internal fun MusicTrackRow(
 }
 
 @Composable
-internal fun MusicTrackDivider() {
-    HorizontalDivider(Modifier.padding(start = 76.dp),
-        thickness = .5.dp, color = TuneColors.Divider.copy(alpha = .55f))
-}
+internal fun MusicTrackDivider(isCar: Boolean) = MediaRowDivider(isCar)

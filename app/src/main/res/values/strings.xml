@@ -7,6 +7,8 @@
   <string name="brand_full">喵听听 · Meowv Tune</string>
   <string name="action_play">播放</string>
   <string name="player_idle">未播放</string>
+  <string name="player_music_unselected">未选择歌曲</string>
+  <string name="action_select_music">选择歌曲</string>
   <string name="setting_music_device">音乐设备</string>
   <string name="music_device_checking">正在登记或检查设备</string>
   <string name="music_device_offline">等待网络连接</string>
@@ -32,6 +34,9 @@
   <string name="music_search_more">加载更多</string>
   <string name="music_search_more_failed">加载更多失败</string>
   <string name="music_search_empty">没有找到相关歌曲</string>
+  <string name="music_search_restart">重新搜索</string>
+  <string name="music_search_continuation_failed">无法继续加载</string>
+  <string name="music_search_no_playable_results">暂无可播放结果</string>
   <string name="music_search_invalid">请输入 1–100 个字符的歌名或歌手</string>
   <string name="music_search_failed">搜索失败</string>
   <string name="music_search_history">最近搜索</string>

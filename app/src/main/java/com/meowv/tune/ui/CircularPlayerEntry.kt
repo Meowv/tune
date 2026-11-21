@@ -2,14 +2,18 @@ package com.meowv.tune.ui
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -23,10 +27,12 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.*
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -38,11 +44,18 @@ import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlaybackSource
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.Station
+import com.meowv.tune.ui.theme.TuneBrushes
 import com.meowv.tune.ui.theme.TuneColors
+import com.meowv.tune.ui.theme.TuneMotion
 import com.meowv.tune.ui.theme.TuneShapes
+import com.meowv.tune.ui.theme.TuneSizes
+import com.meowv.tune.ui.theme.TuneTypography
 import java.util.Locale
 
 internal enum class CircularPlayerVisual { Default, Loading, Playing, Paused, Error, Disconnected }
+
+internal val PhoneMiniPlayerHeight = 56.dp
+internal val CarMiniPlayerHeight = 77.dp
 
 internal fun circularPlayerVisual(state: PlayerUiState, connected: Boolean): CircularPlayerVisual = when {
     state.station == null && state.music == null && state.source != PlaybackSource.MUSIC || state.phase == PlaybackPhase.IDLE -> CircularPlayerVisual.Default
@@ -91,16 +104,19 @@ internal fun CompactMediaBar(
 ) {
     val music = state.source == PlaybackSource.MUSIC
     val title = if (music) state.music?.title else station?.name
-    val playing = state.phase == PlaybackPhase.PLAYING
     val visual = circularPlayerVisual(state, connected)
     val subtitle = when {
         !isCar -> null
         music -> state.music?.artists?.joinToString(" / ")
         else -> station?.countryCode?.displayName(Locale.SIMPLIFIED_CHINESE)
     }
+    val shape = if (isCar) RoundedCornerShape(0.dp) else TuneShapes.Navigation
     Row(
-        Modifier.fillMaxWidth().background(TuneColors.Surface, TuneShapes.Navigation)
-            .padding(horizontal = 6.dp).testTag("mini_player_bar"),
+        Modifier.fillMaxWidth().heightIn(min = if (isCar) CarMiniPlayerHeight else PhoneMiniPlayerHeight)
+            .clip(shape).background(if (isCar) TuneBrushes.CarPlayer else TuneBrushes.PhonePlayer)
+            .border(1.dp, TuneColors.PrimaryLight.copy(alpha = .14f), shape)
+            .padding(horizontal = if (isCar) 18.dp else 7.dp, vertical = 4.dp)
+            .testTag("mini_player_bar"),
         verticalAlignment = Alignment.CenterVertically
     ) {
         CircularPlayerEntry(
@@ -110,17 +126,75 @@ internal fun CompactMediaBar(
             subtitle = subtitle,
             artworkUrl = if (music) state.music?.coverUrl else station?.iconUrl
         )
-        NowPlayingIconButton(
-            icon = if (playing) R.drawable.ic_music_pause else R.drawable.ic_radio_play,
-            description = stringResource(if (playing) R.string.now_playing_pause_accessibility else R.string.now_playing_resume_accessibility),
+        MiniPlayerToggle(
+            icon = when (visual) {
+                CircularPlayerVisual.Playing -> R.drawable.ic_music_pause
+                CircularPlayerVisual.Error -> R.drawable.ic_refresh
+                else -> R.drawable.ic_radio_play
+            },
+            description = stringResource(when (visual) {
+                CircularPlayerVisual.Playing -> R.string.now_playing_pause_accessibility
+                CircularPlayerVisual.Error -> R.string.directory_retry
+                CircularPlayerVisual.Loading -> R.string.playback_buffering
+                else -> R.string.now_playing_resume_accessibility
+            }),
             isCar = isCar,
-            tag = "mini_player_toggle",
             animationMillis = animationMillis,
-            iconSize = 24.dp,
             enabled = enabled && connected && visual != CircularPlayerVisual.Loading &&
                 (if (music) state.music != null else station != null),
             onClick = onToggle
         )
+    }
+}
+
+@Composable
+private fun MiniPlayerToggle(
+    icon: Int,
+    description: String,
+    isCar: Boolean,
+    animationMillis: Int,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        if (pressed) .94f else 1f,
+        tween(if (animationMillis > 0) TuneMotion.Press else 0),
+        label = "mini_player_press"
+    )
+    val shape = RoundedCornerShape(if (isCar) 16.dp else 13.dp)
+    Box(
+        Modifier.size(if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(
+                interactionSource = interaction, indication = null,
+                role = Role.Button, enabled = enabled, onClick = onClick
+            )
+            .testTag("mini_player_toggle")
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            Modifier.size(if (isCar) 56.dp else 44.dp)
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                }
+                .background(TuneColors.Primary.copy(alpha = if (enabled) .19f else .07f), shape)
+                .border(
+                    if (focused) 2.dp else 1.dp,
+                    if (focused) TuneColors.Primary else TuneColors.PrimaryLight.copy(alpha = .15f),
+                    shape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            TuneIcon(
+                icon, Modifier.size(if (isCar) TuneSizes.IconLg else TuneSizes.IconMd),
+                TuneColors.PrimaryLight.copy(alpha = if (enabled) 1f else TuneColors.DisabledAlpha)
+            )
+        }
     }
 }
 
@@ -172,14 +246,15 @@ private fun CircularPlayerEntry(
         stringResource(R.string.now_playing_current_state, currentTitle, label)
     } else label
     var focused by remember { mutableStateOf(false) }
-    val diameter = if (isCar) 52.dp else 44.dp
+    val coverSize = if (isCar) 48.dp else 42.dp
+    val coverShape = RoundedCornerShape(if (isCar) 13.dp else 11.dp)
     val accent = when (visual) {
         CircularPlayerVisual.Error -> TuneColors.Error
         CircularPlayerVisual.Default, CircularPlayerVisual.Disconnected -> TuneColors.Muted
         else -> TuneColors.Primary
     }
     Row(
-        modifier.heightIn(min = if (isCar) 64.dp else 48.dp)
+        modifier.heightIn(min = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
             .onFocusChanged { focused = it.isFocused }
             .clip(TuneShapes.Navigation)
             .then(if (focused) Modifier.border(2.dp, TuneColors.Primary, TuneShapes.Navigation) else Modifier)
@@ -188,24 +263,27 @@ private fun CircularPlayerEntry(
             .semantics {
                 contentDescription = openLabel
                 stateDescription = entryState
-            }.padding(horizontal = 6.dp),
+            }.padding(start = 2.dp, end = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Box(
-            Modifier.size(diameter).clip(CircleShape).background(TuneColors.Raised)
-                .border(1.dp, accent.copy(alpha = .5f), CircleShape),
+            Modifier.size(coverSize).clip(coverShape).background(TuneColors.Raised)
+                .border(1.dp, accent.copy(alpha = .24f), coverShape),
             contentAlignment = Alignment.Center
         ) {
             Box(
-                Modifier.fillMaxSize().padding(4.dp).clip(CircleShape)
-                    .graphicsLayer { rotationZ = if (rotation.stationKey == stationKey) rotation.angle else 0f },
+                Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
                 val url = artworkUrl
                 var artworkFailed by remember(stationKey, url) { mutableStateOf(false) }
                 if (url.isNullOrBlank() || artworkFailed) {
-                    BrandLogo(Modifier.fillMaxSize().padding(2.dp).testTag("circular_player_logo"))
+                    BrandLogo(
+                        Modifier.fillMaxSize().padding(7.dp)
+                            .graphicsLayer { rotationZ = if (rotation.stationKey == stationKey) rotation.angle else 0f }
+                            .testTag("circular_player_logo")
+                    )
                 } else {
                     key(stationKey, url) {
                         val fallback = painterResource(R.drawable.ic_meowvtune_logo)
@@ -214,7 +292,7 @@ private fun CircularPlayerEntry(
                             modifier = Modifier.fillMaxSize().testTag("circular_player_artwork"),
                             placeholder = fallback, error = fallback, fallback = fallback,
                             onError = { artworkFailed = true },
-                            contentScale = BadgeContentScale
+                            contentScale = if (state.source == PlaybackSource.MUSIC) ContentScale.Crop else BadgeContentScale
                         )
                     }
                 }
@@ -248,9 +326,15 @@ private fun CircularPlayerEntry(
             }
         }
         Column(Modifier.weight(1f)) {
-            Text(title, color = TuneColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                title, color = TuneColors.Text, style = TuneTypography.control(isCar),
+                fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
             if (!subtitle.isNullOrBlank()) {
-                Text(subtitle, color = TuneColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    subtitle, color = TuneColors.Muted, style = TuneTypography.meta(true),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }

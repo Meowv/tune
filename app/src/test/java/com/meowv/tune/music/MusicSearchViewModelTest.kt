@@ -130,6 +130,78 @@ class MusicSearchViewModelTest {
         } finally { append.complete(Unit); scope.cancel() }
     }
 
+    @Test fun invalidContinuationRestartsFromTheFirstPageOnlyAfterUserAction() = runBlocking {
+        val requests = mutableListOf<Pair<String, String?>>()
+        val restart = CompletableDeferred<Unit>()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val replacement = track.copy(id = "fresh")
+        try {
+            val model = MusicSearchViewModel(Repository { query, cursor ->
+                requests.add(query to cursor)
+                when (requests.size) {
+                    1 -> MusicPage(listOf(track), "expired", partial = true)
+                    2 -> throw MusicException(MusicFailure.INVALID_REQUEST)
+                    3 -> throw MusicException(MusicFailure.SOURCE_TIMEOUT)
+                    else -> {
+                        restart.await()
+                        MusicPage(listOf(replacement), "fresh-cursor")
+                    }
+                }
+            }, {}, scope)
+            model.open(); model.queryChanged(" qix "); model.search(); model.more(); model.more()
+            assertEquals(listOf("qix" to null, "qix" to "expired"), requests)
+            assertEquals(listOf(track), model.state.value.items)
+            assertNull(model.state.value.nextCursor)
+            assertTrue(model.state.value.restartRequired)
+            assertNull(model.state.value.appendFailure)
+
+            model.search()
+            assertEquals(MusicFailure.SOURCE_TIMEOUT, model.state.value.appendFailure)
+            assertTrue(model.state.value.restartRequired)
+            assertEquals(listOf(track), model.state.value.items)
+            assertEquals(0, model.state.value.resultVersion)
+
+            model.search(); model.search(); model.more()
+            assertEquals(MusicSearchRequest.RESTART, model.state.value.request)
+            assertEquals(listOf(track), model.state.value.items)
+            assertEquals(listOf("qix" to null, "qix" to "expired", "qix" to null, "qix" to null), requests)
+            restart.complete(Unit)
+            assertEquals(listOf(replacement), model.state.value.items)
+            assertEquals("fresh-cursor", model.state.value.nextCursor)
+            assertEquals(1, model.state.value.resultVersion)
+            assertNull(model.state.value.appendFailure)
+            assertFalse(model.state.value.restartRequired)
+            assertFalse(model.state.value.partial)
+        } finally { restart.complete(Unit); scope.cancel() }
+    }
+
+    @Test fun editingQueryDiscardsAnInFlightContinuationRestart() = runBlocking {
+        val restart = CompletableDeferred<Unit>()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        var firstPageRequests = 0
+        try {
+            val model = MusicSearchViewModel(Repository { query, cursor ->
+                when {
+                    query == "new" -> MusicPage(listOf(track.copy(id = "new")))
+                    cursor != null -> throw MusicException(MusicFailure.INVALID_REQUEST)
+                    firstPageRequests++ == 0 -> MusicPage(listOf(track), "expired")
+                    else -> withContext(NonCancellable) {
+                        restart.await()
+                        MusicPage(listOf(track.copy(id = "stale")))
+                    }
+                }
+            }, {}, scope)
+            model.open(); model.queryChanged("old"); model.search(); model.more(); model.search()
+            assertEquals(MusicSearchRequest.RESTART, model.state.value.request)
+            model.queryChanged("new")
+            model.search()
+            restart.complete(Unit)
+            assertEquals("new", model.state.value.items.single().id)
+            assertFalse(model.state.value.restartRequired)
+            assertFalse(model.state.value.loading)
+        } finally { restart.complete(Unit); scope.cancel() }
+    }
+
     @Test fun invalidQueryDoesNotRequestAndRepeatedSubmitDoesNotOverlap() = runBlocking {
         val gate = CompletableDeferred<Unit>()
         var requests = 0

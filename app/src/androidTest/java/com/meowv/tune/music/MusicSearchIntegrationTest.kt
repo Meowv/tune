@@ -159,6 +159,8 @@ class MusicSearchIntegrationTest {
                 compose.onNodeWithTag("music_search_query").performImeAction()
                 compose.waitUntil(4000) { compose.onAllNodesWithTag("music_search_empty").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("music_search_result_metadata").assertDoesNotExist()
+                compose.onNodeWithText(app.getString(com.meowv.tune.R.string.music_search_no_playable_results))
+                    .assertIsDisplayed()
                 assertEquals(PlaybackPhase.IDLE, connection.state.value.phase)
             } finally { app.testMusicRepository = null }
         }
@@ -188,7 +190,6 @@ class MusicSearchIntegrationTest {
                 compose.waitUntil(4000) { compose.onAllNodesWithTag("music_search_more").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("music_search_result_metadata").assertDoesNotExist()
                 compose.onNodeWithText("QQ 音乐 响应超时").assertDoesNotExist()
-                compose.onNodeWithText("部分来源未能提供结果，已显示可用内容").assertDoesNotExist()
                 compose.onNodeWithTag("music_search_more").performScrollTo().performClick()
                 compose.waitUntil(4000) { compose.onAllNodesWithTag("music_search_result_original-001").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("music_search_result_metadata").assertDoesNotExist()
@@ -263,6 +264,58 @@ class MusicSearchIntegrationTest {
                 assertEquals(2, first.get())
                 assertEquals(2, append.get())
             } finally {
+                app.testMusicRepository = null
+            }
+        }
+    }
+
+    @Test fun invalidContinuationOffersFirstPageRestartAndPreservesRowsUntilSuccess() = runBlocking<Unit> {
+        val first = AtomicInteger()
+        val append = AtomicInteger()
+        val restart = CompletableDeferred<Unit>()
+        val initialPage = (1..20).map { MusicTrack("initial-$it", "Existing result $it", listOf("qix")) }
+        val refreshedPage = (1..20).map { MusicTrack("fresh-$it", "New result $it", listOf("qix")) }
+        val fake = FakeMusicRepository(tracks)
+        app.testMusicRepository = object : MusicRepository by fake {
+            override suspend fun search(query: String, limit: Int, cursor: String?): MusicPage {
+                assertEquals("qix", query)
+                if (cursor != null) {
+                    append.incrementAndGet()
+                    assertEquals("expired", cursor)
+                    throw MusicException(MusicFailure.INVALID_REQUEST)
+                }
+                return if (first.incrementAndGet() == 1) MusicPage(initialPage, "expired") else {
+                    restart.await()
+                    MusicPage(refreshedPage)
+                }
+            }
+        }
+        app.userSettings.update { it.copy(autoPlay = false) }
+        ActivityScenario.launch(MainActivity::class.java).use {
+            try {
+                compose.onNodeWithTag("nav_music").performClick()
+                compose.onNodeWithTag("music_search_open").performClick()
+                compose.onNodeWithTag("music_search_query").performTextInput("qix")
+                compose.onNodeWithTag("music_search_query").performImeAction()
+                compose.onNodeWithTag("music_search_results")
+                    .performScrollToNode(hasTestTag("music_search_more"))
+                compose.onNodeWithTag("music_search_more").performClick()
+                compose.onNodeWithTag("music_search_more").assertDoesNotExist()
+                compose.onNodeWithTag("music_search_restart").performClick()
+                compose.onNodeWithTag("music_search_loading").assertIsDisplayed()
+                compose.onNodeWithTag("music_search_result_initial-20").assertIsDisplayed()
+                restart.complete(Unit)
+                compose.waitUntil(4000) {
+                    compose.onAllNodesWithTag("music_search_result_fresh-1").fetchSemanticsNodes().isNotEmpty()
+                }
+                compose.onNodeWithTag("music_search_result_fresh-1").assertIsDisplayed()
+                compose.onNodeWithTag("music_search_result_initial-20").assertDoesNotExist()
+                compose.onNodeWithTag("music_search_restart").assertDoesNotExist()
+                compose.onNodeWithTag("music_search_query").assertTextContains("qix")
+                assertEquals(2, first.get())
+                assertEquals(1, append.get())
+            } finally {
+                restart.complete(Unit)
                 app.testMusicRepository = null
             }
         }

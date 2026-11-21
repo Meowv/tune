@@ -61,7 +61,7 @@ class UpdatePageTest {
         compose.onNodeWithTag("update_status_title").assertIsDisplayed()
         compose.onNodeWithText("发现新版本 1.1.0").assertIsDisplayed()
         val status = compose.onNodeWithTag("update_status_title").getUnclippedBoundsInRoot()
-        val version = compose.onNodeWithText("版本信息").getUnclippedBoundsInRoot()
+        val version = compose.onNodeWithTag("update_version_card").getUnclippedBoundsInRoot()
         if (isCar) {
             compose.onNodeWithTag("side_navigation").assertIsDisplayed()
             val updateBounds = compose.onNodeWithTag("page_update").getUnclippedBoundsInRoot()

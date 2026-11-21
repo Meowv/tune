@@ -33,14 +33,20 @@ class MusicPlaybackUiTest {
     @Test fun musicPageAndImmersiveControlsFollowTheActiveSource() = runBlocking<Unit> {
         val app = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as TuneTestApplication
         val originals = InstrumentationRegistry.getArguments().getString("musicOriginals") == "true"
-        val tracks = (1..3).map { MusicTrack("ui-$it", if (it == 1) "睡醒就好了" else if (it == 2) "今天也不错" else "第三首", listOf("qix"), durationMs = 12000) }
+        // 截图和多次界面操作可能耗时超过短音频的播放时长。
+        val fixtureDurationMs = if (originals) 12_000L else 96_000L
+        val tracks = listOf("睡醒就好了", "今天也不错", "第三首").mapIndexed { index, title ->
+            MusicTrack("ui-${index + 1}", title, listOf("qix"), durationMs = fixtureDurationMs)
+        }
         val audio = tracks.mapIndexed { index, track ->
             track.id to PlayableAudio(track.id, "test", track.id, 1.0,
-                if (originals) "https://original.test/original-00${index + 1}.mp3" else "https://test.example/radio.mp3",
-                "audio/mpeg", 12000, seekable = true)
+                if (originals) "https://original.test/original-00${index + 1}.mp3" else "https://test.example/session-handoff.mp3",
+                "audio/mpeg", fixtureDurationMs, seekable = true)
         }.toMap()
         val unavailable = MusicTrack("unavailable", "不存在的曲目", listOf("qix"), availability = "unavailable")
         val fake = FakeMusicRepository(listOf(unavailable) + tracks, audio)
+        app.testMusicRepository = null
+        app.musicResume.save(null)
         app.testMusicRepository = object : MusicRepository by fake {
             override suspend fun recommendations(limit: Int, cursor: String?) =
                 fake.recommendations(limit, cursor).copy(partial = true, warnings = listOf("qqmusic:source_unavailable"))
@@ -49,6 +55,18 @@ class MusicPlaybackUiTest {
         app.userSettings.update { it.copy(autoPlay = false, playbackOrder = PlaybackOrder.SEQUENTIAL) }
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             val connection = app.playerController
+            suspend fun expectPlayback(step: String, phase: PlaybackPhase, trackId: String) {
+                val timeoutMillis = if (phase == PlaybackPhase.PAUSED) 3_000L else 6_000L
+                try {
+                    withTimeout(timeoutMillis) {
+                        connection.state.first { it.phase == phase && it.music?.id == trackId }
+                    }
+                } catch (timeout: TimeoutCancellationException) {
+                    val state = connection.state.value
+                    throw AssertionError("$step: expected $phase/$trackId, got ${state.phase}/${state.music?.id} " +
+                        "(error=${state.error}, musicFailure=${state.musicFailure})", timeout)
+                }
+            }
             val musicPage = hasAnyAncestor(hasTestTag("page_music"))
             val listMode = compose.onNode(hasTestTag("layout_list") and musicPage)
             val cardMode = compose.onNode(hasTestTag("layout_card") and musicPage)
@@ -58,7 +76,7 @@ class MusicPlaybackUiTest {
                 compose.onNodeWithTag("nav_music").performClick()
                 compose.waitUntil(5000) { compose.onAllNodesWithTag("music_feed_track_ui-1").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("music_feed_track_ui-1").performClick()
-                withTimeout(6000) { connection.state.first { state -> state.phase == PlaybackPhase.PLAYING && state.music?.id == "ui-1" } }
+                expectPlayback("选择第一首歌曲", PlaybackPhase.PLAYING, "ui-1")
                 compose.onNodeWithTag("music_feed").assertIsDisplayed()
                 compose.waitUntil(5000) {
                     compose.onAllNodesWithTag("music_feed_track_ui-2").fetchSemanticsNodes().isNotEmpty()
@@ -80,15 +98,15 @@ class MusicPlaybackUiTest {
                     assertTrue(secondBounds.top >= firstBounds.bottom)
                 }
                 compose.onNodeWithTag("music_feed_track_ui-2").performClick()
-                withTimeout(6000) { connection.state.first { it.phase == PlaybackPhase.PLAYING && it.music?.id == "ui-2" } }
+                expectPlayback("选择第二首歌曲", PlaybackPhase.PLAYING, "ui-2")
                 val rowControl = compose.onNodeWithTag("music_track_action_ui-2", useUnmergedTree = true)
                 rowControl.performTouchInput { click() }
-                withTimeout(3000) { connection.state.first { it.phase == PlaybackPhase.PAUSED && it.music?.id == "ui-2" } }
+                expectPlayback("列表内暂停", PlaybackPhase.PAUSED, "ui-2")
                 compose.onNodeWithTag("now_playing_screen").assertDoesNotExist()
                 compose.onNodeWithTag("music_feed").assertIsDisplayed()
 
                 rowControl.performTouchInput { click() }
-                withTimeout(6000) { connection.state.first { it.phase == PlaybackPhase.PLAYING && it.music?.id == "ui-2" } }
+                expectPlayback("列表内继续播放", PlaybackPhase.PLAYING, "ui-2")
                 compose.onNodeWithTag("now_playing_screen").assertDoesNotExist()
                 cardMode.performClick()
                 compose.onNodeWithTag("music_cards").assertIsDisplayed()
@@ -109,10 +127,10 @@ class MusicPlaybackUiTest {
 
                 compose.onNodeWithTag("music_feed_card_ui-3").performTouchInput { swipeRight() }
                 currentCard.assertIsSelected().performClick()
-                withTimeout(3000) { connection.state.first { it.phase == PlaybackPhase.PAUSED && it.music?.id == "ui-2" } }
+                expectPlayback("卡片内暂停", PlaybackPhase.PAUSED, "ui-2")
                 compose.onNodeWithTag("now_playing_screen").assertDoesNotExist()
                 currentCard.performClick()
-                withTimeout(6000) { connection.state.first { it.phase == PlaybackPhase.PLAYING && it.music?.id == "ui-2" } }
+                expectPlayback("卡片内继续播放", PlaybackPhase.PLAYING, "ui-2")
                 capture("cards")
                 if (InstrumentationRegistry.getArguments().getString("captureV5Drag") == "true" && car) {
                     captureDragFrame(scenario)
@@ -120,12 +138,12 @@ class MusicPlaybackUiTest {
                 }
                 listMode.performClick()
                 compose.onNodeWithTag("music_feed_track_ui-1").performClick()
-                withTimeout(6000) { connection.state.first { it.phase == PlaybackPhase.PLAYING && it.music?.id == "ui-1" } }
+                expectPlayback("返回列表选择第一首", PlaybackPhase.PLAYING, "ui-1")
                 cardMode.performClick()
                 compose.onNodeWithTag("music_feed_card_ui-1").assertIsSelected()
                 listMode.performClick()
                 compose.onNodeWithTag("music_feed_track_ui-2").performClick()
-                withTimeout(6000) { connection.state.first { it.phase == PlaybackPhase.PLAYING && it.music?.id == "ui-2" } }
+                expectPlayback("打开沉浸页前选择第二首", PlaybackPhase.PLAYING, "ui-2")
                 capture("page")
                 compose.onNodeWithTag("circular_player_entry").performClick()
                 compose.onNodeWithTag("now_playing_screen").assertExists()
@@ -139,7 +157,7 @@ class MusicPlaybackUiTest {
                 toggle.assertIsFocused().performKeyInput { pressKey(Key.DirectionRight) }
                 compose.onNodeWithTag("now_playing_next").assertIsFocused()
                 toggle.assertIsDisplayed().performClick()
-                withTimeout(3000) { connection.state.first { state -> state.phase == PlaybackPhase.PAUSED } }
+                expectPlayback("沉浸主控暂停第二首", PlaybackPhase.PAUSED, "ui-2")
                 compose.onNodeWithTag("music_seek").assertIsDisplayed().performTouchInput {
                     swipe(Offset(width * .25f, center.y), Offset(width * .75f, center.y), 200)
                 }
@@ -152,13 +170,13 @@ class MusicPlaybackUiTest {
                 compose.waitUntil(5000) { compose.onNode(orderLabel and hasText("顺序播放"), useUnmergedTree = true).isDisplayed() }
                 val artwork = compose.onNodeWithTag("now_playing_artwork")
                 artwork.assertIsDisplayed().performTouchInput { swipeLeft() }
-                withTimeout(6000) { connection.state.first { state -> state.phase == PlaybackPhase.PLAYING && state.music?.id == "ui-3" } }
+                expectPlayback("左滑封面播放第三首", PlaybackPhase.PLAYING, "ui-3")
                 artwork.performTouchInput { swipeRight() }
-                withTimeout(6000) { connection.state.first { state -> state.phase == PlaybackPhase.PLAYING && state.music?.id == "ui-2" } }
+                expectPlayback("右滑封面播放第二首", PlaybackPhase.PLAYING, "ui-2")
                 compose.onNodeWithTag("now_playing_next").assertIsDisplayed().performClick()
-                withTimeout(6000) { connection.state.first { state -> state.phase == PlaybackPhase.PLAYING && state.music?.id == "ui-3" } }
+                expectPlayback("下一首按钮播放第三首", PlaybackPhase.PLAYING, "ui-3")
                 toggle.assertIsDisplayed().performClick()
-                withTimeout(3000) { connection.state.first { state -> state.phase == PlaybackPhase.PAUSED } }
+                expectPlayback("沉浸主控暂停第三首", PlaybackPhase.PAUSED, "ui-3")
                 capture("immersive")
                 artwork.assertIsDisplayed().performTouchInput { swipeDown() }
                 try {

@@ -6,21 +6,24 @@ import android.net.Uri
 import android.provider.Settings
 import android.text.format.Formatter
 import androidx.activity.compose.BackHandler
+import androidx.annotation.DrawableRes
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.progressSemantics
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.animation.animateContentSize
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -32,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
@@ -40,12 +44,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.meowv.tune.R
 import com.meowv.tune.update.LocalVersion
 import com.meowv.tune.update.UpdateFailure
@@ -53,11 +58,12 @@ import com.meowv.tune.update.UpdateInfo
 import com.meowv.tune.update.UpdateUiState
 import com.meowv.tune.update.install.InstallFailure
 import com.meowv.tune.update.install.InstallState
+import com.meowv.tune.ui.theme.TuneBrushes
 import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.ui.theme.TuneShapes
 import com.meowv.tune.ui.theme.TuneSizes
 import com.meowv.tune.ui.theme.TuneSpacing
-import com.meowv.tune.ui.theme.TuneTextStyle
+import com.meowv.tune.ui.theme.TuneTypography
 
 @Composable
 internal fun UpdateScreen(
@@ -80,23 +86,26 @@ internal fun UpdateScreen(
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState())
                 .padding(
-                    horizontal = 20.dp,
-                    vertical = if (isCar) 20.dp else 16.dp
+                    horizontal = if (isCar) TuneSpacing.Section else TuneSpacing.Large,
+                    vertical = TuneSpacing.Large
                 ),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             BoxWithConstraints(Modifier.widthIn(max = 1080.dp).fillMaxWidth()) {
                 val twoColumns = maxWidth >= (if (isCar) 620.dp else 840.dp)
                 val status: @Composable () -> Unit = {
-                    StatusCard(isCar, state, install, upgradedTo, onCheck, onDownload, onCancelDownload, onInstall)
+                    StatusCard(
+                        isCar, state, install, upgradedTo, onCheck, onDownload, onCancelDownload, onInstall,
+                        wide = isCar && twoColumns
+                    )
                 }
                 val notes: @Composable () -> Unit = {
                     ReleaseNotesCard(isCar, state.latest, notesExpanded) { notesExpanded = !notesExpanded }
                 }
                 if (isCar && twoColumns) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Large)) {
-                        Box(Modifier.weight(.85f)) { VersionCard(isCar, local, state.latest, showBrand = true) }
-                        Column(Modifier.weight(1.15f), verticalArrangement = Arrangement.spacedBy(TuneSpacing.Large)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Section)) {
+                        Box(Modifier.weight(.86f)) { VersionCard(isCar, local, state.latest, showBrand = true) }
+                        Column(Modifier.weight(1.14f), verticalArrangement = Arrangement.spacedBy(TuneSpacing.Large)) {
                             status()
                             notes()
                         }
@@ -131,15 +140,16 @@ internal fun UpdateScreen(
 private fun UpdateTopBar(isCar: Boolean, onBack: () -> Unit) {
     val backLabel = stringResource(R.string.update_back)
     var focused by remember { mutableStateOf(false) }
+    val shape = TuneShapes.Chip
     Row(
-        Modifier.fillMaxWidth().height(if (isCar) 64.dp else 56.dp)
-            .padding(horizontal = if (isCar) 16.dp else 8.dp),
+        Modifier.fillMaxWidth().heightIn(min = if (isCar) 64.dp else 56.dp)
+            .padding(horizontal = if (isCar) TuneSpacing.Section else TuneSpacing.Large),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
-            Modifier.size(if (isCar) TuneSizes.TouchCar else TuneSizes.Touch).clip(CircleShape)
+            Modifier.size(if (isCar) TuneSizes.TouchCar else TuneSizes.Touch).clip(shape)
                 .background(TuneColors.Raised)
-                .then(if (focused) Modifier.border(2.dp, TuneColors.Primary, CircleShape) else Modifier)
+                .border(if (focused) 2.dp else 1.dp, if (focused) TuneColors.Primary else TuneColors.Border, shape)
                 .onFocusChanged { focused = it.isFocused }
                 .clickable(role = Role.Button, onClick = onBack)
                 .testTag("update_back")
@@ -148,30 +158,38 @@ private fun UpdateTopBar(isCar: Boolean, onBack: () -> Unit) {
         ) {
             TuneIcon(R.drawable.ic_arrow_back, Modifier.size(22.dp), TuneColors.Text)
         }
-        Spacer(Modifier.width(TuneSpacing.Hairline))
+        Spacer(Modifier.width(TuneSpacing.Medium))
         Text(
             stringResource(R.string.update_title),
             color = TuneColors.Text,
-            fontSize = if (isCar) 20.sp else 18.sp,
-            fontWeight = FontWeight.SemiBold,
-            style = TuneTextStyle,
-            maxLines = 1
+            style = TuneTypography.pageTitle(isCar),
+            modifier = Modifier.semantics { heading() }
         )
     }
 }
 
 @Composable
-private fun BrandHeader(isCar: Boolean) {
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        BrandLogo(Modifier.size(60.dp))
-        Spacer(Modifier.height(8.dp))
+private fun BrandHeader(isCar: Boolean, inCard: Boolean = false) {
+    Column(
+        Modifier.fillMaxWidth(),
+        horizontalAlignment = if (inCard) Alignment.Start else Alignment.CenterHorizontally
+    ) {
+        Box(
+            Modifier.size(if (isCar) 64.dp else 58.dp)
+                .background(
+                    Brush.linearGradient(listOf(TuneColors.Primary, TuneColors.Accent)),
+                    TuneShapes.Dialog
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            BrandLogo(Modifier.size(if (isCar) 44.dp else 40.dp))
+        }
+        Spacer(Modifier.height(TuneSpacing.Medium))
         Text(
             stringResource(R.string.brand_full),
             color = TuneColors.Text,
-            fontSize = if (isCar) 22.sp else 20.sp,
-            fontWeight = FontWeight.SemiBold,
-            style = TuneTextStyle,
-            textAlign = TextAlign.Center
+            style = TuneTypography.pageTitle(isCar),
+            textAlign = if (inCard) TextAlign.Start else TextAlign.Center
         )
     }
 }
@@ -185,11 +203,12 @@ private fun StatusCard(
     onCheck: () -> Unit,
     onDownload: () -> Unit,
     onCancelDownload: () -> Unit,
-    onInstall: () -> Unit
+    onInstall: () -> Unit,
+    wide: Boolean
 ) {
     val context = LocalContext.current
     val presentation = statusPresentation(state, install, upgradedTo)
-    UpdateCard {
+    UpdateCard(isCar, if (wide) 260.dp else 0.dp) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             StatusIcon(isCar, state, install)
             Spacer(Modifier.width(TuneSpacing.Medium))
@@ -198,18 +217,14 @@ private fun StatusCard(
                     presentation.title,
                     modifier = Modifier.testTag("update_status_title").semantics { liveRegion = LiveRegionMode.Polite },
                     color = presentation.tint,
-                    fontSize = if (isCar) 19.sp else 17.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    style = TuneTextStyle
+                    style = TuneTypography.rowTitle(isCar).copy(fontWeight = FontWeight.SemiBold)
                 )
                 presentation.body?.let { body ->
                     Spacer(Modifier.height(TuneSpacing.Hairline))
                     Text(
                         body,
                         color = TuneColors.Muted,
-                        fontSize = if (isCar) 14.sp else 13.sp,
-                        lineHeight = if (isCar) 20.sp else 19.sp,
-                        style = TuneTextStyle
+                        style = TuneTypography.secondary(isCar)
                     )
                 }
             }
@@ -227,7 +242,8 @@ private fun StatusCard(
             onDownload = onDownload,
             onCancelDownload = onCancelDownload,
             onInstall = onInstall,
-            onGrantPermission = { openInstallPermission(context) }
+            onGrantPermission = { openInstallPermission(context) },
+            wide = wide
         )
     }
 }
@@ -238,11 +254,18 @@ private fun DownloadProgress(isCar: Boolean, download: InstallState.Downloading)
     val total = download.totalBytes
     val downloaded = download.downloadedBytes
     if (download.indeterminate) {
-        LinearProgressIndicator(
-            modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
-            color = TuneColors.Primary,
-            trackColor = TuneColors.Primary.copy(alpha = .18f)
-        )
+        val track = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape)
+        if (rememberMotionEnabled()) {
+            LinearProgressIndicator(
+                modifier = track,
+                color = TuneColors.Primary,
+                trackColor = TuneColors.Primary.copy(alpha = .18f)
+            )
+        } else {
+            Box(track.background(TuneColors.BorderSoft).progressSemantics()) {
+                Box(Modifier.fillMaxHeight().fillMaxWidth(.25f).background(TuneColors.Primary, CircleShape))
+            }
+        }
     } else {
         LinearProgressIndicator(
             progress = { download.percent / 100f },
@@ -257,9 +280,7 @@ private fun DownloadProgress(isCar: Boolean, download: InstallState.Downloading)
         Text(
             if (total > 0) "${download.percent}%" else "",
             color = TuneColors.Primary,
-            fontSize = if (isCar) 15.sp else 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            style = TuneTextStyle
+            style = TuneTypography.control(isCar).copy(fontWeight = FontWeight.SemiBold)
         )
         Spacer(Modifier.weight(1f))
         Text(
@@ -273,8 +294,7 @@ private fun DownloadProgress(isCar: Boolean, download: InstallState.Downloading)
                 Formatter.formatShortFileSize(context, downloaded)
             },
             color = TuneColors.Muted,
-            fontSize = if (isCar) 14.sp else 12.sp,
-            style = TuneTextStyle
+            style = TuneTypography.secondary(isCar)
         )
     }
 }
@@ -288,7 +308,8 @@ private fun InstallAction(
     onDownload: () -> Unit,
     onCancelDownload: () -> Unit,
     onInstall: () -> Unit,
-    onGrantPermission: () -> Unit
+    onGrantPermission: () -> Unit,
+    wide: Boolean
 ) {
     val checking = state is UpdateUiState.Checking
     val available = state is UpdateUiState.UpdateAvailable
@@ -356,9 +377,11 @@ private fun InstallAction(
                 else -> R.string.update_check
             }),
             enabled = !checking,
-            primary = state !is UpdateUiState.UpToDate,
+            primary = true,
             isCar = isCar,
             tag = "update_check",
+            icon = R.drawable.ic_ui_refresh,
+            compactWidth = wide,
             onClick = onCheck
         )
     }
@@ -371,6 +394,8 @@ private fun PrimaryButton(
     primary: Boolean,
     isCar: Boolean,
     tag: String,
+    @DrawableRes icon: Int? = null,
+    compactWidth: Boolean = false,
     onClick: () -> Unit
 ) {
     val background = when {
@@ -387,17 +412,24 @@ private fun PrimaryButton(
     Button(
         onClick = onClick,
         enabled = enabled,
-        border = if (focused) BorderStroke(2.dp, TuneColors.Text) else null,
-        modifier = Modifier.fillMaxWidth().heightIn(min = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
+        border = if (focused) BorderStroke(2.dp, TuneColors.Text) else BorderStroke(1.dp, TuneColors.Border),
+        modifier = (if (compactWidth) Modifier.widthIn(min = 190.dp) else Modifier.fillMaxWidth())
+            .heightIn(min = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
             .onFocusChanged { focused = it.isFocused }.testTag(tag),
-        shape = TuneShapes.Control,
+        shape = TuneShapes.Chip,
         colors = ButtonDefaults.buttonColors(
             containerColor = background, contentColor = textColor,
             disabledContainerColor = background, disabledContentColor = textColor
         )
     ) {
-        Text(label, fontSize = if (isCar) 16.sp else 15.sp,
-            fontWeight = FontWeight.SemiBold, style = TuneTextStyle, textAlign = TextAlign.Center)
+        if (icon != null) {
+            TuneIcon(icon, Modifier.size(TuneSizes.IconSm), textColor)
+            Spacer(Modifier.width(TuneSpacing.Small))
+        }
+        Text(
+            label, style = TuneTypography.control(isCar).copy(fontWeight = FontWeight.SemiBold),
+            textAlign = TextAlign.Center
+        )
     }
 }
 
@@ -409,13 +441,17 @@ private fun StatusIcon(isCar: Boolean, state: UpdateUiState, install: InstallSta
             install is InstallState.Verifying ||
             install is InstallState.Installing
         if (spinning) {
-            CircularProgressIndicator(
-                Modifier.size(if (isCar) 24.dp else 22.dp),
-                color = TuneColors.Primary,
-                strokeWidth = 2.dp,
-                trackColor = TuneColors.Primary.copy(alpha = .22f),
-                strokeCap = StrokeCap.Round
-            )
+            if (rememberMotionEnabled()) {
+                CircularProgressIndicator(
+                    Modifier.size(if (isCar) 24.dp else 22.dp),
+                    color = TuneColors.Primary,
+                    strokeWidth = 2.dp,
+                    trackColor = TuneColors.Primary.copy(alpha = .22f),
+                    strokeCap = StrokeCap.Round
+                )
+            } else {
+                TuneIcon(R.drawable.ic_ui_refresh, Modifier.size(size).progressSemantics(), TuneColors.Primary)
+            }
         } else {
             when {
                 install is InstallState.Failed -> TuneIcon(R.drawable.ic_ui_info, Modifier.size(size), TuneColors.Error)
@@ -514,69 +550,90 @@ private fun statusPresentation(
 
 @Composable
 private fun VersionCard(isCar: Boolean, local: LocalVersion, info: UpdateInfo?, showBrand: Boolean = false) {
-    UpdateCard {
+    UpdateCard(isCar, if (showBrand) 260.dp else 0.dp, Modifier.testTag("update_version_card")) {
         if (showBrand) {
-            BrandHeader(isCar)
-            Spacer(Modifier.height(TuneSpacing.Large))
+            BrandHeader(isCar, inCard = true)
+            Spacer(Modifier.height(TuneSpacing.Medium))
+        } else {
+            CardTitle(stringResource(R.string.update_section_version), isCar)
+            Spacer(Modifier.height(TuneSpacing.Small))
         }
-        CardTitle(stringResource(R.string.update_section_version), isCar)
-        Spacer(Modifier.height(TuneSpacing.Small))
-        InfoRow(stringResource(R.string.update_label_current), "v${local.versionName}")
-        InfoRow(stringResource(R.string.update_label_version_code), local.versionCode.toString())
+        InfoRow(
+            stringResource(R.string.update_label_current), "v${local.versionName}",
+            isCar, TuneColors.PrimaryLight
+        )
+        InfoRow(stringResource(R.string.update_label_version_code), local.versionCode.toString(), isCar)
         // 清单日期属于清单版本，不能把待升级版本的日期标到当前安装版本上。
         val currentRelease = info?.takeIf { it.versionCode == local.versionCode && it.versionName == local.versionName }
-        InfoRow(stringResource(R.string.update_label_release_date),
-            currentRelease?.releaseDate?.takeIf { it.isNotBlank() } ?: stringResource(R.string.update_value_unknown))
-        InfoRow(stringResource(R.string.update_label_channel),
-            if (local.channel == "stable") stringResource(R.string.update_channel_stable) else local.channel)
-
+        InfoRow(
+            stringResource(R.string.update_label_release_date),
+            currentRelease?.releaseDate?.takeIf { it.isNotBlank() } ?: stringResource(R.string.update_value_unknown),
+            isCar
+        )
+        InfoRow(
+            stringResource(R.string.update_label_channel),
+            if (local.channel == "stable") stringResource(R.string.update_channel_stable) else local.channel,
+            isCar, showDivider = false
+        )
     }
 }
 
 @Composable
-private fun InfoRow(label: String, value: String, valueColor: Color = TuneColors.Text) {
+private fun InfoRow(
+    label: String,
+    value: String,
+    isCar: Boolean,
+    valueColor: Color = TuneColors.Text,
+    showDivider: Boolean = true
+) {
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        Modifier.fillMaxWidth().padding(vertical = TuneSpacing.Small),
+        horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Medium),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             label,
             color = TuneColors.Muted,
-            fontSize = 13.sp,
-            style = TuneTextStyle,
-            modifier = Modifier.weight(1f).padding(end = 12.dp)
+            style = TuneTypography.secondary(isCar),
+            modifier = Modifier.weight(1f)
         )
         Text(
             value,
             color = valueColor,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Medium,
-            style = TuneTextStyle,
+            style = TuneTypography.control(isCar),
             modifier = Modifier.weight(1f),
             textAlign = TextAlign.End
         )
     }
+    if (showDivider) HorizontalDivider(color = TuneColors.Border.copy(alpha = .45f))
 }
 
 @Composable
 private fun ReleaseNotesCard(isCar: Boolean, info: UpdateInfo?, expanded: Boolean, onToggle: () -> Unit) {
     val notes = info?.releaseNotes.orEmpty()
-    UpdateCard {
+    UpdateCard(isCar) {
         CardTitle(stringResource(R.string.update_section_notes), isCar)
         Spacer(Modifier.height(8.dp))
         if (info != null) {
-            Text("v${info.versionName}", color = TuneColors.Text,
-                fontSize = if (isCar) 16.sp else 15.sp, fontWeight = FontWeight.SemiBold, style = TuneTextStyle)
+            Text(
+                "v${info.versionName}", color = TuneColors.PrimaryLight,
+                style = TuneTypography.rowTitle(isCar).copy(fontWeight = FontWeight.SemiBold)
+            )
             Spacer(Modifier.height(8.dp))
         }
         if (notes.isEmpty()) {
-            Text(stringResource(R.string.update_notes_empty), color = TuneColors.Muted, fontSize = 13.sp, style = TuneTextStyle)
+            Text(
+                stringResource(R.string.update_notes_empty),
+                color = TuneColors.Muted,
+                style = TuneTypography.secondary(isCar)
+            )
         } else {
             Column(if (rememberMotionEnabled()) Modifier.animateContentSize() else Modifier) {
                 (if (expanded) notes else notes.take(5)).forEach { note ->
-                    Text(note, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        color = TuneColors.Muted, fontSize = if (isCar) 14.sp else 13.sp,
-                        lineHeight = if (isCar) 22.sp else 21.sp, style = TuneTextStyle)
+                    Text(
+                        note, modifier = Modifier.fillMaxWidth().padding(vertical = TuneSpacing.Hairline),
+                        color = TuneColors.Muted, style = TuneTypography.secondary(isCar)
+                    )
                 }
             }
             if (notes.size > 5) {
@@ -585,8 +642,10 @@ private fun ReleaseNotesCard(isCar: Boolean, info: UpdateInfo?, expanded: Boolea
                     modifier = Modifier.heightIn(min = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
                         .testTag("update_notes_toggle")
                 ) {
-                    Text(stringResource(if (expanded) R.string.update_notes_collapse else R.string.update_notes_expand),
-                        style = TuneTextStyle)
+                    Text(
+                        stringResource(if (expanded) R.string.update_notes_collapse else R.string.update_notes_expand),
+                        style = TuneTypography.control(isCar)
+                    )
                 }
             }
         }
@@ -594,9 +653,23 @@ private fun ReleaseNotesCard(isCar: Boolean, info: UpdateInfo?, expanded: Boolea
 }
 
 @Composable
-private fun UpdateCard(content: @Composable ColumnScope.() -> Unit) {
-    Surface(color = TuneColors.Surface, shape = TuneShapes.SettingsGroup) {
-        Column(Modifier.fillMaxWidth().padding(20.dp), content = content)
+private fun UpdateCard(
+    isCar: Boolean,
+    minHeight: Dp = 0.dp,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Surface(
+        modifier = modifier,
+        color = TuneColors.Surface,
+        shape = TuneShapes.Dialog,
+        border = BorderStroke(1.dp, TuneColors.Border.copy(alpha = .65f))
+    ) {
+        Column(
+            Modifier.fillMaxWidth().heightIn(min = minHeight).background(TuneBrushes.Card)
+                .padding(if (isCar) TuneSpacing.Section else TuneSpacing.Large),
+            content = content
+        )
     }
 }
 
@@ -605,9 +678,8 @@ private fun CardTitle(text: String, isCar: Boolean) {
     Text(
         text,
         color = TuneColors.Text,
-        fontSize = if (isCar) 17.sp else 16.sp,
-        fontWeight = FontWeight.SemiBold,
-        style = TuneTextStyle
+        style = TuneTypography.rowTitle(isCar).copy(fontWeight = FontWeight.SemiBold),
+        modifier = Modifier.semantics { heading() }
     )
 }
 

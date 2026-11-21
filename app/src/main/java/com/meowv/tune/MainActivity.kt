@@ -173,7 +173,9 @@ class MainActivity : ComponentActivity() {
             val musicBrowse by musicModel.browse.collectAsStateWithLifecycle()
             val musicState by musicModel.state.collectAsStateWithLifecycle()
             val musicSearch by musicSearchModel.state.collectAsStateWithLifecycle()
-            val searchList = key(musicSearch.query) { androidx.compose.foundation.lazy.grid.rememberLazyGridState() }
+            val searchList = key(musicSearch.query, musicSearch.resultVersion) {
+                androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+            }
             val searchContent: @androidx.compose.runtime.Composable (Boolean) -> Unit = { isCar ->
                 MusicSearchScreen(
                     musicSearch, musicSearchModel::queryChanged, musicSearchModel::search,

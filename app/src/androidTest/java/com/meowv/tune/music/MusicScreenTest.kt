@@ -111,7 +111,7 @@ class MusicScreenTest {
     @Test fun lyricsFollowPlaybackAndOnlyTapOrHorizontalDragSeeks() {
         val state = mutableStateOf(PlayerUiState(
             source = PlaybackSource.MUSIC, phase = PlaybackPhase.PAUSED,
-            music = MusicTrack("seek", "Progress", listOf("qix")),
+            music = MusicTrack("seek", "Progress", listOf("qix"), album = "Test album"),
             durationMs = 12000, positionMs = 2000, canSeek = true
         ))
         val seeks = mutableListOf<Long>()
@@ -123,6 +123,7 @@ class MusicScreenTest {
                 onSeek = { seeks.add(it) }
             )
         } }
+        compose.onNodeWithText(if (isCar) "qix · Test album" else "qix").assertIsDisplayed()
         val slider = compose.onNodeWithTag("music_seek")
         compose.onNodeWithTag("music_lyrics").assertDoesNotExist()
         slider.assertIsDisplayed().performTouchInput {
@@ -162,6 +163,24 @@ class MusicScreenTest {
         compose.runOnIdle { state.value = state.value.copy(durationMs = null) }
         compose.onNodeWithTag("music_progress").assertDoesNotExist()
         compose.onNodeWithTag("now_playing_play").assertIsDisplayed()
+    }
+
+    @Test fun emptyMusicPlayerCanReturnToTheMusicPage() {
+        var choices = 0
+        compose.setContent { TuneTheme {
+            NowPlayingScreen(
+                isCar = isCar, connected = true,
+                state = PlayerUiState(source = PlaybackSource.MUSIC), station = null,
+                shuffle = false, sleepTimer = SleepTimerState(), onCollapse = {}, onToggle = {},
+                onNext = {}, onPrevious = {}, onToggleShuffle = {}, onSetSleepTimer = {},
+                onSelectStation = { choices++ }
+            )
+        } }
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        compose.onNodeWithTag("now_playing_empty").assertIsDisplayed()
+        compose.onNodeWithTag("now_playing_play").assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.action_select_music)).performClick()
+        compose.runOnIdle { assertEquals(1, choices) }
     }
 
     private fun capture(name: String) {
