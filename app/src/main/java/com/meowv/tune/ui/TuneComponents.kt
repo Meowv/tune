@@ -13,14 +13,15 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
-import androidx.compose.foundation.indication
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
@@ -30,7 +31,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,12 +42,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -64,6 +64,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -95,6 +96,52 @@ internal fun TuneIcon(@DrawableRes resource: Int, modifier: Modifier = Modifier,
 @Composable
 internal fun BrandLogo(modifier: Modifier = Modifier) {
     Image(painterResource(R.drawable.ic_meowvtune_logo), contentDescription = null, modifier = modifier)
+}
+
+@Composable
+internal fun BrandLockup(
+    label: String,
+    logoSize: Dp,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+    logoTag: String
+) {
+    // 按可见字形和 Logo 的中心校准，布局仍按原来的行高对齐。
+    val opticalOffset = with(LocalDensity.current) { 1.5.sp.toDp() }
+    Row(
+        modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Small)
+    ) {
+        BrandLogo(Modifier.size(logoSize).offset(y = opticalOffset).testTag(logoTag))
+        Text(
+            label, color = TuneColors.Text, style = style,
+            modifier = Modifier.offset(y = -opticalOffset),
+            maxLines = 1, overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+internal fun Modifier.controlFeedback(
+    interaction: InteractionSource,
+    shape: Shape,
+    enabled: Boolean = true,
+    durationMillis: Int = TuneMotion.Press
+): Modifier {
+    val pressed by interaction.collectIsPressedAsState()
+    val focused by interaction.collectIsFocusedAsState()
+    val fill by animateColorAsState(
+        targetValue = when {
+            enabled && pressed -> TuneColors.Primary.copy(alpha = .23f)
+            enabled && focused -> TuneColors.Primary.copy(alpha = .10f)
+            else -> Color.Transparent
+        },
+        animationSpec = tween(if (rememberMotionEnabled()) durationMillis else 0),
+        label = "control_feedback"
+    )
+    return clip(shape).background(fill)
+        .then(if (enabled && focused) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)
 }
 
 /**
@@ -297,8 +344,7 @@ internal fun MeowvNavigationBar(page: TunePage, modifier: Modifier = Modifier, o
         )
         Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
             items.forEach { item ->
-                NavigationItem(item, item == page, isCar = false, Modifier.weight(1f), onPage,
-                    indicatorWidth = pillWidth)
+                NavigationItem(item, item == page, isCar = false, Modifier.weight(1f), onPage)
             }
         }
     }
@@ -319,21 +365,16 @@ internal fun MeowvNavigationRail(
                 .focusGroup(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Row(
-                Modifier.fillMaxWidth().heightIn(min = 40.dp).testTag("car_rail_brand")
+            BrandLockup(
+                label = stringResource(R.string.app_name),
+                logoSize = 24.dp,
+                style = TuneTypography.control(true).copy(fontWeight = FontWeight.SemiBold),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp).testTag("car_rail_brand")
                     .padding(start = 10.dp, bottom = if (compact) 4.dp else 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                BrandLogo(Modifier.size(24.dp).testTag("car_rail_brand_logo"))
-                Text(
-                    stringResource(R.string.app_name), color = TuneColors.Text,
-                    style = TuneTypography.control(true), fontWeight = FontWeight.SemiBold,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis
-                )
-            }
+                logoTag = "car_rail_brand_logo"
+            )
             TunePage.entries.forEach { item ->
-                NavigationItem(item, item == page, isCar = true, Modifier.fillMaxWidth(), onPage, showBackground = true)
+                NavigationItem(item, item == page, isCar = true, Modifier.fillMaxWidth(), onPage)
             }
         }
     }
@@ -363,12 +404,9 @@ private fun NavigationItem(
     selected: Boolean,
     isCar: Boolean,
     modifier: Modifier,
-    onPage: (TunePage) -> Unit,
-    showBackground: Boolean = false,
-    indicatorWidth: Dp = NavPillWidth
+    onPage: (TunePage) -> Unit
 ) {
     val interaction = remember { MutableInteractionSource() }
-    var focused by remember { mutableStateOf(false) }
     val label = stringResource(page.label)
     val duration = if (rememberMotionEnabled()) TuneMotion.ColorChange else 0
     val color by animateColorAsState(
@@ -376,7 +414,7 @@ private fun NavigationItem(
         animationSpec = tween(duration), label = "nav_item_color"
     )
     val background by animateColorAsState(
-        if (selected && showBackground) TuneColors.NavSelected else Color.Transparent,
+        if (selected && isCar) TuneColors.NavSelected else Color.Transparent,
         animationSpec = tween(duration), label = "nav_item_background"
     )
     val shape = TuneShapes.Navigation
@@ -388,12 +426,12 @@ private fun NavigationItem(
     Box(
         modifier.height(if (isCar) 62.dp else PhoneNavigationHeight)
             .then(if (isCar) Modifier.fillMaxWidth() else Modifier.padding(horizontal = 6.dp))
-            .clip(shape)
-            .onFocusChanged { focused = it.isFocused }
+            .background(background, shape)
+            .controlFeedback(interaction, shape)
             .selectable(
                 selected = selected,
                 interactionSource = interaction,
-                indication = if (isCar) LocalIndication.current else null,
+                indication = null,
                 role = Role.Tab,
                 onClick = { onPage(page) }
             )
@@ -401,20 +439,8 @@ private fun NavigationItem(
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center
     ) {
-        // 手机按压与焦点反馈和滑动选中块同尺寸，整格仍保持原有触控区域。
-        if (!isCar) {
-            Box(
-                Modifier.align(Alignment.TopCenter).offset(y = NavPillTop)
-                    .size(indicatorWidth, NavPillHeight).clip(shape)
-                    .indication(interaction, ripple(bounded = false, color = TuneColors.Primary))
-                    .then(if (focused) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)
-            )
-        }
         Box(
             Modifier.then(if (isCar) Modifier.fillMaxWidth() else Modifier.fillMaxSize())
-                .clip(shape)
-                .background(background)
-                .then(if (isCar && focused) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)
                 .padding(
                     horizontal = if (isCar) 16.dp else 0.dp,
                     vertical = if (isCar) 10.dp else 0.dp

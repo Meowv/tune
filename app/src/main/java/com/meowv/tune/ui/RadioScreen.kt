@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -580,6 +581,7 @@ internal fun LayoutSwitcher(mode: RadioDisplayMode, onChange: (RadioDisplayMode)
         verticalAlignment = Alignment.CenterVertically
     ) {
         listOf(RadioDisplayMode.LIST, RadioDisplayMode.CARD).forEach { value ->
+            val interaction = remember { MutableInteractionSource() }
             val selected = mode == value
             val label = stringResource(
                 if (value == RadioDisplayMode.LIST) R.string.layout_list else R.string.layout_card
@@ -594,7 +596,10 @@ internal fun LayoutSwitcher(mode: RadioDisplayMode, onChange: (RadioDisplayMode)
             )
             Box(
                 Modifier.size(cell)
-                    .clickable(role = Role.Button) { onChange(value) }
+                    .controlFeedback(interaction, TuneShapes.Control)
+                    .clickable(interactionSource = interaction, indication = null, role = Role.Button) {
+                        onChange(value)
+                    }
                     .testTag(if (value == RadioDisplayMode.LIST) "layout_list" else "layout_card")
                     .semantics {
                         contentDescription = label

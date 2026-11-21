@@ -1,6 +1,7 @@
 package com.meowv.tune
 
 import androidx.compose.runtime.*
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -16,6 +17,50 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class CircularEntryUiTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun heldControlsHighlightTheirWholeTargetWithoutActivatingEarly() {
+        val station = Station(UUID(0, 1), "Radio", null)
+        var opens = 0
+        var toggles = 0
+        var selectedPage = TunePage.Radio
+        compose.setContent {
+            TuneTheme {
+                val rotation = remember { PlayerRotationState() }
+                MeowvBottomDock(TunePage.Radio, {
+                    CompactMediaBar(
+                        PlayerUiState(PlaybackPhase.PAUSED, station), station, true, rotation,
+                        isCar = false, enabled = true, animationMillis = 0,
+                        onToggle = { toggles++ }, onOpen = { opens++ }
+                    )
+                }) { selectedPage = it }
+            }
+        }
+
+        listOf("nav_music", "circular_player_entry", "mini_player_toggle").forEach { tag ->
+            val item = compose.onNodeWithTag(tag)
+            fun feedbackSamples(): List<Float> {
+                val pixels = item.captureToImage().toPixelMap()
+                return listOf(.20f to .23f, .83f to .78f).map { (x, y) ->
+                    pixels[(pixels.width * x).toInt(), (pixels.height * y).toInt()].red
+                }
+            }
+
+            val idle = feedbackSamples()
+            item.performTouchInput { down(center) }
+            compose.mainClock.advanceTimeBy(360)
+            val held = feedbackSamples()
+            assertTrue("$tag should fill both sides of the touch target: $idle / $held",
+                held.zip(idle).all { (pressed, normal) -> pressed > normal + .04f })
+            compose.runOnIdle {
+                assertEquals(TunePage.Radio, selectedPage)
+                assertEquals(0, opens)
+                assertEquals(0, toggles)
+            }
+            item.performTouchInput { cancel() }
+            compose.mainClock.advanceTimeBy(160)
+            assertEquals("$tag feedback must clear after cancellation", idle, feedbackSamples())
+        }
+    }
 
     @Test fun rotationFreezesAndMenuGesturesStaySeparate() {
         val station = Station(UUID(0, 1), "Radio", null)

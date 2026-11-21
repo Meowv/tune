@@ -314,22 +314,15 @@ private fun NowPlayingTopBar(
             onCollapse = onCollapse,
             modifier = Modifier.align(Alignment.CenterStart)
         )
-        Row(
-            Modifier.align(Alignment.Center)
+        BrandLockup(
+            label = stringResource(R.string.brand_full),
+            logoSize = 25.dp,
+            style = TuneTypography.control(isCar = false),
+            modifier = Modifier.align(Alignment.Center)
                 .padding(horizontal = TuneSizes.Touch)
                 .testTag("now_playing_brand"),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Small)
-        ) {
-            BrandLogo(Modifier.size(25.dp).testTag("now_playing_brand_logo"))
-            Text(
-                stringResource(R.string.brand_full),
-                color = TuneColors.Text,
-                style = TuneTypography.control(isCar = false),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
+            logoTag = "now_playing_brand_logo"
+        )
     }
 }
 

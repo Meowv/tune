@@ -3,6 +3,7 @@ package com.meowv.tune.ui
 import android.graphics.Bitmap
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,6 +20,7 @@ import com.meowv.tune.update.*
 import com.meowv.tune.update.install.InstallFailure
 import com.meowv.tune.update.install.InstallState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -108,7 +110,21 @@ class SettingsUpdateUiTest {
             SettingsScreen(false, settings.value, refreshing.value, "vtest · 检查更新失败",
                 { settings.value = it(settings.value); toggles++ }, { refreshes++ }, {}, {})
         } } }
-        compose.onNodeWithText("自动播放").performClick().assertIsOn()
+        val autoplay = compose.onNodeWithText("自动播放")
+        fun menuEdgeSamples(): List<Float> {
+            val pixels = autoplay.captureToImage().toPixelMap()
+            val y = pixels.height / 2
+            return listOf(pixels[3, y].red, pixels[pixels.width - 4, y].red)
+        }
+        val idle = menuEdgeSamples()
+        autoplay.performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(360)
+        val held = menuEdgeSamples()
+        assertTrue("Pressed settings row must reach both card edges: $idle / $held",
+            held.zip(idle).all { (pressed, normal) -> pressed > normal + .04f })
+        compose.runOnIdle { assertEquals(0, toggles) }
+        autoplay.performTouchInput { up() }
+        autoplay.assertIsOn()
         assertEquals(1, toggles)
         compose.onNodeWithText("刷新数据").performClick()
         assertEquals(1, refreshes)

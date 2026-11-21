@@ -2,7 +2,6 @@ package com.meowv.tune.ui
 
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -25,7 +24,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,10 +32,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.testTag
@@ -247,8 +242,7 @@ private fun SettingsGroup(
         ) {
             Column(
                 Modifier.fillMaxWidth()
-                    .background(TuneBrushes.Card)
-                    .padding(vertical = TuneSpacing.Hairline),
+                    .background(TuneBrushes.Card),
                 content = content
             )
         }
@@ -276,32 +270,23 @@ private fun SettingRow(
     onClick: (() -> Unit)? = null
 ) {
     val interaction = remember { MutableInteractionSource() }
-    var focused by remember { mutableStateOf(false) }
-    // 行反馈铺满菜单项，由外层卡片统一裁切圆角，避免出现内缩的独立色块。
-    val shape = RectangleShape
-    val background by animateColorAsState(
-        if (focused && enabled) TuneColors.Selected else Color.Transparent,
-        animationSpec = tween(if (rememberMotionEnabled()) TuneMotion.ColorChange else 0), label = "setting_row_background"
-    )
     val contentAlpha = if (enabled) 1f else .55f
     val rowModifier = Modifier.fillMaxWidth().heightIn(min = if (isCar) 68.dp else 64.dp)
-        .clip(shape)
-        .background(background)
-        .then(if (focused && enabled) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)
-        .onFocusChanged { focused = it.isFocused }
+        .controlFeedback(interaction, RectangleShape, enabled && onClick != null)
         .testTag("setting_$label")
     val action = if (onClick == null) Modifier else if (checked != null) {
         Modifier.toggleable(
             value = checked,
+            enabled = enabled,
             interactionSource = interaction,
-            indication = ripple(color = TuneColors.Primary),
+            indication = null,
             role = Role.Switch
         ) { onClick() }
     } else {
         Modifier.clickable(
             enabled = enabled,
             interactionSource = interaction,
-            indication = ripple(color = TuneColors.Primary),
+            indication = null,
             role = Role.Button,
             onClick = onClick
         )

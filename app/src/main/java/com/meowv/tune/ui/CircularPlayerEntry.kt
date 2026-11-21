@@ -2,7 +2,6 @@ package com.meowv.tune.ui
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -10,7 +9,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,7 +20,6 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -157,17 +154,10 @@ private fun MiniPlayerToggle(
     onClick: () -> Unit
 ) {
     val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        if (pressed) .94f else 1f,
-        tween(if (animationMillis > 0) TuneMotion.Press else 0),
-        label = "mini_player_press"
-    )
     val shape = RoundedCornerShape(if (isCar) 16.dp else 13.dp)
     Box(
         Modifier.size(if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
-            .onFocusChanged { focused = it.isFocused }
+            .controlFeedback(interaction, shape, enabled, if (animationMillis > 0) TuneMotion.Press else 0)
             .clickable(
                 interactionSource = interaction, indication = null,
                 role = Role.Button, enabled = enabled, onClick = onClick
@@ -178,16 +168,8 @@ private fun MiniPlayerToggle(
     ) {
         Box(
             Modifier.size(if (isCar) 56.dp else 44.dp)
-                .graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                }
                 .background(TuneColors.Primary.copy(alpha = if (enabled) .19f else .07f), shape)
-                .border(
-                    if (focused) 2.dp else 1.dp,
-                    if (focused) TuneColors.Primary else TuneColors.PrimaryLight.copy(alpha = .15f),
-                    shape
-                ),
+                .border(1.dp, TuneColors.PrimaryLight.copy(alpha = .15f), shape),
             contentAlignment = Alignment.Center
         ) {
             TuneIcon(
@@ -245,7 +227,7 @@ private fun CircularPlayerEntry(
     val entryState = if (visual != CircularPlayerVisual.Default && !currentTitle.isNullOrBlank()) {
         stringResource(R.string.now_playing_current_state, currentTitle, label)
     } else label
-    var focused by remember { mutableStateOf(false) }
+    val interaction = remember { MutableInteractionSource() }
     val coverSize = if (isCar) 48.dp else 42.dp
     val coverShape = RoundedCornerShape(if (isCar) 13.dp else 11.dp)
     val accent = when (visual) {
@@ -255,10 +237,11 @@ private fun CircularPlayerEntry(
     }
     Row(
         modifier.heightIn(min = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
-            .onFocusChanged { focused = it.isFocused }
-            .clip(TuneShapes.Navigation)
-            .then(if (focused) Modifier.border(2.dp, TuneColors.Primary, TuneShapes.Navigation) else Modifier)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onOpen)
+            .controlFeedback(interaction, TuneShapes.Navigation, enabled)
+            .clickable(
+                enabled = enabled, role = Role.Button, interactionSource = interaction,
+                indication = null, onClick = onOpen
+            )
             .testTag("circular_player_entry")
             .semantics {
                 contentDescription = openLabel
