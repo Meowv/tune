@@ -39,7 +39,7 @@ class MusicFeedStoreTest {
             assertEquals(listOf(a, b, fallback), partial.tracks)
 
             val renamed = a.copy(title = "A updated")
-            val reordered = store.updateRecommendations(MusicPage(listOf(b, renamed, b)))
+            val reordered = store.updateRecommendations(MusicPage(listOf(b, renamed, b), strategy = "rolling_candidates"))
             assertEquals(oldVersion, reordered.version)
             assertEquals(listOf(b, renamed, fallback), reordered.tracks)
 

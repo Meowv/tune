@@ -48,7 +48,7 @@ internal class MusicPlaybackEngine(
     private var refill: Job? = null
     private var lyricsRequest: Job? = null
     private var refillSuppressed = false
-    private var promoted: Deferred<Result<PlayableAudio>>? = null
+    private var advancing = false
     private val nextPreparation = MusicNextPreparation(repository, scope, ::backgroundFailure)
     private var bufferTimeout: Job? = null
     private var loading = false
@@ -70,6 +70,16 @@ internal class MusicPlaybackEngine(
 
     init {
         player.addListener(this)
+        scope.launch {
+            feedStore.snapshot.collect {
+                if (!active || state.phase == PlaybackPhase.IDLE || !syncQueueFeed()) return@collect
+                if (advancing) next(userInitiated = false)
+                else {
+                    publishState(state)
+                    maintainAhead()
+                }
+            }
+        }
         scope.launch {
             network.collect { value ->
                 if (!active) return@collect
@@ -153,20 +163,21 @@ internal class MusicPlaybackEngine(
         resumePoint = null
         interruptions.reset()
         if (resetSession || !queue.canNext) queue.reset(seed, track?.id)
-        begin(explicit = track != null) { if (track == null) queue.next() else queue.select(track) }
+        syncQueueFeed()
+        begin(explicit = track != null, advance = track == null) { if (track == null) queue.next() else queue.select(track) }
     }
 
     fun next(userInitiated: Boolean = true) {
         if (!active || !mayRequest()) return
+        syncQueueFeed()
         if (userInitiated && state.phase !in setOf(PlaybackPhase.IDLE, PlaybackPhase.ERROR)) state.music?.let {
             if (!loading && confirmed && itemMatches()) listening?.finish(earlySkip = true)
             queue.skip(it, affectRanking = !loading && confirmed && current?.track?.id == it.id &&
                 state.phase in setOf(PlaybackPhase.PLAYING, PlaybackPhase.PAUSED))
         }
         interruptions.reset()
-        val prepared = nextPreparation.take(queue.nextTrack?.id)
         resumePoint = null
-        begin(keepRefill = true, prepared = prepared) { queue.next() }
+        begin(keepRefill = true, advance = true) { queue.next() }
     }
 
     fun previous() {
@@ -181,7 +192,7 @@ internal class MusicPlaybackEngine(
         excludedProvider: String? = null,
         keepRefill: Boolean = false,
         saved: MusicResumePoint? = null,
-        prepared: Deferred<Result<PlayableAudio>>? = null,
+        advance: Boolean = false,
         explicit: Boolean = false,
         select: suspend () -> MusicSelection?
     ) {
@@ -192,12 +203,11 @@ internal class MusicPlaybackEngine(
         var refreshed = refreshProvider != null || excludedProvider != null
         val attemptedAlternate = excludedProvider != null || refreshProvider != null && alternateAttempted
         if (NetworkPolicy.evaluate(network.value) != NetworkDecision.ALLOWED) {
-            prepared?.cancel()
             fail(MusicFailure.CONNECTION)
             return
         }
         val id = invalidate(keepRefill)
-        promoted = prepared
+        advancing = advance
         desiredPlay = true
         loading = true
         if (!preserveCurrent) {
@@ -209,11 +219,13 @@ internal class MusicPlaybackEngine(
         publishState(state.copy(phase = PlaybackPhase.RESOLVING, musicFailure = null, error = null, operationFailure = null, canSeek = false))
         val job = scope.launch(start = CoroutineStart.LAZY) {
             var selected = false
+            var prepared: Deferred<Result<PlayableAudio>>? = null
             try {
                 val selectedTrack = withTimeout(8000) { select() }
                     ?: throw MusicException(MusicFailure.NO_PLAYABLE_MATCH)
                 ensureActive()
                 selected = true
+                if (advance) prepared = nextPreparation.take(selectedTrack.track.id)
                 if (refreshProvider == null && excludedProvider == null) listeningHistory?.attempted()
                 if (!preserveCurrent) publishState(state.copy(music = selectedTrack.track))
                 val result = withTimeout(8000) {
@@ -252,6 +264,7 @@ internal class MusicPlaybackEngine(
                 }
                 ensureActive()
                 if (!active || id != generation) return@launch
+                if (advance && restartAdvanceIfFeedChanged()) return@launch
                 loading = false
                 resourceRefreshed = refreshed
                 alternateAttempted = attemptedAlternate
@@ -263,6 +276,7 @@ internal class MusicPlaybackEngine(
                     automatic = !explicit && saved == null)
             } catch (failure: TimeoutCancellationException) {
                 if (active && id == generation) {
+                    if (advance && restartAdvanceIfFeedChanged()) return@launch
                     val error = MusicException(MusicFailure.SOURCE_TIMEOUT)
                     if (saved == null) loadFailed(error, preserveCurrent, oldState, selected) else restoreFailed(error, saved)
                 }
@@ -271,11 +285,11 @@ internal class MusicPlaybackEngine(
             } catch (failure: MusicException) {
                 ensureActive()
                 if (active && id == generation) {
+                    if (advance && restartAdvanceIfFeedChanged()) return@launch
                     if (saved == null) loadFailed(failure, preserveCurrent, oldState, selected) else restoreFailed(failure, saved)
                 }
             } finally {
                 prepared?.cancel()
-                if (promoted === prepared) promoted = null
             }
         }
         // 先登记再启动，避免连续同步失败时外层任务覆盖最新的取消句柄。
@@ -367,6 +381,7 @@ internal class MusicPlaybackEngine(
                 else fail(reason)
             }
             player.isPlaying -> {
+                advancing = false
                 bufferTimeout?.cancel()
                 if (!confirmed) {
                     confirmed = current?.let(queue::recordSuccessfulPlayback) == true
@@ -504,10 +519,27 @@ internal class MusicPlaybackEngine(
 
     private fun invalidate(keepRefill: Boolean = false): Long {
         generation++
+        advancing = false
         pending?.cancel(); bufferTimeout?.cancel(); queue.invalidate()
-        nextPreparation.cancel(); promoted?.cancel(); promoted = null
-        if (!keepRefill) refill?.cancel()
+        if (!keepRefill) {
+            nextPreparation.cancel()
+            refill?.cancel()
+        }
         return generation
+    }
+
+    private fun syncQueueFeed(): Boolean {
+        if (!queue.syncFeed()) return false
+        refill?.cancel()
+        nextPreparation.cancel()
+        refillSuppressed = false
+        return true
+    }
+
+    private fun restartAdvanceIfFeedChanged(): Boolean {
+        if (!syncQueueFeed()) return false
+        next(userInitiated = false)
+        return true
     }
 
     private fun maintainAhead() {

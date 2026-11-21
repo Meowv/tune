@@ -29,8 +29,8 @@ internal class MusicQueueManager(
     private val history = mutableListOf<MusicTrack>()
     private val considered = LinkedHashSet<String>()
     private val recordings = mutableListOf<MusicRecording>()
+    private var feedVersion = feedStore?.snapshot?.value?.version
     private var rolling = false
-    private var rollingFeedVersion: Long? = null
     private var retriedCursor = false
     private val played = LinkedHashSet<String>()
     private val skipped = LinkedHashSet<String>()
@@ -56,7 +56,6 @@ internal class MusicQueueManager(
     private val searchBuffer = ArrayDeque<MusicTrack>()
     private var lastRadioLoad: Long? = null
     private var fallbackFailure: MusicException? = null
-    private var fallbackFeedVersion: Long? = null
     private var emptyCycles = 0
     private var issued = 0L
     private var committed = -1L
@@ -99,38 +98,46 @@ internal class MusicQueueManager(
     }
 
     suspend fun next(): MusicSelection? {
-        if (index < history.lastIndex) return MusicSelection(++issued, history[index + 1], index + 1)
         val owner = revision
-        if (pending.isEmpty() && !exhausted) replenish(minimumOnly = true)
-        if (pending.isEmpty() && exhausted && owner == revision) load.withLock {
-            if (owner != revision) return@withLock
-            fallbackFailure?.let { throw it }
-            repeat(MAX_EMPTY_CYCLES) {
-                if (owner != revision || pending.isNotEmpty() || emptyCycles >= MAX_EMPTY_CYCLES) return@withLock
-                refillRound()
+        feedStore?.restore()
+        while (owner == revision) {
+            syncFeed()
+            val version = feedVersion
+            if (index < history.lastIndex) return MusicSelection(++issued, history[index + 1], index + 1)
+            if (pending.isEmpty() && !exhausted) replenish(minimumOnly = true)
+            if (pending.isEmpty() && exhausted && ownsLoad(owner, version)) load.withLock {
+                if (!ownsLoad(owner, version)) return@withLock
+                fallbackFailure?.let { throw it }
+                repeat(MAX_EMPTY_CYCLES) {
+                    if (!ownsLoad(owner, version) || pending.isNotEmpty() || emptyCycles >= MAX_EMPTY_CYCLES) return@withLock
+                    refillRound()
+                }
             }
+            currentCoroutineContext().ensureActive()
+            if (!ownsLoad(owner, version)) continue
+            val track = nextCandidate() ?: return null
+            pending.remove(track)
+            randomNext = null
+            return MusicSelection(++issued, track)
         }
-        currentCoroutineContext().ensureActive()
-        if (owner != revision) return null
-        val track = nextCandidate() ?: return null
-        pending.remove(track)
-        randomNext = null
-        return MusicSelection(++issued, track)
+        return null
     }
 
     fun previous(): MusicSelection? = if (canPrevious) MusicSelection(++issued, history[index - 1], index - 1) else null
 
     suspend fun replenish(minimumOnly: Boolean = false) = load.withLock {
         val owner = revision
+        val version = feedVersion
         var added = 0
         // 前台仅在没有待播曲目时继续跨过空页，预取仍以两页为限。
         repeat(if (rolling && minimumOnly) 6 else 2) {
-            if (!needsReplenish || minimumOnly && pending.isNotEmpty()) return@withLock
+            if (!ownsLoad(owner, version) || !needsReplenish || minimumOnly && pending.isNotEmpty()) return@withLock
             val requestedCursor = cursor
             val source = repository()
             val page = try {
                 if (rolling) source.candidates(cursor = requestedCursor) else source.recommendations(batchSize, requestedCursor)
             } catch (failure: MusicException) {
+                if (!ownsLoad(owner, version)) return@withLock
                 if (rolling && requestedCursor != null && failure.failure == MusicFailure.INVALID_REQUEST && !retriedCursor) {
                     retriedCursor = true
                     cursor = null
@@ -143,7 +150,7 @@ internal class MusicQueueManager(
                 return@withLock
             }
             currentCoroutineContext().ensureActive()
-            if (owner != revision) return@withLock
+            if (!ownsLoad(owner, version)) return@withLock
             val pageLimit = if (rolling) 30 else batchSize
             if (page.nextCursor != null && page.items.size > pageLimit) throw MusicException(MusicFailure.INVALID_RESPONSE)
             if (rolling && page.strategy == "rolling_warming") {
@@ -154,19 +161,19 @@ internal class MusicQueueManager(
             val known = considered + played + skipped + pending.map { it.id } + history.map { it.id }
             val eligible = page.items.distinctBy { it.id }.filter { it.canStartPlayback && it.id !in known }
             val ordered = listening?.rank(eligible, page.discoveryTrackIds, pending.lastOrNull() ?: history.getOrNull(index)) ?: eligible
-            if (owner != revision) return@withLock
+            if (!ownsLoad(owner, version)) return@withLock
             val accepted = ordered.filterNot(::seenRecording)
             accepted.forEach {
                 pending.addLast(it)
                 remember(it)
                 added++
             }
-            if (rolling && accepted.isNotEmpty())
-                rollingFeedVersion?.let { feedStore?.appendFallback(it, accepted, page.discoveryTrackIds) }
             seenCursors.add(requestedCursor)
             while (seenCursors.size > 100) seenCursors.remove(seenCursors.first())
             cursor = page.nextCursor
             exhausted = cursor == null || cursor in seenCursors
+            if (version != null && accepted.isNotEmpty())
+                feedStore?.appendFallback(version, accepted, page.discoveryTrackIds)
         }
         if (added == 0 && !rolling) { exhausted = true; cursor = null }
     }
@@ -177,16 +184,8 @@ internal class MusicQueueManager(
 
     private suspend fun refillRound(countEmpty: Boolean = true) {
         val owner = revision
-        val feedVersion = feedStore?.restore()?.version
-        if (owner != revision) return
-        if (fallbackFeedVersion != feedVersion) {
-            // 推荐换批以后，之前预取但未入队的候选不能追加到新列表。
-            fallbackFeedVersion = feedVersion
-            radioBuffer.clear()
-            searchBuffer.clear()
-            searchPosition = null
-            lastRadioLoad = null
-        }
+        val version = feedVersion
+        if (!ownsLoad(owner, version)) return
         val source = repository()
         val context = history.getOrNull(index)
         var hour = Math.floorDiv(epochSeconds(), 3600L)
@@ -264,12 +263,13 @@ internal class MusicQueueManager(
                 radioRequest.cancelAndJoin()
             }
         } catch (failure: MusicException) {
-            if (owner == revision && failure.failure in STOP_FALLBACK) fallbackFailure = failure
+            if (!ownsLoad(owner, version)) return
+            if (failure.failure in STOP_FALLBACK) fallbackFailure = failure
             throw failure
         }
 
         currentCoroutineContext().ensureActive()
-        if (owner != revision) return
+        if (!ownsLoad(owner, version)) return
         if (radioFetched) lastRadioLoad = nowMillis()
         searchPosition = position
         radioBuffer.addAll(radio.filter(::fresh))
@@ -279,7 +279,7 @@ internal class MusicQueueManager(
         if (listening != null) {
             val options = (radioBuffer + searchBuffer).filter(::fresh)
             val ranked = listening.rank(options, options.map { it.id }.toSet(), pending.lastOrNull() ?: history.getOrNull(index))
-            if (owner != revision) return
+            if (!ownsLoad(owner, version)) return
             for (track in ranked.take(FALLBACK_BATCH)) {
                 radioBuffer.removeAll { it.id == track.id }
                 searchBuffer.removeAll { it.id == track.id }
@@ -298,9 +298,8 @@ internal class MusicQueueManager(
         }
         if (added.isNotEmpty()) {
             emptyCycles = 0
-            val targetVersion = if (rolling) rollingFeedVersion else feedVersion
-            if (targetVersion != null)
-                feedStore?.appendFallback(targetVersion, added, if (listening == null) emptySet() else added.map { it.id }.toSet())
+            if (version != null)
+                feedStore?.appendFallback(version, added, if (listening == null) emptySet() else added.map { it.id }.toSet())
             return
         }
         if (timedOut || radioError != null || searchError != null) {
@@ -312,9 +311,11 @@ internal class MusicQueueManager(
     fun recordSuccessfulPlayback(selection: MusicSelection): Boolean {
         if (selection.token != issued || committed == selection.token) return false
         committed = selection.token
+        pending.removeAll { it.id == selection.track.id }
         remember(played, selection.track.id)
-        if (selection.historyIndex != null) {
-            index = selection.historyIndex
+        val historyIndex = selection.historyIndex?.takeIf { it in history.indices }
+        if (historyIndex != null) {
+            index = historyIndex
         } else {
             while (history.lastIndex > index) history.removeAt(history.lastIndex)
             if (history.lastOrNull()?.id != selection.track.id) history.add(selection.track)
@@ -327,25 +328,46 @@ internal class MusicQueueManager(
     fun reset(seed: MusicQueueSeed? = null, startAt: String? = null) {
         revision++
         invalidate()
-        pending.clear(); history.clear(); considered.clear(); played.clear(); skipped.clear(); seenCursors.clear()
-        clearSkipSignal()
-        cursor = null; exhausted = false; emptyCycles = 0
-        recordings.clear()
-        rolling = seed?.rolling == true
-        rollingFeedVersion = seed?.feedVersion
-        retriedCursor = false
-        searchPosition = null; lastRadioLoad = null; fallbackFailure = null
-        fallbackFeedVersion = null
-        radioBuffer.clear(); searchBuffer.clear()
-        index = -1; randomNext = null
+        history.clear(); played.clear(); skipped.clear()
+        index = -1
+        feedVersion = feedStore?.let { seed?.feedVersion ?: it.snapshot.value.version }
+        resetCandidates(seed)
         if (seed != null) {
             val tracks = seed.tracks.filter { it.canStartPlayback }.distinctBy { it.id }
             val selected = tracks.indexOfFirst { it.id == startAt }
             pending.addAll(if (shuffle) tracks.filterNot { it.id == startAt } else tracks.drop(selected + 1))
             tracks.forEach(::remember)
-            cursor = seed.nextCursor
-            exhausted = cursor == null
         }
+    }
+
+    fun syncFeed(): Boolean {
+        val snapshot = feedStore?.snapshot?.value ?: return false
+        if (feedVersion == snapshot.version) return false
+        feedVersion = snapshot.version
+        // 当前歌曲和已播放历史继续可用，旧批次的待播曲目和前进记录从这里换掉。
+        while (history.lastIndex > index) history.removeAt(history.lastIndex)
+        resetCandidates(MusicQueueSeed(snapshot.tracks, snapshot.nextCursor, snapshot.rolling, snapshot.version))
+        val currentId = history.getOrNull(index)?.id
+        pending.addAll(snapshot.tracks.filter { it.canStartPlayback && it.id != currentId })
+        history.forEach(::remember)
+        snapshot.tracks.forEach(::remember)
+        return true
+    }
+
+    private fun ownsLoad(owner: Long, version: Long?): Boolean =
+        owner == revision && version == feedVersion && version == feedStore?.snapshot?.value?.version
+
+    private fun resetCandidates(seed: MusicQueueSeed?) {
+        pending.clear(); considered.clear(); seenCursors.clear(); recordings.clear()
+        clearSkipSignal()
+        cursor = seed?.nextCursor
+        exhausted = seed != null && cursor == null
+        emptyCycles = 0
+        rolling = seed?.rolling == true
+        retriedCursor = false
+        searchPosition = null; lastRadioLoad = null; fallbackFailure = null
+        radioBuffer.clear(); searchBuffer.clear()
+        randomNext = null
     }
 
     private fun seenRecording(track: MusicTrack): Boolean {

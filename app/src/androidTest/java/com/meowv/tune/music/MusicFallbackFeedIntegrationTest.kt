@@ -42,7 +42,7 @@ import org.junit.Test
 class MusicFallbackFeedIntegrationTest {
     @get:Rule val compose = createEmptyComposeRule()
 
-    @Test fun queuedFallbackAppearsInTheFeedAndSurvivesUntilRecommendationsChange() = runBlocking<Unit> {
+    @Test fun automaticFallbackAppearsInTheFeedAndSurvivesUntilRecommendationsChange() = runBlocking<Unit> {
         val app = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as TuneTestApplication
         val original = MusicTrack("feed-base", "Base", listOf("qix"))
         val fallback = MusicTrack("feed-fallback", "Fallback", listOf("qix"),
@@ -51,7 +51,8 @@ class MusicFallbackFeedIntegrationTest {
         val replacement = MusicTrack("feed-replacement", "Replacement", listOf("qix"))
         val recommendations = MutableStateFlow(MusicPage(listOf(original)))
         val sourceExpired = AtomicBoolean()
-        val catalog = FakeMusicRepository(listOf(original, fallback, recovered, replacement), listOf(original, fallback, recovered).associate {
+        val tracks = listOf(original, fallback, recovered, replacement)
+        val catalog = FakeMusicRepository(tracks, tracks.associate {
             it.id to PlayableAudio(it.id, "test", it.id, 1.0,
                 "https://test.example/radio.mp3", "audio/mpeg", 12000, seekable = true)
         })
@@ -79,7 +80,10 @@ class MusicFallbackFeedIntegrationTest {
                     withTimeout(6000) {
                         controller.state.first { it.phase == PlaybackPhase.PLAYING && it.music?.id == original.id }
                     }
-                    controller.dispatch(PlayerCommand.Next)
+                    controller.dispatch(PlayerCommand.Seek(11_500))
+                    withTimeout(6000) {
+                        controller.state.first { it.phase == PlaybackPhase.PLAYING && it.music?.id == fallback.id }
+                    }
                     awaitRow(fallback.id)
                     compose.onNodeWithTag("music_feed_track_${fallback.id}").assertIsDisplayed()
 
@@ -100,6 +104,12 @@ class MusicFallbackFeedIntegrationTest {
                     scenario.moveToState(Lifecycle.State.CREATED).moveToState(Lifecycle.State.RESUMED)
                     awaitRow(replacement.id)
                     compose.onNodeWithTag("music_feed_track_${recovered.id}").assertDoesNotExist()
+                    assertEquals(recovered.id, controller.state.value.music?.id)
+                    assertEquals(PlaybackPhase.PLAYING, controller.state.value.phase)
+                    controller.dispatch(PlayerCommand.Seek(11_500))
+                    withTimeout(6000) {
+                        controller.state.first { it.phase == PlaybackPhase.PLAYING && it.music?.id == replacement.id }
+                    }
                 } finally {
                     controller.dispatch(PlayerCommand.Stop)
                 }

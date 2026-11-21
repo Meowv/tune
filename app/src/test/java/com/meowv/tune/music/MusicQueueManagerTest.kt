@@ -31,6 +31,7 @@ class MusicQueueManagerTest {
 
     @Test fun loadsFullRecommendationListBeforeRadioFallback() = runBlocking {
         val all = (1..75).map { MusicTrack(it.toString(), "Song $it", listOf("qix")) }
+        val feed = MusicFeedStore()
         var loads = 0
         var radio = 0
         val repository = object : MusicRepository by FakeMusicRepository(all) {
@@ -43,12 +44,37 @@ class MusicQueueManagerTest {
                 return emptyList()
             }
         }
-        val queue = MusicQueueManager({ repository })
+        val queue = MusicQueueManager({ repository }, feedStore = feed)
         all.forEach { assertEquals(it, queue.next()?.track) }
+        assertEquals(all, feed.snapshot.value.tracks)
         assertEquals(1, loads)
         assertEquals(0, radio)
         assertNull(queue.next())
         assertEquals(1, radio)
+    }
+
+    @Test fun refreshedFeedReplacesPendingTracksAndUsesTheNewCursor() = runBlocking {
+        val feed = MusicFeedStore()
+        val initial = feed.updateRecommendations(MusicPage(tracks.take(2), "old", strategy = "rolling_candidates"))
+        val source = object : MusicRepository by FakeMusicRepository(emptyList()) {
+            override suspend fun candidates(limit: Int, cursor: String?): MusicPage {
+                assertEquals("new", cursor)
+                return MusicPage(listOf(tracks[3]), strategy = "rolling_candidates", discoveryTrackIds = setOf(tracks[3].id))
+            }
+        }
+        val queue = MusicQueueManager({ source }, feedStore = feed)
+        queue.reset(MusicQueueSeed(initial.tracks, initial.nextCursor, rolling = true, feedVersion = initial.version))
+        assertTrue(queue.recordSuccessfulPlayback(checkNotNull(queue.next())))
+
+        val refreshed = feed.updateRecommendations(MusicPage(listOf(tracks[0], tracks[2]), "new", strategy = "rolling_candidates"))
+        assertEquals(initial.version + 1, refreshed.version)
+        val next = checkNotNull(queue.next())
+        assertEquals(tracks[2], next.track)
+        assertTrue(queue.recordSuccessfulPlayback(next))
+        assertEquals(tracks[0], queue.previous()?.track)
+        assertEquals(tracks[3], queue.next()?.track)
+        assertEquals(listOf(tracks[0], tracks[2], tracks[3]), feed.snapshot.value.tracks)
+        assertEquals(setOf(tracks[3].id), feed.snapshot.value.discoveryTrackIds)
     }
 
     @Test fun retainsOnlyTracksAppendedToThePlaybackQueue() = runBlocking {
@@ -65,7 +91,7 @@ class MusicQueueManagerTest {
         assertEquals(listOf(original) + candidates.take(12), feed.snapshot.value.tracks)
     }
 
-    @Test fun fallbackThatFinishesAfterRecommendationRefreshCannotReappearInTheFeed() = runBlocking {
+    @Test fun fallbackThatFinishesAfterRecommendationRefreshIsDiscarded() = runBlocking {
         val started = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
         val feed = MusicFeedStore()
@@ -83,7 +109,30 @@ class MusicQueueManagerTest {
         started.await()
         feed.updateRecommendations(MusicPage(listOf(tracks[1])))
         release.complete(Unit)
-        assertEquals(tracks[2], next.await()?.track)
+        assertEquals(tracks[1], next.await()?.track)
+        assertEquals(listOf(tracks[1]), feed.snapshot.value.tracks)
+    }
+
+    @Test fun rollingPageFromThePreviousFeedIsDiscardedEvenWhenItReturnsAfterRefresh() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val feed = MusicFeedStore()
+        val initial = feed.updateRecommendations(MusicPage(listOf(tracks[0]), "old", strategy = "rolling_candidates"))
+        val source = object : MusicRepository by FakeMusicRepository(emptyList()) {
+            override suspend fun candidates(limit: Int, cursor: String?): MusicPage {
+                assertEquals("old", cursor)
+                started.complete(Unit)
+                release.await()
+                return MusicPage(listOf(tracks[2]), strategy = "rolling_candidates")
+            }
+        }
+        val queue = MusicQueueManager({ source }, feedStore = feed)
+        queue.reset(MusicQueueSeed(initial.tracks, initial.nextCursor, rolling = true), startAt = tracks[0].id)
+        val next = async { queue.next() }
+        started.await()
+        feed.updateRecommendations(MusicPage(listOf(tracks[1]), strategy = "rolling_candidates"))
+        release.complete(Unit)
+        assertEquals(tracks[1], next.await()?.track)
         assertEquals(listOf(tracks[1]), feed.snapshot.value.tracks)
     }
 

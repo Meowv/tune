@@ -39,9 +39,9 @@ internal class MusicFeedStore(private val preferences: DataStore<Preferences>? =
 
     suspend fun updateRecommendations(page: MusicPage): MusicFeedSnapshot = update { previous ->
         val tracks = page.items.filter { it.canStartPlayback }.distinctBy { it.id }
-        if (page.partial && (previous.complete || tracks.isEmpty())) return@update previous
+        if (page.partial && (previous.complete || previous.tracks.isNotEmpty() || tracks.isEmpty())) return@update previous
         val rolling = page.strategy == "rolling_candidates"
-        val changed = previous.rolling != rolling || !page.partial && previous.complete &&
+        val changed = !page.partial &&
             previous.recommendations.mapTo(HashSet()) { it.id } != tracks.mapTo(HashSet()) { it.id }
         return@update previous.copy(
             version = if (changed) previous.version + 1 else previous.version,

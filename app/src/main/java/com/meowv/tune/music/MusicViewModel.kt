@@ -106,8 +106,12 @@ internal class MusicViewModel(
                         else -> MusicFailure.SOURCE_UNAVAILABLE
                     }
                 } else null
-                mutableBrowse.value = MusicFeed(tracks, loaded = true, failure = failure, seed = snapshot.seed(tracks))
-                listening?.displayed(tracks)
+                mutableBrowse.update {
+                    if (feedStore.snapshot.value == snapshot) {
+                        MusicFeed(tracks, loaded = true, failure = failure, seed = snapshot.seed(tracks))
+                    } else it.copy(loaded = true, loading = false, failure = failure)
+                }
+                listening?.displayed(mutableBrowse.value.tracks)
             } catch (failure: MusicException) {
                 mutableBrowse.update { it.copy(loading = false, failure = failure.failure) }
             }
