@@ -14,6 +14,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlaybackSource
@@ -176,13 +177,13 @@ class MainActivity : ComponentActivity() {
             val searchList = key(musicSearch.query, musicSearch.resultVersion) {
                 androidx.compose.foundation.lazy.grid.rememberLazyGridState()
             }
-            val searchContent: @androidx.compose.runtime.Composable (Boolean) -> Unit = { isCar ->
+            val searchContent: @Composable (Boolean, @Composable () -> Unit) -> Unit = { isCar, playerEntry ->
                 MusicSearchScreen(
                     musicSearch, musicSearchModel::queryChanged, musicSearchModel::search,
                     musicSearchModel::more,
                     { track -> ensureNotificationPermission(); musicSearchModel.select(track) },
                     musicSearchModel::selectHistory, musicSearchModel::clearHistory,
-                    musicSearchModel::close, searchList, isCar = isCar
+                    musicSearchModel::close, searchList, isCar = isCar, playerEntry = playerEntry
                 )
             }
             val settings by settingsModel.settings.collectAsStateWithLifecycle()

@@ -67,7 +67,8 @@ data class TuneSettings(
     val lastSuccessfulStation: UUID? = null,
     val lastPlayedStation: Station? = null,
     val displayMode: RadioDisplayMode = RadioDisplayMode.LIST,
-    val playbackOrder: PlaybackOrder = PlaybackOrder.SHUFFLE
+    val playbackOrder: PlaybackOrder = PlaybackOrder.SHUFFLE,
+    val musicDisplayMode: RadioDisplayMode = RadioDisplayMode.LIST
 )
 
 interface SettingsRepository {

@@ -65,6 +65,13 @@ class MusicSearchIntegrationTest {
                 awaitTrack("original-002")
                 assertTrue(connection.state.value.canPrevious)
                 compose.onNodeWithTag("music_search_open").performClick()
+                val searchToggle = compose.onNode(hasTestTag("mini_player_toggle") and
+                    hasAnyAncestor(hasTestTag("music_search_player")))
+                searchToggle.assertIsDisplayed().performClick()
+                withTimeout(5000) { connection.state.first { it.phase == PlaybackPhase.PAUSED } }
+                compose.onNodeWithTag("music_search_result_original-001").assertIsDisplayed()
+                searchToggle.performClick()
+                awaitTrack("original-002")
                 compose.onNodeWithTag("music_search_close").performClick()
                 assertEquals(token, main { controller.connectedToken })
                 assertEquals(PlaybackPhase.PLAYING, connection.state.value.phase)
@@ -84,6 +91,9 @@ class MusicSearchIntegrationTest {
             connection.dispatch(PlayerCommand.Stop)
             try {
                 compose.onNodeWithTag("nav_music").performClick()
+                compose.onNodeWithTag("music_search_open").performClick()
+                compose.onNodeWithTag("music_search_close").performClick()
+                compose.onNodeWithTag("music_search_page").assertDoesNotExist()
                 compose.onNodeWithTag("music_search_open").performClick()
                 compose.onNodeWithTag("music_search_query").performTextInput("no-result-for-this-query")
                 compose.onNodeWithTag("music_search_query").performImeAction()

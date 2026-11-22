@@ -31,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -75,6 +76,8 @@ internal fun MusicScreen(
     onCommand: (PlayerCommand) -> Unit,
     onSearch: () -> Unit,
     onLoad: () -> Unit,
+    displayMode: RadioDisplayMode,
+    onDisplayModeChange: (RadioDisplayMode) -> Unit,
     animationsEnabled: Boolean = true
 ) {
     val playback = (state as? MusicUiState.Active)?.playback
@@ -83,7 +86,6 @@ internal fun MusicScreen(
     val playbackError = playback?.let { musicPlaybackErrorText(it) }
     val waitingForAccess = browse.failure == MusicFailure.NOT_CONFIGURED
     val list = rememberLazyGridState()
-    var mode by rememberSaveable { mutableStateOf(RadioDisplayMode.LIST) }
     var previewId by rememberSaveable { mutableStateOf<String?>(null) }
     var listSelectionId by rememberSaveable { mutableStateOf<String?>(null) }
     val listTrackToCenter = listSelectionId?.takeIf {
@@ -105,7 +107,7 @@ internal fun MusicScreen(
                     DirectoryActionChip(search, search, R.drawable.ic_ui_search, isCar,
                         Modifier.weight(1f).padding(end = TuneSpacing.Medium)
                             .testTag("music_search_open"), onClick = onSearch)
-                    LayoutSwitcher(mode, { mode = it }, isCar)
+                    LayoutSwitcher(displayMode, onDisplayModeChange, isCar)
                 }
             }
 
@@ -132,7 +134,7 @@ internal fun MusicScreen(
                 if (song.id == currentId && visual in setOf(StationPlaybackVisual.Playing, StationPlaybackVisual.Paused)) {
                     onCommand(PlayerCommand.TogglePause)
                 } else {
-                    listSelectionId = song.id.takeIf { mode == RadioDisplayMode.LIST }
+                    listSelectionId = song.id.takeIf { displayMode == RadioDisplayMode.LIST }
                     onCommand(PlayerCommand.PlayMusic(song, browse.seed ?: MusicQueueSeed(browse.tracks, null)))
                 }
             }
@@ -140,7 +142,7 @@ internal fun MusicScreen(
                 DirectoryFeedback(musicPlaybackFailureMessage(browse.failure), onLoad)
             }
 
-            if (mode == RadioDisplayMode.CARD) {
+            if (displayMode == RadioDisplayMode.CARD) {
                 MusicCards(browse.tracks, currentId, visual, playbackError, connected,
                     playback != null && playback.phase in CardAutoplayPhases, isCar,
                     previewId, listTrackToCenter, { id ->
@@ -271,10 +273,10 @@ private fun MusicCards(
     BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         val statusHeight = if (isCar) 28.dp else 22.dp
         val statusGap = TuneSpacing.Small
-        val viewport = if (isCar) maxWidth else minOf(maxWidth, 400.dp)
-        val width = minOf(if (isCar) 290.dp else 263.dp, (viewport - 48.dp).coerceAtLeast(1.dp))
-        val height = minOf(if (isCar) 313.dp else 356.dp, width * (if (isCar) 1.08f else 1.36f),
-            (maxHeight - statusHeight - statusGap - TuneSpacing.Wide).coerceAtLeast(1.dp))
+        val viewport = maxWidth
+        val pagerPositionHeight = if (tracks.size > 1) MediaPagerPositionHeight else 0.dp
+        val cardSpace = maxHeight - statusHeight - statusGap - pagerPositionHeight - TuneSpacing.Large
+        val (width, height) = mediaCardSize(viewport, cardSpace, isCar)
         HorizontalPager(
             state = pager,
             pageSize = PageSize.Fixed(width),
@@ -358,7 +360,11 @@ private fun MusicCard(
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val compact = maxHeight < 280.dp
             val pad = if (compact) TuneSpacing.Large else TuneSpacing.Section
-            val cover = minOf(if (isCar) 180.dp else 178.dp, maxWidth - pad * 2, maxHeight - pad * 2 - 76.dp)
+            val titleLine = if (isCar) 25.sp else 23.sp
+            val secondary = TuneTypography.secondary(isCar)
+            val textHeight = with(LocalDensity.current) { titleLine.toDp() * 2 + secondary.lineHeight.toDp() }
+            val cover = minOf(maxWidth * .68f, maxWidth - pad * 2,
+                maxHeight - pad * 2 - textHeight - TuneSpacing.Medium - TuneSpacing.Hairline)
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(pad),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                 if (cover >= 32.dp) {
@@ -367,11 +373,11 @@ private fun MusicCard(
                 }
                 Text(track.title, color = if (current) TuneColors.PrimaryLight else TuneColors.Text,
                     style = TuneTypography.pageTitle(isCar), fontSize = if (isCar) 20.sp else 18.sp,
-                    lineHeight = if (isCar) 25.sp else 23.sp,
+                    lineHeight = titleLine,
                     textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(TuneSpacing.Hairline))
                 Text(track.artists.joinToString(" / "), color = TuneColors.Muted,
-                    style = TuneTypography.secondary(isCar),
+                    style = secondary,
                     textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }

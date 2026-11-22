@@ -52,7 +52,6 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.ScaleFactor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -68,6 +67,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -204,10 +204,7 @@ internal fun rememberMotionEnabled(): Boolean {
 private const val WAVE_BAR_COUNT = 4
 private val WAVE_STATIC_LEVELS = listOf(.42f, .78f, .55f, .9f)
 
-/**
- * 台标容器：固定正方形 + 统一圆角，图片按容器边界裁切，不拉伸也不越界。
- * 缩放策略见 [BadgeContentScale]：近方形图铺满，其余完整展示。
- */
+/** 台标保持图片原比例，避免裁掉贴近边缘的文字。 */
 @Composable
 internal fun StationBadge(station: Station?, size: Dp) {
     // 圆角随尺寸缩放，但不超过大卡片的 28dp，保证子元素始终比父容器更方。
@@ -251,22 +248,7 @@ internal fun MediaArtwork(url: String?, isMusic: Boolean, modifier: Modifier = M
     }
 }
 
-/** 容器的正方形比例允许 10% 误差，超出后铺满就会切到可见内容。 */
-private val BADGE_CROP_RANGE = .9f..1.11f
-
-internal fun badgeScale(width: Float, height: Float): ContentScale {
-    if (width <= 0f || height <= 0f) return ContentScale.Fit
-    return if (width / height in BADGE_CROP_RANGE) ContentScale.Crop else ContentScale.Fit
-}
-
-/**
- * 按每张图的实际尺寸在绘制期决定缩放方式：不额外记录状态，也不触发重组，
- * 列表滚动时不会因为图片尺寸回写而抖动。
- */
-internal object BadgeContentScale : ContentScale {
-    override fun computeScaleFactor(srcSize: Size, dstSize: Size): ScaleFactor =
-        badgeScale(srcSize.width, srcSize.height).computeScaleFactor(srcSize, dstSize)
-}
+internal val BadgeContentScale = ContentScale.Fit
 
 /** 品牌栏：手机 64dp / 车机 80dp，单行 Logo + 名称。 */
 @Composable
@@ -522,6 +504,19 @@ internal fun Modifier.mediaCardDepth(isCar: Boolean, offset: () -> Float): Modif
     transformOrigin = TransformOrigin(if (position < 0f) 0f else 1f, .5f)
 }
 
+internal fun mediaCardSize(viewport: Dp, availableHeight: Dp, isCar: Boolean): DpSize {
+    val ratio = if (isCar) 1.08f else 1.36f
+    val preferredWidth = (viewport * if (isCar) .46f else .67f)
+        .coerceAtMost(if (isCar) 380.dp else 352.dp)
+    val height = availableHeight.coerceAtLeast(1.dp)
+    val width = minOf(
+        preferredWidth,
+        viewport - 48.dp,
+        (height / ratio).coerceAtLeast(if (isCar) 230.dp else 200.dp)
+    ).coerceAtLeast(1.dp)
+    return DpSize(width, minOf(height, width * ratio))
+}
+
 internal fun Modifier.mediaCardSurface(focused: Boolean): Modifier =
     shadow(10.dp, TuneShapes.Card)
         .clip(TuneShapes.Card)
@@ -532,16 +527,18 @@ internal fun Modifier.mediaCardSurface(focused: Boolean): Modifier =
             TuneShapes.Card
         )
 
+internal val MediaPagerPositionHeight = 12.dp
+
 @Composable
 internal fun MediaPagerPosition(page: Int, count: Int, visibleOnPage: Boolean) {
     if (count < 2) return
     if (!visibleOnPage) {
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(MediaPagerPositionHeight))
         return
     }
     val visible = minOf(3, count)
     val first = (page - 1).coerceIn(0, count - visible)
-    Row(Modifier.height(12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp),
+    Row(Modifier.height(MediaPagerPositionHeight), horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically) {
         repeat(visible) { index ->
             val active = first + index == page

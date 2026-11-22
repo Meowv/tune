@@ -42,6 +42,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
@@ -106,9 +107,18 @@ private fun MusicLyricPreview(state: PlayerUiState, isCar: Boolean, compact: Boo
     val lines = state.musicLyrics
     val index = MusicLyrics.activeLine(lines, state.positionMs ?: 0)
     val animationMillis = if (rememberMotionEnabled()) TuneMotion.ColorChange else 0
+    val currentStyle = TuneTypography.rowTitle(isCar && !compact)
+    val nextStyle = TuneTypography.secondary(isCar)
+    val lineCount = if (compact) 1 else 2
+    val lyricHeight = with(LocalDensity.current) {
+        val currentHeight = currentStyle.lineHeight.toDp() * lineCount
+        val nextHeight = nextStyle.lineHeight.toDp()
+        if (compact) maxOf(currentHeight, nextHeight) else currentHeight + nextHeight + TuneSpacing.Hairline
+    }
     AnimatedContent(
         targetState = index,
-        modifier = Modifier.fillMaxWidth().clipToBounds().testTag("music_lyrics"),
+        modifier = Modifier.fillMaxWidth().padding(top = if (compact) 0.dp else TuneSpacing.Hairline)
+            .height(lyricHeight + 1.dp).clipToBounds().testTag("music_lyrics"),
         transitionSpec = {
             val direction = if (targetState > initialState) 1 else -1
             slideInVertically(tween(animationMillis)) { it * direction } togetherWith
@@ -125,10 +135,10 @@ private fun MusicLyricPreview(state: PlayerUiState, isCar: Boolean, compact: Boo
                 Text(
                     it.text,
                     color = TuneColors.Text,
-                    style = TuneTypography.rowTitle(isCar && !compact),
+                    style = currentStyle,
                     fontWeight = FontWeight.Medium,
                     textAlign = TextAlign.Center,
-                    maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis
+                    maxLines = lineCount, overflow = TextOverflow.Ellipsis
                 )
             }
             if (!compact || lineIndex < 0) {
@@ -136,7 +146,7 @@ private fun MusicLyricPreview(state: PlayerUiState, isCar: Boolean, compact: Boo
                     Text(
                         it.text,
                         color = TuneColors.Muted,
-                        style = TuneTypography.secondary(isCar),
+                        style = nextStyle,
                         textAlign = TextAlign.Center,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis

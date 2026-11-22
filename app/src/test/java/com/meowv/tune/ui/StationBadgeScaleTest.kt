@@ -1,33 +1,29 @@
 package com.meowv.tune.ui
 
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.geometry.Size
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class StationBadgeScaleTest {
     @Test
     fun squareArtworkFillsContainer() {
-        assertEquals(ContentScale.Crop, badgeScale(512f, 512f))
+        val scale = BadgeContentScale.computeScaleFactor(Size(512f, 512f), Size(180f, 180f))
+        assertEquals(180f, 512f * scale.scaleX, .01f)
+        assertEquals(180f, 512f * scale.scaleY, .01f)
     }
 
     @Test
-    fun nearlySquareArtworkFillsContainer() {
-        assertEquals(ContentScale.Crop, badgeScale(300f, 280f))
-        assertEquals(ContentScale.Crop, badgeScale(280f, 300f))
+    fun nearlySquarePortraitKeepsTheFullHeight() {
+        val scale = BadgeContentScale.computeScaleFactor(Size(1100f, 1199f), Size(180f, 180f))
+        assertEquals(180f, 1199f * scale.scaleY, .01f)
+        assertEquals(scale.scaleX, scale.scaleY, .0001f)
     }
 
     // 宽幅/竖长图多为带文字的台标，铺满会切掉内容，必须完整展示。
     @Test
-    fun nonSquareArtworkKeepsFullContent() {
-        assertEquals(ContentScale.Fit, badgeScale(640f, 360f))
-        assertEquals(ContentScale.Fit, badgeScale(360f, 640f))
-        assertEquals(ContentScale.Fit, badgeScale(300f, 200f))
-    }
-
-    @Test
-    fun unknownSizeFallsBackToFit() {
-        assertEquals(ContentScale.Fit, badgeScale(0f, 0f))
-        assertEquals(ContentScale.Fit, badgeScale(512f, 0f))
-        assertEquals(ContentScale.Fit, badgeScale(Float.NaN, Float.NaN))
+    fun landscapeArtworkKeepsTheFullWidth() {
+        val scale = BadgeContentScale.computeScaleFactor(Size(640f, 360f), Size(180f, 180f))
+        assertEquals(180f, 640f * scale.scaleX, .01f)
+        assertEquals(scale.scaleX, scale.scaleY, .0001f)
     }
 }

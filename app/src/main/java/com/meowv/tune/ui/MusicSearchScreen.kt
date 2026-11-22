@@ -73,13 +73,19 @@ internal fun MusicSearchScreen(
     onClearHistory: () -> Unit,
     onClose: () -> Unit,
     list: LazyGridState = rememberLazyGridState(),
-    isCar: Boolean
+    isCar: Boolean,
+    playerEntry: @Composable () -> Unit
 ) {
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
     val requester = remember { FocusRequester() }
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
-    BackHandler(enabled = !imeVisible) { onClose() }
+    val close: () -> Unit = {
+        keyboard?.hide()
+        focus.clearFocus()
+        onClose()
+    }
+    BackHandler(enabled = !imeVisible, onBack = close)
     val submitEnabled = !state.loading && !state.selecting && state.query.isNotBlank()
     val submit: () -> Unit = {
         if (submitEnabled) {
@@ -104,13 +110,9 @@ internal fun MusicSearchScreen(
                     horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Small),
                     verticalAlignment = Alignment.CenterVertically) {
                     SearchIconButton(
-                        R.drawable.ic_arrow_back, R.string.music_search_close, touch, "music_search_close"
-                    ) {
-                        if (imeVisible) {
-                            keyboard?.hide()
-                            focus.clearFocus()
-                        } else onClose()
-                    }
+                        R.drawable.ic_arrow_back, R.string.music_search_close, touch, "music_search_close",
+                        onClick = close
+                    )
                     SearchInput(
                         query = state.query,
                         enabled = !state.selecting,
@@ -192,6 +194,15 @@ internal fun MusicSearchScreen(
                                 } else null
                             )
                         }
+                    }
+                }
+                if (!imeVisible) {
+                    Box(
+                        Modifier.fillMaxWidth().testTag("music_search_player")
+                            .then(if (isCar) Modifier else Modifier.padding(horizontal = TuneSpacing.Medium,
+                                vertical = TuneSpacing.Small))
+                    ) {
+                        playerEntry()
                     }
                 }
             }

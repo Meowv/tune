@@ -29,6 +29,7 @@ class DataStoreSettingsRepositoryTest {
             coroutineScope {
                 launch(Dispatchers.Default) { repository.update { it.copy(scope = japan) } }
                 launch(Dispatchers.Default) { repository.update { it.copy(autoPlay = true) } }
+                launch(Dispatchers.Default) { repository.update { it.copy(musicDisplayMode = RadioDisplayMode.CARD) } }
                 launch(Dispatchers.Default) {
                     repository.update {
                         it.copy(displayMode = RadioDisplayMode.CARD, playbackOrder = PlaybackOrder.SEQUENTIAL)
@@ -41,11 +42,14 @@ class DataStoreSettingsRepositoryTest {
             assertEquals(
                 TuneSettings(
                     scope = japan, autoPlay = true, lastSuccessfulStation = uuid,
-                    displayMode = RadioDisplayMode.CARD, playbackOrder = PlaybackOrder.SEQUENTIAL
+                    displayMode = RadioDisplayMode.CARD, playbackOrder = PlaybackOrder.SEQUENTIAL,
+                    musicDisplayMode = RadioDisplayMode.CARD
                 ),
                 repository.settings.first()
             )
-            repository.update { it.copy(autoPlay = false, scope = RadioScope(ScopeMode.GLOBAL)) }
+            repository.update {
+                it.copy(autoPlay = false, scope = RadioScope(ScopeMode.GLOBAL), displayMode = RadioDisplayMode.LIST)
+            }
             repository.recordSuccessfulStation(uuid)
         }
         open(file) { repository ->
@@ -53,7 +57,8 @@ class DataStoreSettingsRepositoryTest {
             assertFalse(settings.autoPlay)
             assertEquals(uuid, settings.lastSuccessfulStation)
             assertEquals(ScopeMode.GLOBAL, settings.scope.mode)
-            assertEquals(RadioDisplayMode.CARD, settings.displayMode)
+            assertEquals(RadioDisplayMode.LIST, settings.displayMode)
+            assertEquals(RadioDisplayMode.CARD, settings.musicDisplayMode)
             assertEquals(PlaybackOrder.SEQUENTIAL, settings.playbackOrder)
             repository.update { it.copy(autoPlay = true, lastSuccessfulStation = uuid) }
             assertEquals(uuid, repository.settings.first().lastSuccessfulStation)
@@ -69,6 +74,7 @@ class DataStoreSettingsRepositoryTest {
                 it[stringPreferencesKey("scope")] = "COUNTRY"
                 it[stringPreferencesKey("country")] = "ZZ"
                 it[stringPreferencesKey("auto_play")] = "true"
+                it[stringPreferencesKey("music_display_mode")] = "UNKNOWN"
                 // 已下线的设置键即使残留也不应再影响当前设置。
                 it[booleanPreferencesKey("wifi_only")] = true
                 it[booleanPreferencesKey("data_warning")] = false

@@ -95,7 +95,7 @@ internal fun TuneApp(
     onSearchMusic: () -> Unit = {},
     musicSearchOpen: Boolean = false,
     onCloseMusicSearch: () -> Unit = {},
-    musicSearchContent: @Composable (Boolean) -> Unit = {},
+    musicSearchContent: @Composable (Boolean, @Composable () -> Unit) -> Unit = { _, _ -> },
     musicBrowse: MusicFeed = MusicFeed(),
     onEnterMusic: () -> Unit = {},
     onLoadMusic: () -> Unit = {},
@@ -304,7 +304,9 @@ internal fun TuneApp(
                         if (isCar) {
                             if (!fullscreenOccupied && !musicSearchOpen && !showUpdate) playerEntry()
                         } else {
-                            MeowvBottomDock(page, playerEntry) { page = it }
+                            MeowvBottomDock(page, {
+                                if (musicSearchOpen) Spacer(Modifier.height(PhoneMiniPlayerHeight)) else playerEntry()
+                            }) { page = it }
                         }
                     }
                     if (!shellEnabled || showUpdate || musicSearchOpen) {
@@ -320,11 +322,7 @@ internal fun TuneApp(
                             playerEntry()
                         }
                     } else if (isCar && musicSearchOpen) {
-                        Column(Modifier.fillMaxSize()) {
-                            Box(Modifier.weight(1f).fillMaxWidth()) { musicSearchContent(true) }
-                            val imeVisible = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
-                            if (!imeVisible) playerEntry()
-                        }
+                        musicSearchContent(true, playerEntry)
                     }
                     androidx.compose.animation.AnimatedVisibility(
                         visibleState = fullscreenTransition,
@@ -374,7 +372,7 @@ internal fun TuneApp(
                     properties = androidx.compose.ui.window.DialogProperties(
                         usePlatformDefaultWidth = false, decorFitsSystemWindows = false
                     )
-                ) { musicSearchContent(false) }
+                ) { musicSearchContent(false, playerEntry) }
             }
             if (!isCar && showUpdate) {
                 updateContent(
@@ -531,6 +529,8 @@ private fun pageContent(
                 animationsEnabled = directoryAnimationsEnabled
             )
             TunePage.Music -> MusicScreen(isCar, musicState, musicBrowse, connected, onPlayback, onSearchMusic, onLoadMusic,
+                displayMode = settings.musicDisplayMode,
+                onDisplayModeChange = { mode -> onSettingsChange { it.copy(musicDisplayMode = mode) } },
                 animationsEnabled = directoryAnimationsEnabled)
             TunePage.Settings -> SettingsScreen(
                 isCar = isCar,

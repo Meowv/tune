@@ -393,9 +393,9 @@ private fun CardMode(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val statusGap = TuneSpacing.Small
         val statusHeight = if (isCar) 28.dp else 22.dp
-        val width = minOf(if (isCar) 290.dp else 263.dp, (maxWidth - 48.dp).coerceAtLeast(1.dp))
-        val height = minOf(if (isCar) 313.dp else 356.dp, width * (if (isCar) 1.08f else 1.36f),
-            (maxHeight - statusHeight - statusGap - TuneSpacing.Wide).coerceAtLeast(1.dp))
+        val pagerPositionHeight = if (queue.size > 1) MediaPagerPositionHeight else 0.dp
+        val cardSpace = maxHeight - statusHeight - statusGap - pagerPositionHeight - TuneSpacing.Large
+        val (width, height) = mediaCardSize(maxWidth, cardSpace, isCar)
         val side = (maxWidth - width) / 2
         HorizontalPager(
             state = pagerState,
@@ -462,9 +462,8 @@ private fun StationCard(
             with(LocalDensity.current) { (if (isCar) 20.sp else 18.sp).toDp() } + TuneSpacing.Small
         } else 0.dp
         val artworkGap = if (isCar) TuneSpacing.Large else TuneSpacing.Medium
-        val artwork = (maxHeight - padding * 2 - nameBlock - countryHeight - artworkGap)
-            .coerceIn(0.dp, if (isCar) 180.dp else 178.dp)
-            .coerceAtMost((maxWidth - padding * 2).coerceAtLeast(0.dp))
+        val artwork = minOf(maxWidth * .68f, maxWidth - padding * 2,
+            maxHeight - padding * 2 - nameBlock - countryHeight - artworkGap)
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding),
             horizontalAlignment = Alignment.CenterHorizontally,

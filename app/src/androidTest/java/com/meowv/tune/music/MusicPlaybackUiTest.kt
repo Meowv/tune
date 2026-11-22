@@ -52,7 +52,9 @@ class MusicPlaybackUiTest {
                 fake.recommendations(limit, cursor).copy(partial = true, warnings = listOf("qqmusic:source_unavailable"))
         }
         app.mockNetwork.value = NetworkState(NetworkType.WIFI)
-        app.userSettings.update { it.copy(autoPlay = false, playbackOrder = PlaybackOrder.SEQUENTIAL) }
+        app.userSettings.update {
+            it.copy(autoPlay = false, playbackOrder = PlaybackOrder.SEQUENTIAL, musicDisplayMode = RadioDisplayMode.LIST)
+        }
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             val connection = app.playerController
             suspend fun expectPlayback(step: String, phase: PlaybackPhase, trackId: String) {
@@ -71,6 +73,11 @@ class MusicPlaybackUiTest {
             val listMode = compose.onNode(hasTestTag("layout_list") and musicPage)
             val cardMode = compose.onNode(hasTestTag("layout_card") and musicPage)
             val feed = compose.onNodeWithTag("music_feed")
+            val cards = compose.onNodeWithTag("music_cards")
+            fun switchMode(button: SemanticsNodeInteraction, content: SemanticsNodeInteraction) {
+                button.performClick()
+                compose.waitUntil(5000) { content.isDisplayed() }
+            }
             withTimeout(5000) { connection.connected.first { ready -> ready } }
             try {
                 compose.onNodeWithTag("nav_music").performClick()
@@ -108,25 +115,30 @@ class MusicPlaybackUiTest {
                 rowControl.performTouchInput { click() }
                 expectPlayback("列表内继续播放", PlaybackPhase.PLAYING, "ui-2")
                 compose.onNodeWithTag("now_playing_screen").assertDoesNotExist()
-                cardMode.performClick()
-                compose.onNodeWithTag("music_cards").assertIsDisplayed()
+                switchMode(cardMode, cards)
                 val currentCard = compose.onNodeWithTag("music_feed_card_ui-2")
+                val thirdCard = compose.onNodeWithTag("music_feed_card_ui-3")
                 currentCard.assertIsSelected()
                 currentCard.performTouchInput { swipeLeft() }
-                compose.onNodeWithTag("music_feed_card_ui-3").assertIsSelected()
-                assertEquals("ui-2", connection.state.value.music?.id)
-                assertEquals(PlaybackPhase.PLAYING, connection.state.value.phase)
+                thirdCard.assertIsSelected()
+                expectPlayback("播放中左滑卡片切到第三首", PlaybackPhase.PLAYING, "ui-3")
+                thirdCard.performClick()
+                expectPlayback("卡片内暂停第三首", PlaybackPhase.PAUSED, "ui-3")
+                thirdCard.performTouchInput { swipeRight() }
+                currentCard.assertIsSelected()
 
-                listMode.performClick()
-                cardMode.performClick()
-                compose.onNodeWithTag("music_feed_card_ui-3").assertIsSelected()
+                switchMode(listMode, feed)
+                switchMode(cardMode, cards)
+                currentCard.assertIsSelected()
                 compose.onNodeWithTag("circular_player_entry").performClick()
                 compose.onNodeWithTag("now_playing_collapse").performClick()
-                compose.onNodeWithTag("music_feed_card_ui-3").assertIsSelected()
-                assertEquals("ui-2", connection.state.value.music?.id)
+                currentCard.assertIsSelected()
+                assertEquals("ui-3", connection.state.value.music?.id)
+                assertEquals(PlaybackPhase.PAUSED, connection.state.value.phase)
 
-                compose.onNodeWithTag("music_feed_card_ui-3").performTouchInput { swipeRight() }
-                currentCard.assertIsSelected().performClick()
+                currentCard.performClick()
+                expectPlayback("点按已浏览的第二首", PlaybackPhase.PLAYING, "ui-2")
+                currentCard.performClick()
                 expectPlayback("卡片内暂停", PlaybackPhase.PAUSED, "ui-2")
                 compose.onNodeWithTag("now_playing_screen").assertDoesNotExist()
                 currentCard.performClick()
@@ -136,12 +148,12 @@ class MusicPlaybackUiTest {
                     captureDragFrame(scenario)
                     assertEquals("ui-2", connection.state.value.music?.id)
                 }
-                listMode.performClick()
+                switchMode(listMode, feed)
                 compose.onNodeWithTag("music_feed_track_ui-1").performClick()
                 expectPlayback("返回列表选择第一首", PlaybackPhase.PLAYING, "ui-1")
-                cardMode.performClick()
+                switchMode(cardMode, cards)
                 compose.onNodeWithTag("music_feed_card_ui-1").assertIsSelected()
-                listMode.performClick()
+                switchMode(listMode, feed)
                 compose.onNodeWithTag("music_feed_track_ui-2").performClick()
                 expectPlayback("打开沉浸页前选择第二首", PlaybackPhase.PLAYING, "ui-2")
                 capture("page")
@@ -190,13 +202,15 @@ class MusicPlaybackUiTest {
                 compose.waitUntil(5000) { compose.onNodeWithTag("page_radio").isDisplayed() }
                 compose.onNodeWithTag("nav_music").performClick()
                 compose.waitUntil(5000) { feed.isDisplayed() }
+                switchMode(cardMode, cards)
                 scenario.recreate()
-                compose.waitUntil(5000) { feed.isDisplayed() }
+                compose.waitUntil(5000) { cards.isDisplayed() }
                 assertEquals("ui-3", connection.state.value.music?.id)
                 assertEquals(PlaybackPhase.PAUSED, connection.state.value.phase)
             } finally {
                 connection.dispatch(PlayerCommand.Stop)
                 app.testMusicRepository = null
+                app.userSettings.update { it.copy(musicDisplayMode = RadioDisplayMode.LIST) }
             }
         }
     }

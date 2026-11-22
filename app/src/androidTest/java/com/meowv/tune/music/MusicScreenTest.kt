@@ -1,9 +1,15 @@
 package com.meowv.tune.music
 
 import android.graphics.Bitmap
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.platform.app.InstrumentationRegistry
@@ -11,9 +17,11 @@ import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlaybackSource
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.PlayerCommand
+import com.meowv.tune.domain.RadioDisplayMode
 import com.meowv.tune.domain.TuneError
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import com.meowv.tune.R
 import com.meowv.tune.ui.MediaArtwork
@@ -38,7 +46,7 @@ class MusicScreenTest {
 
     @Test fun unconfiguredHidesTheNoticeAndRetry() {
         compose.setContent { TuneTheme {
-            MusicScreen(isCar, MusicUiState.NotConfigured, MusicFeed(), true, {}, {}, {})
+            TestMusicScreen(isCar, MusicUiState.NotConfigured, MusicFeed(), true, {}, {}, {})
         } }
         compose.onNodeWithText("音乐服务暂未就绪").assertDoesNotExist()
         compose.onNodeWithText("重试").assertDoesNotExist()
@@ -50,7 +58,7 @@ class MusicScreenTest {
     @Test fun waitingForAccessHidesTheNoticeWithOrWithoutCachedTracks() {
         val browse = mutableStateOf(MusicFeed(failure = MusicFailure.NOT_CONFIGURED))
         compose.setContent { TuneTheme {
-            MusicScreen(isCar, MusicUiState.Idle, browse.value, true, {}, {}, {})
+            TestMusicScreen(isCar, MusicUiState.Idle, browse.value, true, {}, {}, {})
         } }
         compose.onNodeWithText("音乐服务暂未就绪").assertDoesNotExist()
         compose.onNodeWithText("重试").assertDoesNotExist()
@@ -66,7 +74,7 @@ class MusicScreenTest {
     @Test fun listAndCardsDisplayTheSameTrack() {
         val track = MusicTrack("original-001", "睡醒就好了（测试片段）", listOf("qix"))
         compose.setContent { TuneTheme {
-            MusicScreen(isCar, MusicUiState.Idle, MusicFeed(tracks = listOf(track)), true, {}, {}, {})
+            TestMusicScreen(isCar, MusicUiState.Idle, MusicFeed(tracks = listOf(track)), true, {}, {}, {})
         } }
         compose.onNodeWithTag("music_feed_track_original-001").assertIsDisplayed()
         compose.onNodeWithTag("layout_card").performClick()
@@ -82,7 +90,7 @@ class MusicScreenTest {
         ))
         val commands = mutableListOf<PlayerCommand>()
         compose.setContent { TuneTheme {
-            MusicScreen(isCar, paused, MusicFeed(tracks = tracks), true, { commands.add(it) }, {}, {})
+            TestMusicScreen(isCar, paused, MusicFeed(tracks = tracks), true, { commands.add(it) }, {}, {})
         } }
         compose.onNodeWithTag("layout_card").performClick()
         compose.onNodeWithTag("music_feed_card_drag-1").assertIsSelected()
@@ -103,7 +111,7 @@ class MusicScreenTest {
         ))
         val commands = mutableListOf<PlayerCommand>()
         compose.setContent { TuneTheme {
-            MusicScreen(isCar, MusicUiState.Active(playback.value), MusicFeed(tracks = tracks), true,
+            TestMusicScreen(isCar, MusicUiState.Active(playback.value), MusicFeed(tracks = tracks), true,
                 { commands.add(it) }, {}, {})
         } }
         compose.onNodeWithTag("layout_card").performClick()
@@ -135,7 +143,7 @@ class MusicScreenTest {
         )
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         compose.setContent { TuneTheme {
-            MusicScreen(isCar, MusicUiState.Active(playback.value), MusicFeed(tracks = listOf(track)),
+            TestMusicScreen(isCar, MusicUiState.Active(playback.value), MusicFeed(tracks = listOf(track)),
                 true, {}, {}, {})
         } }
         cases.forEach { (failure, message) ->
@@ -219,6 +227,38 @@ class MusicScreenTest {
         compose.onNodeWithTag("now_playing_play").assertIsDisplayed()
     }
 
+    @Test fun largeTextKeepsTheLyricsAndPlaybackControlsStable() {
+        val longLine = "This lyric wraps onto another line at a larger font size. ".repeat(4).trim()
+        val state = mutableStateOf(PlayerUiState(
+            source = PlaybackSource.MUSIC, phase = PlaybackPhase.PAUSED,
+            music = MusicTrack("large-text", "A song", listOf("Test artist")),
+            durationMs = 12000, positionMs = 2000, canSeek = true,
+            musicLyrics = listOf(MusicLyricLine(0, "Short lyric"), MusicLyricLine(5000, longLine))
+        ))
+        compose.setContent {
+            val density = LocalDensity.current.density
+            CompositionLocalProvider(LocalDensity provides Density(density, fontScale = 1.5f)) {
+                TuneTheme {
+                    NowPlayingScreen(
+                        isCar = isCar, connected = true, state = state.value, station = null,
+                        shuffle = false, sleepTimer = SleepTimerState(), onCollapse = {}, onToggle = {},
+                        onNext = {}, onPrevious = {}, onToggleShuffle = {}, onSetSleepTimer = {}
+                    )
+                }
+            }
+        }
+        val lyrics = compose.onNodeWithTag("music_lyrics").assertIsDisplayed()
+        val seek = compose.onNodeWithTag("music_seek").assertIsDisplayed()
+        val play = compose.onNodeWithTag("now_playing_play").assertIsDisplayed()
+        val lyricsBounds = lyrics.getUnclippedBoundsInRoot()
+        val seekBounds = seek.getUnclippedBoundsInRoot()
+        val playBounds = play.getUnclippedBoundsInRoot()
+        compose.runOnIdle { state.value = state.value.copy(positionMs = 6000) }
+        assertEquals(lyricsBounds, lyrics.assertIsDisplayed().getUnclippedBoundsInRoot())
+        assertEquals(seekBounds, seek.assertIsDisplayed().getUnclippedBoundsInRoot())
+        assertEquals(playBounds, play.assertIsDisplayed().getUnclippedBoundsInRoot())
+    }
+
     @Test fun emptyMusicPlayerCanReturnToTheMusicPage() {
         var choices = 0
         compose.setContent { TuneTheme {
@@ -235,6 +275,20 @@ class MusicScreenTest {
         compose.onNodeWithTag("now_playing_play").assertDoesNotExist()
         compose.onNodeWithText(context.getString(R.string.action_select_music)).performClick()
         compose.runOnIdle { assertEquals(1, choices) }
+    }
+
+    @Composable
+    private fun TestMusicScreen(
+        isCar: Boolean,
+        state: MusicUiState,
+        browse: MusicFeed,
+        connected: Boolean,
+        onCommand: (PlayerCommand) -> Unit,
+        onSearch: () -> Unit,
+        onLoad: () -> Unit
+    ) {
+        var mode by remember { mutableStateOf(RadioDisplayMode.LIST) }
+        MusicScreen(isCar, state, browse, connected, onCommand, onSearch, onLoad, mode, { mode = it })
     }
 
     private fun capture(name: String) {
