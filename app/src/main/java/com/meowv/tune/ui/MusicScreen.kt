@@ -78,7 +78,8 @@ internal fun MusicScreen(
     onLoad: () -> Unit,
     displayMode: RadioDisplayMode,
     onDisplayModeChange: (RadioDisplayMode) -> Unit,
-    animationsEnabled: Boolean = true
+    animationsEnabled: Boolean = true,
+    activePage: Boolean = true
 ) {
     val playback = (state as? MusicUiState.Active)?.playback
     val currentId = playback?.music?.id
@@ -144,7 +145,7 @@ internal fun MusicScreen(
 
             if (displayMode == RadioDisplayMode.CARD) {
                 MusicCards(browse.tracks, currentId, visual, playbackError, connected,
-                    playback != null && playback.phase in CardAutoplayPhases, isCar,
+                    activePage && playback != null && playback.phase in CardAutoplayPhases, isCar,
                     previewId, listTrackToCenter, { id ->
                         previewId = id
                         if (id == listTrackToCenter) listSelectionId = null
@@ -225,8 +226,8 @@ private fun MusicCards(
     var cardClickCount by remember { mutableIntStateOf(0) }
 
     // 播放来源变化或用户已点按卡片时，取消待执行的滑卡播放。
-    LaunchedEffect(pager, currentId, autoPlayOnSwipe, connected, animationsEnabled, cardClickCount) {
-        if (!autoPlayOnSwipe || !connected || !animationsEnabled || currentId == null) return@LaunchedEffect
+    LaunchedEffect(pager, currentId, autoPlayOnSwipe, connected, cardClickCount) {
+        if (!autoPlayOnSwipe || !connected || currentId == null) return@LaunchedEffect
         var dragStartId: String? = null
         launch {
             pager.interactionSource.interactions.collect { interaction ->
@@ -242,10 +243,11 @@ private fun MusicCards(
             .collectLatest { settledId ->
                 if (settledId == null) return@collectLatest
                 val startId = dragStartId ?: return@collectLatest
+                // 松手到惯性滑动启动之间可能短暂空闲，等防抖结束后再清除滑动起点。
+                delay(CARD_AUTOPLAY_DEBOUNCE_MS)
+                if (pager.isScrollInProgress || dragStartId != startId) return@collectLatest
                 dragStartId = null
                 if (settledId == startId || settledId == currentId) return@collectLatest
-                delay(CARD_AUTOPLAY_DEBOUNCE_MS)
-                if (pager.isScrollInProgress) return@collectLatest
                 val track = currentTracks.getOrNull(pager.settledPage) ?: return@collectLatest
                 if (track.id == settledId && track.canStartPlayback) playTrack(track)
             }

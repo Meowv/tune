@@ -373,18 +373,16 @@ private fun CardMode(
     )
     LaunchedEffect(pagerState.settledPage, pagerState.isScrollInProgress) {
         if (pagerState.isScrollInProgress || !userScrollPending) return@LaunchedEffect
+        val shouldPlay = currentPlaying
+        // 松手和惯性滑动之间也会进入空闲态，保留滑动记录直到卡片真正停稳。
+        delay(CARD_AUTOPLAY_DEBOUNCE_MS)
+        if (pagerState.isScrollInProgress) return@LaunchedEffect
         userScrollPending = false
         val page = pagerState.settledPage
         val station = queue.getOrNull(page) ?: return@LaunchedEffect
         if (station.uuid != currentSelectedId) {
             currentOnSelectTarget(station)
-            if (currentPlaying) {
-                // 快速连续滑动时，页变化会取消上一个协程，只有最终停留的台真正发起播放。
-                delay(CARD_AUTOPLAY_DEBOUNCE_MS)
-                if (currentPlaying && currentSelectedId == station.uuid) {
-                    currentOnPlayback?.invoke(PlayerCommand.Play(station))
-                }
-            }
+            if (shouldPlay && currentPlaying) currentOnPlayback?.invoke(PlayerCommand.Play(station))
         }
     }
     LaunchedEffect(pagerState.settledPage, queue.size) {

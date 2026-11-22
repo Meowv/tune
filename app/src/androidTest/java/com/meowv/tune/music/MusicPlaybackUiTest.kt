@@ -1,9 +1,10 @@
 package com.meowv.tune.music
 
+import android.content.Intent
 import android.graphics.Bitmap
+import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.view.InputDevice
-import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import androidx.compose.ui.geometry.Offset
@@ -18,6 +19,7 @@ import com.meowv.tune.MainActivity
 import com.meowv.tune.TuneTestApplication
 import com.meowv.tune.domain.*
 import com.meowv.tune.domain.music.*
+import com.meowv.tune.playback.RadioPlaybackService
 import java.io.File
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
@@ -31,7 +33,20 @@ class MusicPlaybackUiTest {
 
     @OptIn(ExperimentalTestApi::class)
     @Test fun musicPageAndImmersiveControlsFollowTheActiveSource() = runBlocking<Unit> {
-        val app = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as TuneTestApplication
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val app = instrumentation.targetContext.applicationContext as TuneTestApplication
+        // 同一批设备测试会更换音乐仓库，旧服务仍持有其启动时的推荐队列。
+        instrumentation.runOnMainSync {
+            app.playerController.stopActive()
+            app.stopService(Intent(app, RadioPlaybackService::class.java))
+        }
+        withTimeout(5000) {
+            var stopped = false
+            while (!stopped) {
+                instrumentation.runOnMainSync { stopped = app.playerController.coordinator == null }
+                if (!stopped) delay(25)
+            }
+        }
         val originals = InstrumentationRegistry.getArguments().getString("musicOriginals") == "true"
         // 截图和多次界面操作可能耗时超过短音频的播放时长。
         val fixtureDurationMs = if (originals) 12_000L else 96_000L
@@ -121,6 +136,10 @@ class MusicPlaybackUiTest {
                 currentCard.assertIsSelected()
                 currentCard.performTouchInput { swipeLeft() }
                 thirdCard.assertIsSelected()
+                // 等待期间保持 Compose 时钟推进，以完成 Pager 和防抖。
+                compose.waitUntil(8000) {
+                    connection.state.value.let { it.phase == PlaybackPhase.PLAYING && it.music?.id == "ui-3" }
+                }
                 expectPlayback("播放中左滑卡片切到第三首", PlaybackPhase.PLAYING, "ui-3")
                 thirdCard.performClick()
                 expectPlayback("卡片内暂停第三首", PlaybackPhase.PAUSED, "ui-3")
@@ -160,12 +179,16 @@ class MusicPlaybackUiTest {
                 compose.onNodeWithTag("circular_player_entry").performClick()
                 compose.onNodeWithTag("now_playing_screen").assertExists()
                 val toggle = compose.onNodeWithTag("now_playing_play")
-                val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-                val keyTime = SystemClock.uptimeMillis()
-                assertTrue(automation.injectInputEvent(KeyEvent(keyTime, keyTime, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_TAB, 0), true))
-                assertTrue(automation.injectInputEvent(KeyEvent(keyTime, keyTime, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_TAB, 0), true))
+                val automation = instrumentation.uiAutomation
+                ParcelFileDescriptor.AutoCloseInputStream(
+                    automation.executeShellCommand("input dpad keyevent KEYCODE_DPAD_DOWN")
+                ).use { it.readBytes() }
                 compose.waitForIdle()
-                toggle.performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+                compose.waitUntil(5000) {
+                    var requested = false
+                    toggle.performSemanticsAction(SemanticsActions.RequestFocus) { requested = it() }
+                    requested
+                }
                 toggle.assertIsFocused().performKeyInput { pressKey(Key.DirectionRight) }
                 compose.onNodeWithTag("now_playing_next").assertIsFocused()
                 toggle.assertIsDisplayed().performClick()

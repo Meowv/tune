@@ -42,6 +42,7 @@ internal class MusicPlaybackEngine(
     private val focus = AudioFocusController(context, ::onAudioFocusEvent)
     private val route = AudioRouteMonitor(context, ::onExternalOutputRemoved)
     private val interruptions = MusicInterruptionState(android.os.SystemClock::elapsedRealtime)
+    private val diagnostics = PlaybackDiagnostics.forDebug(PlaybackSource.MUSIC)
     private var active = false
     private var generation = 0L
     private var pending: Job? = null
@@ -73,7 +74,7 @@ internal class MusicPlaybackEngine(
         scope.launch {
             feedStore.snapshot.collect {
                 if (!active || state.phase == PlaybackPhase.IDLE || !syncQueueFeed()) return@collect
-                if (advancing) next(userInitiated = false)
+                if (advancing) advanceQueue(PlaybackTrigger.AUTO_ADVANCE)
                 else {
                     publishState(state)
                     maintainAhead()
@@ -87,7 +88,7 @@ internal class MusicPlaybackEngine(
                     if (desiredPlay || interruptions.hasResumeIntent) pause(PauseReason.NETWORK)
                 } else if (interruptions.networkAvailable() ||
                     resumePoint?.playOnEntry == true && state.phase == PlaybackPhase.PAUSED && state.error == null) {
-                    resume()
+                    resume(PlaybackTrigger.RECOVERY)
                 }
             }
         }
@@ -131,9 +132,9 @@ internal class MusicPlaybackEngine(
         }
     }
 
-    private fun continueRemembered(point: MusicResumePoint) {
+    private fun continueRemembered(point: MusicResumePoint, trigger: PlaybackTrigger = PlaybackTrigger.RESUME) {
         if (!mayRequest(preserveCurrent = true)) return
-        begin(saved = point) { queue.select(point.track) }
+        begin(trigger, saved = point) { queue.select(point.track) }
     }
 
     private fun showRemembered(point: MusicResumePoint, failure: MusicFailure? = null) {
@@ -157,36 +158,42 @@ internal class MusicPlaybackEngine(
         lastCheckpointAt = android.os.SystemClock.elapsedRealtime()
     }
 
-    fun play(track: MusicTrack? = null, resetSession: Boolean = true, seed: MusicQueueSeed? = null) {
+    fun play(track: MusicTrack? = null, resetSession: Boolean = true, seed: MusicQueueSeed? = null,
+        trigger: PlaybackTrigger = PlaybackTrigger.PLAY) {
         if (!active || track != null && !track.canStartPlayback || !mayRequest()) return
         failures = 0
         resumePoint = null
         interruptions.reset()
         if (resetSession || !queue.canNext) queue.reset(seed, track?.id)
         syncQueueFeed()
-        begin(explicit = track != null, advance = track == null) { if (track == null) queue.next() else queue.select(track) }
+        begin(trigger, explicit = track != null, advance = track == null) {
+            if (track == null) queue.next() else queue.select(track)
+        }
     }
 
-    fun next(userInitiated: Boolean = true) {
+    fun next() = advanceQueue(PlaybackTrigger.NEXT)
+
+    private fun advanceQueue(trigger: PlaybackTrigger) {
         if (!active || !mayRequest()) return
         syncQueueFeed()
-        if (userInitiated && state.phase !in setOf(PlaybackPhase.IDLE, PlaybackPhase.ERROR)) state.music?.let {
+        if (trigger == PlaybackTrigger.NEXT && state.phase !in setOf(PlaybackPhase.IDLE, PlaybackPhase.ERROR)) state.music?.let {
             if (!loading && confirmed && itemMatches()) listening?.finish(earlySkip = true)
             queue.skip(it, affectRanking = !loading && confirmed && current?.track?.id == it.id &&
                 state.phase in setOf(PlaybackPhase.PLAYING, PlaybackPhase.PAUSED))
         }
         interruptions.reset()
         resumePoint = null
-        begin(keepRefill = true, advance = true) { queue.next() }
+        begin(trigger, keepRefill = true, advance = true) { queue.next() }
     }
 
     fun previous() {
         if (!active || !queue.canPrevious || !mayRequest(preserveCurrent = true)) return
         interruptions.reset()
-        begin(preserveCurrent = true, explicit = true) { queue.previous() }
+        begin(PlaybackTrigger.PREVIOUS, preserveCurrent = true, explicit = true) { queue.previous() }
     }
 
     private fun begin(
+        trigger: PlaybackTrigger,
         preserveCurrent: Boolean = false,
         refreshProvider: String? = null,
         excludedProvider: String? = null,
@@ -203,10 +210,12 @@ internal class MusicPlaybackEngine(
         var refreshed = refreshProvider != null || excludedProvider != null
         val attemptedAlternate = excludedProvider != null || refreshProvider != null && alternateAttempted
         if (NetworkPolicy.evaluate(network.value) != NetworkDecision.ALLOWED) {
+            diagnostics?.start(trigger)
             fail(MusicFailure.CONNECTION)
             return
         }
         val id = invalidate(keepRefill)
+        diagnostics?.start(trigger)
         advancing = advance
         desiredPlay = true
         loading = true
@@ -228,6 +237,7 @@ internal class MusicPlaybackEngine(
                 if (advance) prepared = nextPreparation.take(selectedTrack.track.id)
                 if (refreshProvider == null && excludedProvider == null) listeningHistory?.attempted()
                 if (!preserveCurrent) publishState(state.copy(music = selectedTrack.track))
+                diagnostics?.resolving()
                 val result = withTimeout(8000) {
                     var selection = selectedTrack
                     var retainedVersion: Long? = null
@@ -304,23 +314,27 @@ internal class MusicPlaybackEngine(
             failure.failure in setOf(MusicFailure.SOURCE_UNAVAILABLE, MusicFailure.SOURCE_TIMEOUT)
         if (sourceBackoff) requestGate.block(failure.retryAfterSeconds, failure.failure)
         if (preserve && itemMatches() && player.playbackState != Player.STATE_ENDED) {
+            diagnostics?.failed(failure.failure)
+            if (player.isPlaying) diagnostics?.playing(completeAttempt = false)
             queue.invalidate()
             desiredPlay = player.playWhenReady
             publishState(old.copy(operationFailure = PlaybackOperationFailure(++operationSequence, TuneError.PLAYBACK)))
         } else if (!preserve && !sourceBackoff && selected && failure.failure in setOf(MusicFailure.TRACK_NOT_FOUND,
                 MusicFailure.NO_PLAYABLE_MATCH, MusicFailure.SOURCE_UNAVAILABLE, MusicFailure.SOURCE_TIMEOUT,
                 MusicFailure.PLAYBACK_UNAVAILABLE) && ++failures < 5 && queue.canNext) {
-            next(userInitiated = false)
+            diagnostics?.failed(failure.failure)
+            advanceQueue(PlaybackTrigger.RECOVERY)
         } else {
             fail(failure.failure)
         }
     }
 
     private fun restoreFailed(failure: MusicException, point: MusicResumePoint) {
+        diagnostics?.failed(failure.failure)
         if (failure.failure in MissingTrack) {
             resumeStore.save(null)
             resumePoint = null
-            next(userInitiated = false)
+            advanceQueue(PlaybackTrigger.RECOVERY)
         } else {
             backgroundFailure(failure)
             showRemembered(point, failure.failure)
@@ -329,6 +343,7 @@ internal class MusicPlaybackEngine(
 
     private fun prepare(selection: MusicSelection, playable: PlayableAudio, id: Long, positionMs: Long,
         explicit: Boolean, continuing: Boolean, automatic: Boolean) {
+        diagnostics?.preparing()
         listening?.start(selection.track, explicit, continuing, automatic)
         lyricsRequest?.cancel()
         lyricsRequest = null
@@ -358,11 +373,17 @@ internal class MusicPlaybackEngine(
                 val provider = audio?.providerId
                 if (http?.responseCode in setOf(404, 410) && desiredPlay && selection != null && provider != null) {
                     if (!resourceRefreshed) {
-                        if (mayRequest()) begin(refreshProvider = provider) { queue.renew(selection) }
+                        if (mayRequest()) {
+                            diagnostics?.failed(TuneError.HTTP)
+                            begin(PlaybackTrigger.RECOVERY, refreshProvider = provider) { queue.renew(selection) }
+                        }
                         return
                     }
                     if (!alternateAttempted && selection.track.matches.any { it.providerId != provider }) {
-                        if (mayRequest()) begin(excludedProvider = provider) { queue.renew(selection) }
+                        if (mayRequest()) {
+                            diagnostics?.failed(TuneError.HTTP)
+                            begin(PlaybackTrigger.RECOVERY, excludedProvider = provider) { queue.renew(selection) }
+                        }
                         return
                     }
                 }
@@ -377,10 +398,13 @@ internal class MusicPlaybackEngine(
                     requestGate.block(retry)
                 }
                 // 解码/连接失败可跳过候选；权限和限流必须停止，不跨源绕过。
-                if (desiredPlay && reason == MusicFailure.PLAYBACK_UNAVAILABLE && ++failures < 5 && queue.canNext) next(userInitiated = false)
-                else fail(reason)
+                if (desiredPlay && reason == MusicFailure.PLAYBACK_UNAVAILABLE && ++failures < 5 && queue.canNext) {
+                    diagnostics?.failed(reason)
+                    advanceQueue(PlaybackTrigger.RECOVERY)
+                } else fail(reason)
             }
             player.isPlaying -> {
+                diagnostics?.playing()
                 advancing = false
                 bufferTimeout?.cancel()
                 if (!confirmed) {
@@ -403,13 +427,16 @@ internal class MusicPlaybackEngine(
                     resumeStore.save(null)
                     resumePoint = null
                     if (desiredPlay) {
-                        next(userInitiated = false)
+                        advanceQueue(PlaybackTrigger.AUTO_ADVANCE)
                         queue.clearSkipSignal()
                     }
                 }
             }
             !player.playWhenReady -> publishState(state.copy(phase = PlaybackPhase.PAUSED))
-            else -> publishState(state.copy(phase = PlaybackPhase.BUFFERING))
+            else -> {
+                if (player.playbackState == Player.STATE_BUFFERING) diagnostics?.buffering()
+                publishState(state.copy(phase = PlaybackPhase.BUFFERING))
+            }
         }
     }
 
@@ -419,6 +446,7 @@ internal class MusicPlaybackEngine(
 
     fun pause(reason: PauseReason = PauseReason.USER) {
         if (!active) return
+        diagnostics?.reset(reason)
         val paused = interruptions.pause(state, reason, desiredPlay)
         invalidate()
         loading = false; desiredPlay = false
@@ -431,20 +459,23 @@ internal class MusicPlaybackEngine(
         checkpoint()
     }
 
-    fun resume() {
+    fun resume(trigger: PlaybackTrigger = PlaybackTrigger.RESUME) {
         if (!active || desiredPlay || loading) return
         interruptions.reset()
         if (NetworkPolicy.evaluate(network.value) != NetworkDecision.ALLOWED) {
+            diagnostics?.failed(TuneError.NETWORK_OFFLINE)
             publishState(state.copy(error = TuneError.NETWORK_OFFLINE)); return
         }
-        resumePoint?.let { continueRemembered(it); return }
+        resumePoint?.let { continueRemembered(it, trigger); return }
         if (!itemMatches() || player.playbackState == Player.STATE_ENDED || state.phase == PlaybackPhase.ERROR) {
-            play(state.music, resetSession = false)
+            play(state.music, resetSession = false, trigger = trigger)
         } else if (audio?.let { !nextPreparation.fresh(it) } == true) {
             val selection = current ?: return
             val provider = audio?.providerId ?: return
-            if (mayRequest()) begin(refreshProvider = provider) { queue.renew(selection) }
+            if (mayRequest()) begin(trigger, refreshProvider = provider) { queue.renew(selection) }
         } else if (focus.acquire()) {
+            diagnostics?.start(trigger)
+            diagnostics?.preparing()
             if (!confirmed) current = current?.let(queue::renew)
             desiredPlay = true
             refillSuppressed = false
@@ -481,6 +512,7 @@ internal class MusicPlaybackEngine(
     }
 
     fun stop(forget: Boolean = true) {
+        diagnostics?.reset()
         listening?.finish()
         if (forget) resumeStore.save(null)
         resumePoint = null
@@ -504,13 +536,16 @@ internal class MusicPlaybackEngine(
     }
 
     private fun mayRequest(preserveCurrent: Boolean = false): Boolean = try { requestGate.check(); true } catch (failure: MusicException) {
-        if (preserveCurrent && itemMatches() && player.playbackState != Player.STATE_ENDED)
+        if (preserveCurrent && itemMatches() && player.playbackState != Player.STATE_ENDED) {
+            diagnostics?.failed(failure.failure)
+            if (player.isPlaying) diagnostics?.playing(completeAttempt = false)
             publishState(state.copy(operationFailure = PlaybackOperationFailure(++operationSequence, TuneError.PLAYBACK)))
-        else fail(failure.failure)
+        } else fail(failure.failure)
         false
     }
 
     private fun fail(failure: MusicFailure) {
+        diagnostics?.failed(failure)
         listening?.finish()
         invalidate(); loading = false; desiredPlay = false
         interruptions.reset(); focus.abandon(); player.pause()
@@ -538,7 +573,7 @@ internal class MusicPlaybackEngine(
 
     private fun restartAdvanceIfFeedChanged(): Boolean {
         if (!syncQueueFeed()) return false
-        next(userInitiated = false)
+        advanceQueue(PlaybackTrigger.AUTO_ADVANCE)
         return true
     }
 
@@ -617,7 +652,7 @@ internal class MusicPlaybackEngine(
             AudioFocusEvent.GAIN -> {
                 player.volume = 1f
                 if (NetworkPolicy.evaluate(network.value) != NetworkDecision.ALLOWED && interruptions.hasResumeIntent) pause(PauseReason.NETWORK)
-                if (interruptions.focusGained()) resume()
+                if (interruptions.focusGained()) resume(PlaybackTrigger.RECOVERY)
             }
             AudioFocusEvent.DUCK -> player.volume = .2f
             AudioFocusEvent.TRANSIENT_LOSS -> pause(PauseReason.TRANSIENT_FOCUS)

@@ -15,6 +15,7 @@ import com.meowv.tune.R
 import com.meowv.tune.domain.NetworkState
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlaybackOperationFailure
+import com.meowv.tune.domain.PlaybackSource
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.QueueSelection
 import com.meowv.tune.domain.RadioQueue
@@ -80,17 +81,16 @@ internal class RadioPlayback(
     private var operationFailureId = 0L
     private var attemptTimeout: Job? = null
     private var awaitingFirstPlayback = false
-    private var attemptStartedAt = 0L
-    private var resolveStartedAt = 0L
-    private var prepareStartedAt = 0L
-    internal var timing: PlaybackTiming? = null
-        private set
+    private val diagnostics = PlaybackDiagnostics.forDebug(PlaybackSource.RADIO)
     private var state = PlayerUiState()
     private val stallMonitor = PlaybackStallMonitor(
         scope = scope,
         nowMillis = android.os.SystemClock::elapsedRealtime,
         progress = { PlaybackProgress(player.currentPosition, player.playbackState == Player.STATE_BUFFERING, player.playWhenReady) },
-        onStalled = { scheduleRecovery(TuneFailure(TuneError.TIMEOUT)) }
+        onStalled = {
+            diagnostics?.stalled()
+            scheduleRecovery(TuneFailure(TuneError.TIMEOUT))
+        }
     )
 
     init {
@@ -187,6 +187,7 @@ internal class RadioPlayback(
 
     fun stop() {
         if (!active) return
+        diagnostics?.reset()
         finishAttempt()
         supersedeRequest()
         audioFocus.abandon()
@@ -204,6 +205,7 @@ internal class RadioPlayback(
     }
 
     fun close() {
+        diagnostics?.reset()
         finishAttempt()
         supersedeRequest()
         audioFocus.abandon()
@@ -221,11 +223,8 @@ internal class RadioPlayback(
         if (state.phase in SettlingPhases) return
         when {
             player.isPlaying -> {
-                if (awaitingFirstPlayback) {
-                    val now = android.os.SystemClock.elapsedRealtime()
-                    timing = timing?.copy(prepareMillis = now - prepareStartedAt, totalMillis = now - attemptStartedAt)
-                    finishAttempt()
-                }
+                diagnostics?.playing(completeAttempt = awaitingFirstPlayback)
+                if (awaitingFirstPlayback) finishAttempt()
                 if (!committed) {
                     committed = queue.recordSuccessfulPlayback(currentSelection)
                     // 只有服务确认成功的台站才写回自播恢复点。
@@ -242,7 +241,10 @@ internal class RadioPlayback(
                 if (player.playerError == null && player.mediaItemCount > 0) stop()
             }
             !player.playWhenReady -> update(state.copy(phase = PlaybackPhase.PAUSED))
-            else -> update(state.copy(phase = PlaybackPhase.BUFFERING))
+            else -> {
+                if (player.playbackState == Player.STATE_BUFFERING) diagnostics?.buffering()
+                update(state.copy(phase = PlaybackPhase.BUFFERING))
+            }
         }
     }
 
@@ -256,7 +258,14 @@ internal class RadioPlayback(
         currentCoroutineContext().ensureActive()
         if (!active) return
         if (!networkAllows(command.targetStation)) return
-        if (command != Command.Toggle && attemptTimeout == null) startAttempt()
+        val trigger = when (command) {
+            is Command.Play -> PlaybackTrigger.PLAY
+            Command.Next -> PlaybackTrigger.NEXT
+            Command.Previous -> PlaybackTrigger.PREVIOUS
+            is Command.Resume -> PlaybackTrigger.RESUME
+            Command.Toggle -> null
+        }
+        if (trigger != null && attemptTimeout == null) startAttempt(trigger)
         when (command) {
             is Command.Play -> {
                 val activeScope = queue.activeScope.value ?: run {
@@ -324,10 +333,10 @@ internal class RadioPlayback(
         if (selection != null) userPause()
     }
 
-    private suspend fun resume() {
+    private suspend fun resume(trigger: PlaybackTrigger = PlaybackTrigger.RESUME) {
         when (state.phase) {
             PlaybackPhase.IDLE -> {
-                restoreFromSession()
+                restoreFromSession(trigger)
                 return
             }
             PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING -> return
@@ -335,12 +344,12 @@ internal class RadioPlayback(
                 val currentIntent = intent
                 val currentSelection = selection
                 if (currentIntent == null || currentSelection == null) {
-                    restoreFromSession()
+                    restoreFromSession(trigger)
                     return
                 }
                 if (!networkAllows()) return
                 resetRetryBudget()
-                startAttempt()
+                startAttempt(trigger)
                 resolveAndPlay(currentSelection, PlaybackPhase.RETRYING, currentIntent)
             }
             else -> {
@@ -348,6 +357,7 @@ internal class RadioPlayback(
                 if (player.mediaItemCount == 0) {
                     val currentSelection = selection ?: return
                     resetRetryBudget()
+                    startAttempt(trigger)
                     resolveAndPlay(currentSelection, PlaybackPhase.RETRYING, intent)
                     return
                 }
@@ -356,18 +366,18 @@ internal class RadioPlayback(
                     return
                 }
                 interruptions.reset()
-                startAttempt()
+                startAttempt(trigger)
                 awaitingFirstPlayback = true
-                prepareStartedAt = android.os.SystemClock.elapsedRealtime()
+                diagnostics?.preparing()
                 update(state.copy(error = null, statusCode = null))
                 player.play()
             }
         }
     }
 
-    private suspend fun restoreFromSession() {
+    private suspend fun restoreFromSession(trigger: PlaybackTrigger) {
         if (!networkAllows()) return
-        startAttempt()
+        startAttempt(trigger)
         val user = settings.settings.first()
         if (queue.activeScope.value == null) {
             for (candidate in CountryResolver(context).candidates(user.scope, repository)) {
@@ -398,6 +408,7 @@ internal class RadioPlayback(
         val phase = if (selection == null) PlaybackPhase.ERROR else state.phase
         // 离线时起播目标还没进入播放器，错误态仍要带上该台，列表与播放器才能指向同一项。
         val station = if (selection == null) target ?: state.station else state.station
+        diagnostics?.failed(TuneError.NETWORK_OFFLINE)
         update(state.copy(phase = phase, station = station, error = TuneError.NETWORK_OFFLINE, statusCode = null))
         return false
     }
@@ -408,7 +419,7 @@ internal class RadioPlayback(
         if (NetworkPolicy.evaluate(current) == NetworkDecision.ALLOWED) {
             val shouldResume = interruptions.consumeNetworkResume()
             if (isNetworkError(state.error)) update(state.copy(error = null, statusCode = null))
-            if (shouldResume) submit { resume() }
+            if (shouldResume) submit { resume(PlaybackTrigger.RECOVERY) }
             return
         }
         pausePlayback(PauseReason.NETWORK)
@@ -443,10 +454,8 @@ internal class RadioPlayback(
         currentCoroutineContext().ensureActive()
         if (!active) return
         val id = generation
-        if (attemptTimeout == null) startAttempt()
-        val resolutionStarted = android.os.SystemClock.elapsedRealtime()
-        if (resolveStartedAt == 0L) timing = timing?.copy(directoryMillis = resolutionStarted - attemptStartedAt)
-        resolveStartedAt = resolutionStarted
+        if (attemptTimeout == null) startAttempt(PlaybackTrigger.RECOVERY)
+        diagnostics?.resolving()
         interruptions.reset()
         stallMonitor.reset()
         audioFocus.abandon()
@@ -459,12 +468,7 @@ internal class RadioPlayback(
         update(PlayerUiState(phase = phase, station = next.station, isLive = true))
 
         val stream = try {
-            try {
-                resolve(playbackIntent)
-            } finally {
-                if (id == generation) timing = timing?.copy(resolveMillis =
-                    (timing?.resolveMillis ?: 0L) + android.os.SystemClock.elapsedRealtime() - resolutionStarted)
-            }
+            resolve(playbackIntent)
         } catch (failure: TuneFailure) {
             currentCoroutineContext().ensureActive()
             if (id == generation) recoverFromFailure(next, playbackIntent, failure)
@@ -472,7 +476,7 @@ internal class RadioPlayback(
         }
         currentCoroutineContext().ensureActive()
         if (id != generation) return
-        prepareStartedAt = android.os.SystemClock.elapsedRealtime()
+        diagnostics?.preparing()
         awaitingFirstPlayback = true
         val item = MediaItem.Builder()
             .setMediaId(next.station.uuid.toString())
@@ -495,7 +499,7 @@ internal class RadioPlayback(
         val currentSelection = selection ?: return
         val currentIntent = intent ?: PlaybackIntent(currentSelection.station)
         if (recovering) return
-        if (attemptTimeout == null) startAttempt()
+        if (attemptTimeout == null) startAttempt(PlaybackTrigger.RECOVERY)
         recovering = true
         val id = ++generation
         request?.cancel()
@@ -519,11 +523,13 @@ internal class RadioPlayback(
         currentCoroutineContext().ensureActive()
         val decision = NetworkPolicy.evaluate(network.value)
         if (decision != NetworkDecision.ALLOWED) {
+            diagnostics?.failed(TuneError.NETWORK_OFFLINE)
             pausePlayback(PauseReason.NETWORK, cancelPending = false)
             return
         }
         val canRetrySame = retryPolicy.isRetryable(failure) && retryPolicy.canRetrySame(++sameRetries)
         if (canRetrySame) {
+            diagnostics?.retrying(failure.kind)
             update(state.copy(
                 phase = PlaybackPhase.RETRYING,
                 station = failed.station,
@@ -537,6 +543,7 @@ internal class RadioPlayback(
         }
 
         if (retryPolicy.canTryAlternate(alternateCount)) {
+            diagnostics?.retrying(failure.kind)
             alternateCount++
             sameRetries = 0
             val activeScope = queue.activeScope.value ?: run {
@@ -602,6 +609,7 @@ internal class RadioPlayback(
 
     private fun pausePlayback(reason: PauseReason, cancelPending: Boolean = true) {
         if (selection == null) return
+        diagnostics?.reset(reason)
         finishAttempt()
         val paused = interruptions.pause(state, reason, player.playWhenReady)
         if (cancelPending) supersedeRequest()
@@ -621,7 +629,7 @@ internal class RadioPlayback(
                 AudioFocusEvent.GAIN -> {
                     player.volume = 1f
                     if (interruptions.consumeFocusResume() && selection != null) {
-                        submit { resume() }
+                        submit { resume(PlaybackTrigger.RECOVERY) }
                     } else if (state.error == TuneError.AUDIO_FOCUS_LOST) {
                         update(state.copy(error = null, statusCode = null))
                     }
@@ -646,8 +654,10 @@ internal class RadioPlayback(
     }
 
     private fun failWhileKeepingCurrent(failure: TuneFailure, station: Station? = state.station) {
-        finishAttempt()
         if (player.isPlaying) {
+            diagnostics?.failed(failure.kind)
+            diagnostics?.playing(completeAttempt = false)
+            finishAttempt()
             update(state.copy(operationFailure = PlaybackOperationFailure(
                 ++operationFailureId, failure.kind, failure.statusCode
             )))
@@ -668,17 +678,16 @@ internal class RadioPlayback(
     }
 
     private fun fail(kind: TuneError, status: Int? = null, station: Station? = state.station) {
+        diagnostics?.failed(kind)
         finishAttempt()
         stallMonitor.reset()
         audioFocus.abandon()
         update(state.copy(phase = PlaybackPhase.ERROR, station = station, error = kind, statusCode = status))
     }
 
-    private fun startAttempt() {
+    private fun startAttempt(trigger: PlaybackTrigger) {
         finishAttempt()
-        attemptStartedAt = android.os.SystemClock.elapsedRealtime()
-        resolveStartedAt = 0L
-        timing = PlaybackTiming()
+        diagnostics?.start(trigger)
         attemptTimeout = scope.launch {
             delay(retryPolicy.totalTimeoutMillis)
             supersedeRequest()
@@ -691,6 +700,7 @@ internal class RadioPlayback(
     }
 
     private fun finishAttempt() {
+        diagnostics?.cancelAttempt()
         attemptTimeout?.cancel()
         attemptTimeout = null
         awaitingFirstPlayback = false

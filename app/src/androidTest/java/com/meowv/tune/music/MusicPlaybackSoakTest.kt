@@ -34,6 +34,77 @@ class MusicPlaybackSoakTest {
     private val app get() = instrumentation.targetContext.applicationContext as TuneTestApplication
     private val connection get() = app.playerController
 
+    @Test fun rollingRecommendationsContinueAcrossThirtyTrackEnds() = runBlocking<Unit> {
+        assumeTrue(InstrumentationRegistry.getArguments().getString("musicSoak") == "true")
+        val tracks = (1..45).map { MusicTrack("rolling-soak-$it", "Rolling soak $it", listOf("test")) }
+        val audio = tracks.associate { track ->
+            track.id to PlayableAudio(track.id, "test", track.id, 1.0,
+                "https://test.example/radio.mp3", "audio/mpeg", 12000, seekable = true)
+        }
+        val fake = FakeMusicRepository(tracks, audio)
+        val rollingPages = AtomicInteger()
+        val resolves = AtomicInteger()
+        app.testMusicRepository = null
+        app.testMusicRepository = object : MusicRepository by fake {
+            override suspend fun candidates(limit: Int, cursor: String?): MusicPage {
+                rollingPages.incrementAndGet()
+                return fake.recommendations(minOf(5, limit), cursor)
+            }
+
+            override suspend fun resolve(trackId: String, preferredProviderId: String?): PlayableAudio {
+                resolves.incrementAndGet()
+                return fake.resolve(trackId, preferredProviderId)
+            }
+        }
+        app.musicResume.save(null)
+        app.userSettings.update { it.copy(autoPlay = false, playbackOrder = PlaybackOrder.SEQUENTIAL) }
+        app.mockNetwork.value = NetworkState(NetworkType.WIFI)
+        val samples = JSONArray()
+        val transitions = mutableListOf<Long>()
+        val played = linkedSetOf<String>()
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use {
+                withTimeout(5000) { connection.connected.first { it } }
+                val seed = MusicQueueSeed(tracks.take(5), "fake:5", rolling = true)
+                connection.dispatch(PlayerCommand.PlayMusic(seed = seed))
+                var playing = withTimeout(8000) {
+                    connection.state.first { state ->
+                        state.phase == PlaybackPhase.PLAYING && seed.tracks.any { it.id == state.music?.id }
+                    }
+                }
+                played.add(requireNotNull(playing.music).id)
+                repeat(30) { index ->
+                    val previous = requireNotNull(playing.music).id
+                    assertTrue("Fixture must be seekable", playing.canSeek)
+                    val before = SystemClock.elapsedRealtime()
+                    // 快进到末尾，等播放器实际读到 EOF 并自动选下一首。
+                    connection.dispatch(PlayerCommand.Seek(11_000L))
+                    playing = withTimeout(8000) {
+                        connection.state.first { state ->
+                            state.source == PlaybackSource.MUSIC && state.phase == PlaybackPhase.PLAYING &&
+                                state.music != null && state.music.id != previous
+                        }
+                    }
+                    val trackId = requireNotNull(playing.music).id
+                    assertTrue("Rolling feed must select a fixture track", audio.containsKey(trackId))
+                    assertTrue("Rolling feed repeated a track at transition ${index + 1}", played.add(trackId))
+                    assertNull(playing.musicFailure)
+                    transitions += SystemClock.elapsedRealtime() - before
+                    if ((index + 1) % 10 == 0) sample(samples, "eof-${index + 1}", resolves.get())
+                }
+                assertTrue("Rolling feed must replenish beyond the seed page", rollingPages.get() >= 6)
+                val result = JSONObject().put("transitions", transitions.size).put("uniqueTracks", played.size)
+                    .put("rollingPages", rollingPages.get()).put("resolves", resolves.get())
+                    .put("eofSeekToNextMs", JSONArray(transitions))
+                    .put("samples", samples)
+                File(app.filesDir, "music-rolling-soak-result.json").writeText(result.toString(2))
+            }
+        } finally {
+            main { connection.stopActive() }
+            app.testMusicRepository = null
+        }
+    }
+
     @Test fun repeatedSourceSwitchesAndBackgroundKeepOneSession() = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("musicSoak") == "true")
         val tracks = (1..200).map { MusicTrack("soak-$it", "Soak $it", listOf("test")) }

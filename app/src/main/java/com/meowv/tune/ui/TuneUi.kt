@@ -470,6 +470,7 @@ private fun TunePager(
 ) {
     HorizontalPager(state = state, modifier = modifier, key = { TunePage.entries[it].name }) { index ->
         val target = TunePage.entries[index]
+        val activePage = directoryAnimationsEnabled && index == state.settledPage
         Box(Modifier.fillMaxSize()) {
             pageContent(
                 target, pageStates, isCar, settings, radioState, playback, connected,
@@ -477,8 +478,9 @@ private fun TunePager(
                 onDisplayModeChange, onSettingsChange, onRefreshRadio,
                 onRefreshAll, onLoadMore, onClearCache,
                 onOpenUpdate, onScopeClick,
-                directoryAnimationsEnabled && index == state.settledPage && !state.isScrollInProgress,
-                musicBrowse, musicDevice, onLoadMusic, musicState, onSearchMusic
+                activePage && !state.isScrollInProgress,
+                musicBrowse, musicDevice, onLoadMusic, musicState, onSearchMusic,
+                activePage = activePage
             )
         }
     }
@@ -510,7 +512,8 @@ private fun pageContent(
     musicDevice: MusicDeviceState?,
     onLoadMusic: () -> Unit,
     musicState: MusicUiState,
-    onSearchMusic: () -> Unit
+    onSearchMusic: () -> Unit,
+    activePage: Boolean
 ) {
     pageStates.SaveableStateProvider(page) {
         when (page) {
@@ -531,7 +534,8 @@ private fun pageContent(
             TunePage.Music -> MusicScreen(isCar, musicState, musicBrowse, connected, onPlayback, onSearchMusic, onLoadMusic,
                 displayMode = settings.musicDisplayMode,
                 onDisplayModeChange = { mode -> onSettingsChange { it.copy(musicDisplayMode = mode) } },
-                animationsEnabled = directoryAnimationsEnabled)
+                animationsEnabled = directoryAnimationsEnabled,
+                activePage = activePage)
             TunePage.Settings -> SettingsScreen(
                 isCar = isCar,
                 settings = settings,
