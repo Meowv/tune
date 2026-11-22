@@ -77,7 +77,6 @@ class MainActivity : ComponentActivity() {
         viewModelFactory { initializer {
             val app = tuneApp
             MusicViewModel(app.musicRepository,
-                requestPlayback = { seed -> app.playerController.dispatch(PlayerCommand.PlayMusic(seed = seed)) },
                 playback = app.playerController.state,
                 feedStore = app.musicFeed, listening = app.musicListening)
         } }

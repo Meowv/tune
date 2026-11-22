@@ -6,7 +6,6 @@ import com.meowv.tune.domain.music.*
 import com.meowv.tune.domain.PlaybackSource
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlayerUiState
-import com.meowv.tune.domain.TuneFailure
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,11 +15,7 @@ import kotlinx.coroutines.flow.update
 sealed interface MusicUiState {
     data object NotConfigured : MusicUiState
     data object Idle : MusicUiState
-    data object Loading : MusicUiState
-    data class Ready(val track: MusicTrack) : MusicUiState
     data class Active(val playback: PlayerUiState) : MusicUiState
-    data object Empty : MusicUiState
-    data class Error(val failure: MusicFailure) : MusicUiState
 }
 
 internal data class MusicFeed(
@@ -33,7 +28,6 @@ internal data class MusicFeed(
 
 internal class MusicViewModel(
     private val repository: MusicRepository?,
-    private val requestPlayback: (suspend (MusicQueueSeed?) -> Unit)? = null,
     scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
     playback: StateFlow<PlayerUiState>? = null,
     private val feedStore: MusicFeedStore = MusicFeedStore(),
@@ -42,8 +36,6 @@ internal class MusicViewModel(
     private val mutableState = MutableStateFlow<MusicUiState>(if (repository == null) MusicUiState.NotConfigured else MusicUiState.Idle)
     val state = mutableState.asStateFlow()
     private var feedLoad: Job? = null
-    private var pending: Job? = null
-    private var generation = 0L
 
     init {
         if (playback != null) viewModelScope.launch {
@@ -118,33 +110,6 @@ internal class MusicViewModel(
         }
     }
 
-    fun startListening() {
-        val source = repository ?: return
-        if (pending?.isActive == true) return
-        val current = ++generation
-        mutableState.value = MusicUiState.Loading
-        pending = viewModelScope.launch {
-            try {
-                if (requestPlayback != null) {
-                    val feed = feedStore.restore()
-                    val tracks = ranked(feed)
-                    requestPlayback(feed.seed(tracks))
-                    return@launch
-                }
-                val track = source.firstRecommendations().items.firstOrNull { it.canStartPlayback }
-                ensureActive()
-                if (current != generation) return@launch
-                mutableState.value = if (track == null) MusicUiState.Empty else MusicUiState.Ready(track)
-            } catch (_: TuneFailure) {
-                ensureActive()
-                if (current == generation) mutableState.value = MusicUiState.Error(MusicFailure.PLAYBACK_UNAVAILABLE)
-            } catch (failure: MusicException) {
-                ensureActive()
-                if (current == generation) mutableState.value = MusicUiState.Error(failure.failure)
-            }
-        }
-    }
-
     private fun MusicFeedSnapshot.seed(tracks: List<MusicTrack>) =
         tracks.takeIf { it.isNotEmpty() }?.let { MusicQueueSeed(it, nextCursor, rolling, version) }
 
@@ -177,12 +142,6 @@ internal class MusicViewModel(
             }
         }
         return if (page.items.isEmpty() && page.nextCursor == null) recommendations() else page
-    }
-
-    fun cancel() {
-        generation++
-        pending?.cancel()
-        mutableState.value = if (repository == null) MusicUiState.NotConfigured else MusicUiState.Idle
     }
 
 }

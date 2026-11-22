@@ -3,10 +3,6 @@ package com.meowv.tune.music
 import android.content.Intent
 import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
-import android.os.SystemClock
-import android.view.InputDevice
-import android.view.MotionEvent
-import android.view.View
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.input.key.Key
@@ -163,10 +159,6 @@ class MusicPlaybackUiTest {
                 currentCard.performClick()
                 expectPlayback("卡片内继续播放", PlaybackPhase.PLAYING, "ui-2")
                 capture("cards")
-                if (InstrumentationRegistry.getArguments().getString("captureV5Drag") == "true" && car) {
-                    captureDragFrame(scenario)
-                    assertEquals("ui-2", connection.state.value.music?.id)
-                }
                 switchMode(listMode, feed)
                 compose.onNodeWithTag("music_feed_track_ui-1").performClick()
                 expectPlayback("返回列表选择第一首", PlaybackPhase.PLAYING, "ui-1")
@@ -235,45 +227,6 @@ class MusicPlaybackUiTest {
                 app.testMusicRepository = null
                 app.userSettings.update { it.copy(musicDisplayMode = RadioDisplayMode.LIST) }
             }
-        }
-    }
-
-    private fun captureDragFrame(scenario: ActivityScenario<MainActivity>) {
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
-        val automation = instrumentation.uiAutomation
-        val bounds = compose.onNodeWithTag("music_feed_card_ui-2").getUnclippedBoundsInRoot()
-        var density = 1f
-        val origin = IntArray(2)
-        scenario.onActivity { activity ->
-            activity.findViewById<View>(android.R.id.content).getLocationOnScreen(origin)
-            density = activity.resources.displayMetrics.density
-        }
-        val startX = origin[0] + (bounds.left.value + bounds.right.value) * density / 2
-        val y = origin[1] + (bounds.top.value + bounds.bottom.value) * density / 2
-        val distance = (bounds.right - bounds.left).value * density * .42f
-        val downTime = SystemClock.uptimeMillis()
-        fun inject(action: Int, x: Float) {
-            val event = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, x, y, 0)
-            try {
-                event.source = InputDevice.SOURCE_TOUCHSCREEN
-                assertTrue(automation.injectInputEvent(event, true))
-            } finally {
-                event.recycle()
-            }
-        }
-        inject(MotionEvent.ACTION_DOWN, startX)
-        try {
-            repeat(4) { step ->
-                SystemClock.sleep(32)
-                inject(MotionEvent.ACTION_MOVE, startX - distance * (step + 1) / 4)
-            }
-            SystemClock.sleep(150)
-            // 手指仍按住时直接截取系统显示帧，不等待 Compose 滚动结束。
-            val bitmap = requireNotNull(automation.takeScreenshot())
-            val file = File(instrumentation.targetContext.cacheDir, "music-evidence/car-playback-drag.png")
-            file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-        } finally {
-            inject(MotionEvent.ACTION_CANCEL, startX - distance)
         }
     }
 

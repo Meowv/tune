@@ -16,12 +16,10 @@ class DirectoryCacheTest {
     @Test fun accumulatedPagesKeepAllStationsAndCursorAcrossRestart() = runBlocking {
         val stations = (1L..300L).map { testStation(it) }
         open { cache, _ ->
-            val started = System.nanoTime()
             (30..300 step 30).forEach { size ->
                 cache.refreshStations(manual) { StationPage(stations.take(size), size) }
             }
             assertEquals(StationPage(stations, 300), cache.stations(manual)?.value)
-            println("DirectoryCache: ten cumulative writes and read took ${(System.nanoTime() - started) / 1_000_000} ms")
         }
         open { cache, _ -> assertEquals(StationPage(stations, 300), cache.stations(manual)?.value) }
     }

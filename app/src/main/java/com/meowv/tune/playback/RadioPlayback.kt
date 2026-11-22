@@ -1,7 +1,6 @@
 package com.meowv.tune.playback
 
 import android.content.Context
-import android.media.AudioManager
 import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
@@ -263,9 +262,8 @@ internal class RadioPlayback(
             Command.Next -> PlaybackTrigger.NEXT
             Command.Previous -> PlaybackTrigger.PREVIOUS
             is Command.Resume -> PlaybackTrigger.RESUME
-            Command.Toggle -> null
         }
-        if (trigger != null && attemptTimeout == null) startAttempt(trigger)
+        if (attemptTimeout == null) startAttempt(trigger)
         when (command) {
             is Command.Play -> {
                 val activeScope = queue.activeScope.value ?: run {
@@ -305,7 +303,6 @@ internal class RadioPlayback(
                 playbackScope = activeScope
                 resolveAndPlay(next, PlaybackPhase.RESOLVING)
             }
-            Command.Toggle -> togglePlayback()
             is Command.Resume -> {
                 val activeScope = queue.activeScope.value ?: return
                 val next = queue.select(activeScope, command.station) ?: return
@@ -724,7 +721,6 @@ internal class RadioPlayback(
         data class Play(val station: Station) : Command
         data object Next : Command
         data object Previous : Command
-        data object Toggle : Command
         data class Resume(val station: Station) : Command
 
         // 起播类命令的目标台；切台与暂停没有目标，沿用当前台。

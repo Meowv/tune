@@ -1,11 +1,9 @@
 package com.meowv.tune.music
 
 import com.meowv.tune.domain.music.*
-import com.meowv.tune.playback.MediaUrlPolicy
 import java.time.Instant
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.*
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 internal object MusicJson {
     fun page(body: String, recommendation: Boolean = false): MusicPage = parse {

@@ -101,7 +101,6 @@ class LiveRadioIntegrationTest {
 
     @Test
     fun liveQueueRulesOnRealData() = runBlocking {
-        println("LIVE args=" + InstrumentationRegistry.getArguments().keySet() + " live=" + app.liveRadio)
         assumeTrue("需要 -e liveRadio true", app.liveRadio)
         app.userSettings.update {
             TuneSettings(
@@ -113,7 +112,6 @@ class LiveRadioIntegrationTest {
             withTimeout(10_000) { connection.connected.first { it } }
             val scope = withTimeout(15_000) { app.radioQueue.activeScope.first { it != null } }!!
             val page = runCatching { app.radioRepository.stationsForCountry(scope.country!!, 0, 30) }
-                .onFailure { println("LIVE repo error=$it") }
                 .getOrNull()
             println("LIVE page size=${page?.stations?.size} next=${page?.nextOffset}")
             assumeTrue("目录不可用", page != null)
@@ -141,8 +139,6 @@ class LiveRadioIntegrationTest {
                     assertEquals("下一台必须留在所选国家", scope.country, next.station?.countryCode)
                     advanced++
                     println("LIVE queue next=${next.station?.uuid} cc=${next.station?.countryCode?.value}")
-                } else {
-                    println("LIVE queue next failed state=${connection.state.value}")
                 }
             }
             assertTrue("连续下一台应至少成功一次", advanced >= 1)
@@ -236,19 +232,13 @@ class LiveRadioIntegrationTest {
     }
 
     private fun probe(station: Station): Boolean {
-        val url = station.resolvedStreamUrl ?: station.streamUrl ?: run {
-            println("LIVE probe no-url ${station.uuid}")
-            return false
-        }
+        val url = station.resolvedStreamUrl ?: station.streamUrl ?: return false
         val request = Request.Builder().url(url).header("Range", "bytes=0-2047").build()
         return runCatching {
             app.mediaHttp.newCall(request).execute().use { response ->
-                val ok = response.isSuccessful || response.code in 300..399
-                if (!ok) println("LIVE probe ${response.code} $url")
-                ok
+                response.isSuccessful || response.code in 300..399
             }
-        }.onFailure { println("LIVE probe error ${it::class.java.simpleName}: ${it.message} $url") }
-            .getOrDefault(false)
+        }.getOrDefault(false)
     }
 
     private fun country(code: String): CountryCode = requireNotNull(CountryCode.parse(code))
