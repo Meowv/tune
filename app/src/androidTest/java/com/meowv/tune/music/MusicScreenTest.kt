@@ -11,6 +11,7 @@ import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlaybackSource
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.PlayerCommand
+import com.meowv.tune.domain.TuneError
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -76,9 +77,12 @@ class MusicScreenTest {
 
     @Test fun swipingPreviewsAnotherTrackWithoutPlayingIt() {
         val tracks = (1..2).map { MusicTrack("drag-$it", "Card $it", listOf("qix")) }
+        val paused = MusicUiState.Active(PlayerUiState(
+            source = PlaybackSource.MUSIC, phase = PlaybackPhase.PAUSED, music = tracks.first()
+        ))
         val commands = mutableListOf<PlayerCommand>()
         compose.setContent { TuneTheme {
-            MusicScreen(isCar, MusicUiState.Idle, MusicFeed(tracks = tracks), true, { commands.add(it) }, {}, {})
+            MusicScreen(isCar, paused, MusicFeed(tracks = tracks), true, { commands.add(it) }, {}, {})
         } }
         compose.onNodeWithTag("layout_card").performClick()
         compose.onNodeWithTag("music_feed_card_drag-1").assertIsSelected()
@@ -90,6 +94,56 @@ class MusicScreenTest {
         compose.runOnIdle {
             assertEquals("drag-2", (commands.single() as PlayerCommand.PlayMusic).track?.id)
         }
+    }
+
+    @Test fun swipingWhilePlayingStartsTheSettledTrackOnce() {
+        val tracks = (1..2).map { MusicTrack("active-$it", "Card $it", listOf("qix")) }
+        val playback = mutableStateOf(PlayerUiState(
+            source = PlaybackSource.MUSIC, phase = PlaybackPhase.PLAYING, music = tracks.first()
+        ))
+        val commands = mutableListOf<PlayerCommand>()
+        compose.setContent { TuneTheme {
+            MusicScreen(isCar, MusicUiState.Active(playback.value), MusicFeed(tracks = tracks), true,
+                { commands.add(it) }, {}, {})
+        } }
+        compose.onNodeWithTag("layout_card").performClick()
+        compose.onNodeWithTag("music_feed_card_active-1").assertIsSelected()
+        compose.onNodeWithTag("music_cards").performTouchInput { swipeLeft() }
+        compose.onNodeWithTag("music_feed_card_active-2").assertIsSelected()
+        compose.mainClock.advanceTimeBy(500)
+        compose.runOnIdle {
+            assertEquals("active-2", (commands.single() as PlayerCommand.PlayMusic).track?.id)
+            playback.value = playback.value.copy(music = tracks[1])
+        }
+        compose.runOnIdle { playback.value = playback.value.copy(music = tracks[0]) }
+        compose.onNodeWithTag("music_feed_card_active-1").assertIsSelected()
+        compose.mainClock.advanceTimeBy(500)
+        compose.runOnIdle { assertEquals(1, commands.size) }
+    }
+
+    @Test fun listAndCardsShowPlaybackFailuresEvenWithAnEngineErrorCode() {
+        val track = MusicTrack("failed", "Test track", listOf("qix"))
+        val playback = mutableStateOf(PlayerUiState(
+            source = PlaybackSource.MUSIC, phase = PlaybackPhase.ERROR, music = track, error = TuneError.PLAYBACK
+        ))
+        val cases = listOf(
+            null to R.string.music_failed,
+            MusicFailure.SOURCE_UNAVAILABLE to R.string.music_playback_source_unavailable,
+            MusicFailure.UNAUTHORIZED to R.string.music_unauthorized,
+            MusicFailure.SOURCE_TIMEOUT to R.string.music_playback_timeout,
+            MusicFailure.CONNECTION to R.string.playback_connection
+        )
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        compose.setContent { TuneTheme {
+            MusicScreen(isCar, MusicUiState.Active(playback.value), MusicFeed(tracks = listOf(track)),
+                true, {}, {}, {})
+        } }
+        cases.forEach { (failure, message) ->
+            compose.runOnIdle { playback.value = playback.value.copy(musicFailure = failure) }
+            compose.onNodeWithText(context.getString(message), useUnmergedTree = true).assertIsDisplayed()
+        }
+        compose.onNodeWithTag("layout_card").performClick()
+        compose.onNodeWithText(context.getString(R.string.playback_connection)).assertIsDisplayed()
     }
 
     @Test fun artworkUsesTheFallbackForMissingOrFailedImagesAndPrefersLoadedImages() {

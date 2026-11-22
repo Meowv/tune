@@ -368,7 +368,9 @@ private fun CardMode(
     val currentOnPlayback by rememberUpdatedState(onPlayback)
     val currentOnSelectTarget by rememberUpdatedState(onSelectTarget)
     // 播放中（含连接/缓冲/重试）滑动后自动续播；暂停或空闲只换目标，不主动起播。
-    val currentPlaying by rememberUpdatedState(playback.phase in ActivePhases)
+    val currentPlaying by rememberUpdatedState(
+        playback.source == PlaybackSource.RADIO && playback.phase in CardAutoplayPhases
+    )
     LaunchedEffect(pagerState.settledPage, pagerState.isScrollInProgress) {
         if (pagerState.isScrollInProgress || !userScrollPending) return@LaunchedEffect
         userScrollPending = false
@@ -379,7 +381,9 @@ private fun CardMode(
             if (currentPlaying) {
                 // 快速连续滑动时，页变化会取消上一个协程，只有最终停留的台真正发起播放。
                 delay(CARD_AUTOPLAY_DEBOUNCE_MS)
-                if (currentSelectedId == station.uuid) currentOnPlayback?.invoke(PlayerCommand.Play(station))
+                if (currentPlaying && currentSelectedId == station.uuid) {
+                    currentOnPlayback?.invoke(PlayerCommand.Play(station))
+                }
             }
         }
     }
@@ -832,9 +836,9 @@ private fun ScopeOption(isCar: Boolean, tag: String, label: String, selected: Bo
     }
 }
 
-private const val CARD_AUTOPLAY_DEBOUNCE_MS = 300L
+internal const val CARD_AUTOPLAY_DEBOUNCE_MS = 300L
 
 private val BufferingPhases = setOf(PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING, PlaybackPhase.BUFFERING)
-private val ActivePhases = setOf(
+internal val CardAutoplayPhases = setOf(
     PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING, PlaybackPhase.RESOLVING, PlaybackPhase.RETRYING
 )

@@ -133,14 +133,17 @@ internal fun TuneApp(
             TunePage.entries.getOrNull(settled)?.let { if (it != page) page = it }
         }
     }
-    val errorText = playbackErrorText(playbackState.error, playbackState.statusCode)
-    val operationErrorText = playbackErrorText(
-        playbackState.operationFailure?.error, playbackState.operationFailure?.statusCode
-    )
+    val errorText = if (playbackState.source == PlaybackSource.MUSIC) musicPlaybackErrorText(playbackState)
+        else playbackErrorText(playbackState.error, playbackState.statusCode)
+    val operationErrorText = playbackState.operationFailure?.let { failure ->
+        if (playbackState.source == PlaybackSource.MUSIC && failure.error == TuneError.PLAYBACK)
+            stringResource(R.string.music_failed)
+        else playbackErrorText(failure.error, failure.statusCode)
+    }
     LaunchedEffect(playbackState.operationFailure) {
         if (operationErrorText != null) snackbar.showSnackbar(operationErrorText, duration = SnackbarDuration.Short)
     }
-    LaunchedEffect(playbackState.error, nowPlayingOpen) {
+    LaunchedEffect(errorText, nowPlayingOpen) {
         if (!nowPlayingOpen && errorText != null) {
             snackbar.showSnackbar(errorText, duration = SnackbarDuration.Short)
         }
@@ -206,6 +209,8 @@ internal fun TuneApp(
                     enabled = shellEnabled,
                     animationMillis = fullscreenAnimMillis,
                     onToggle = toggle,
+                    onNext = next,
+                    onPrevious = previous,
                     onOpen = {
                         if (playbackState.source == PlaybackSource.RADIO && playbackState.station == null && target != null) {
                             onSelectTarget(target)

@@ -29,3 +29,33 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Test, lint and compile
         run: ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --stacktrace
+
+  device:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-35 build-tools;34.0.0"
+          log-accepted-android-sdk-licenses: false
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Android 9 playback and UI smoke tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 28
+          arch: x86
+          disable-animations: false
+          script: >-
+            ./gradlew :app:connectedDebugAndroidTest --stacktrace
+            -Pandroid.testInstrumentationRunnerArguments.class=com.meowv.tune.CircularEntryUiTest,com.meowv.tune.RadioCardStatusTest,com.meowv.tune.music.MusicScreenTest,com.meowv.tune.music.MusicSearchIntegrationTest,com.meowv.tune.music.MusicPlaybackIntegrationTest#radioAndMusicShareOneSessionWithSourceSpecificSeek,com.meowv.tune.MediaSessionControlTest#returningToForegroundKeepsTheSameSession,com.meowv.tune.TuneAppTest#sleepTimerStartsSurvivesCollapseAndCanBeCancelled,com.meowv.tune.UpdatePageTest,com.meowv.tune.ApkVerifierTest

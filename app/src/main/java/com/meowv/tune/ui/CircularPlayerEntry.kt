@@ -8,6 +8,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -24,6 +25,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -97,7 +99,9 @@ internal fun CompactMediaBar(
     enabled: Boolean,
     animationMillis: Int,
     onToggle: () -> Unit,
-    onOpen: () -> Unit
+    onOpen: () -> Unit,
+    onNext: () -> Unit = {},
+    onPrevious: () -> Unit = {}
 ) {
     val music = state.source == PlaybackSource.MUSIC
     val title = if (music) state.music?.title else station?.name
@@ -118,6 +122,8 @@ internal fun CompactMediaBar(
     ) {
         CircularPlayerEntry(
             state, connected, rotation, isCar, enabled, onOpen,
+            onNext = onNext,
+            onPrevious = onPrevious,
             modifier = Modifier.weight(1f),
             title = title?.takeIf { it.isNotBlank() } ?: stringResource(R.string.player_idle),
             subtitle = subtitle,
@@ -188,6 +194,8 @@ private fun CircularPlayerEntry(
     isCar: Boolean,
     enabled: Boolean,
     onOpen: () -> Unit,
+    onNext: () -> Unit,
+    onPrevious: () -> Unit,
     modifier: Modifier,
     title: String,
     subtitle: String?,
@@ -222,11 +230,32 @@ private fun CircularPlayerEntry(
         CircularPlayerVisual.Error -> R.string.playback_failed
         CircularPlayerVisual.Disconnected -> R.string.playback_service_disconnected
     })
+    val error = if (state.source == PlaybackSource.MUSIC && connected)
+        musicPlaybackErrorText(state) else null
+    val status = error ?: label
     val openLabel = stringResource(R.string.now_playing_open)
     val currentTitle = state.music?.title
     val entryState = if (visual != CircularPlayerVisual.Default && !currentTitle.isNullOrBlank()) {
-        stringResource(R.string.now_playing_current_state, currentTitle, label)
-    } else label
+        stringResource(R.string.now_playing_current_state, currentTitle, status)
+    } else status
+    val canNext = enabled && connected && state.canNext
+    val canPrevious = enabled && connected && state.canPrevious
+    val currentNext by rememberUpdatedState(onNext)
+    val currentPrevious by rememberUpdatedState(onPrevious)
+    val swipe = if (canNext || canPrevious) Modifier.pointerInput(stationKey, canNext, canPrevious) {
+        val threshold = 40.dp.toPx()
+        var distance = 0f
+        detectHorizontalDragGestures(
+            onDragStart = { distance = 0f },
+            onHorizontalDrag = { _, delta -> distance += delta },
+            onDragEnd = {
+                when {
+                    distance <= -threshold && canNext -> currentNext()
+                    distance >= threshold && canPrevious -> currentPrevious()
+                }
+            }
+        )
+    } else Modifier
     val interaction = remember { MutableInteractionSource() }
     val coverSize = if (isCar) 48.dp else 42.dp
     val coverShape = RoundedCornerShape(if (isCar) 13.dp else 11.dp)
@@ -238,6 +267,7 @@ private fun CircularPlayerEntry(
     Row(
         modifier.heightIn(min = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
             .controlFeedback(interaction, TuneShapes.Navigation, enabled)
+            .then(swipe)
             .clickable(
                 enabled = enabled, role = Role.Button, interactionSource = interaction,
                 indication = null, onClick = onOpen
@@ -313,9 +343,11 @@ private fun CircularPlayerEntry(
                 title, color = TuneColors.Text, style = TuneTypography.control(isCar),
                 fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis
             )
-            if (!subtitle.isNullOrBlank()) {
+            val detail = error ?: subtitle
+            if (!detail.isNullOrBlank()) {
                 Text(
-                    subtitle, color = TuneColors.Muted, style = TuneTypography.meta(true),
+                    detail, color = if (error != null) TuneColors.Error else TuneColors.Muted,
+                    style = TuneTypography.meta(isCar),
                     maxLines = 1, overflow = TextOverflow.Ellipsis
                 )
             }

@@ -2,6 +2,7 @@ package com.meowv.tune.ui
 
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -16,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -58,8 +60,11 @@ import com.meowv.tune.ui.theme.TuneSizes
 import com.meowv.tune.ui.theme.TuneSpacing
 import com.meowv.tune.ui.theme.TuneTextStyle
 import com.meowv.tune.ui.theme.TuneTypography
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun MusicScreen(
@@ -75,7 +80,7 @@ internal fun MusicScreen(
     val playback = (state as? MusicUiState.Active)?.playback
     val currentId = playback?.music?.id
     val visual = playback?.let { playbackVisual(it.phase, connected) } ?: StationPlaybackVisual.None
-    val playbackError = playback?.takeIf { it.error == null }?.let { musicPlaybackErrorText(it) }
+    val playbackError = playback?.let { musicPlaybackErrorText(it) }
     val waitingForAccess = browse.failure == MusicFailure.NOT_CONFIGURED
     val list = rememberLazyGridState()
     var mode by rememberSaveable { mutableStateOf(RadioDisplayMode.LIST) }
@@ -136,7 +141,8 @@ internal fun MusicScreen(
             }
 
             if (mode == RadioDisplayMode.CARD) {
-                MusicCards(browse.tracks, currentId, visual, playbackError, connected, isCar,
+                MusicCards(browse.tracks, currentId, visual, playbackError, connected,
+                    playback != null && playback.phase in CardAutoplayPhases, isCar,
                     previewId, listTrackToCenter, { id ->
                         previewId = id
                         if (id == listTrackToCenter) listSelectionId = null
@@ -190,6 +196,7 @@ private fun MusicCards(
     visual: StationPlaybackVisual,
     playbackError: String?,
     connected: Boolean,
+    autoPlayOnSwipe: Boolean,
     isCar: Boolean,
     previewId: String?,
     listTrackToCenter: String?,
@@ -210,7 +217,37 @@ private fun MusicCards(
     ) { tracks.size }
     val animate = rememberMotionEnabled()
     val reportPreview by rememberUpdatedState(onPreview)
+    val currentTracks by rememberUpdatedState(tracks)
+    val playTrack by rememberUpdatedState(onPlay)
     var observedPlaybackId by remember { mutableStateOf(currentId) }
+    var cardClickCount by remember { mutableIntStateOf(0) }
+
+    // 播放来源变化或用户已点按卡片时，取消待执行的滑卡播放。
+    LaunchedEffect(pager, currentId, autoPlayOnSwipe, connected, animationsEnabled, cardClickCount) {
+        if (!autoPlayOnSwipe || !connected || !animationsEnabled || currentId == null) return@LaunchedEffect
+        var dragStartId: String? = null
+        launch {
+            pager.interactionSource.interactions.collect { interaction ->
+                when (interaction) {
+                    is DragInteraction.Start -> dragStartId = currentTracks.getOrNull(pager.settledPage)?.id
+                    is DragInteraction.Cancel -> dragStartId = null
+                    else -> Unit
+                }
+            }
+        }
+        // 只处理手指滑动。播放器带动卡片定位时，只更新预览。
+        snapshotFlow { if (pager.isScrollInProgress) null else currentTracks.getOrNull(pager.settledPage)?.id }
+            .collectLatest { settledId ->
+                if (settledId == null) return@collectLatest
+                val startId = dragStartId ?: return@collectLatest
+                dragStartId = null
+                if (settledId == startId || settledId == currentId) return@collectLatest
+                delay(CARD_AUTOPLAY_DEBOUNCE_MS)
+                if (pager.isScrollInProgress) return@collectLatest
+                val track = currentTracks.getOrNull(pager.settledPage) ?: return@collectLatest
+                if (track.id == settledId && track.canStartPlayback) playTrack(track)
+            }
+    }
 
     LaunchedEffect(pager, tracks, currentId, listTrackToCenter) {
         if (prioritizeCurrent) snapshotFlow { !pager.isScrollInProgress }.first { it }
@@ -227,7 +264,6 @@ private fun MusicCards(
                 else pager.scrollToPage(target)
             }
         }
-        // Pager 的定位和滑动只保存预览，用户点卡片才发送播放命令。
         snapshotFlow { if (pager.isScrollInProgress) null else tracks.getOrNull(pager.settledPage)?.id }
             .filterNotNull().collect { reportPreview(it) }
     }
@@ -273,7 +309,10 @@ private fun MusicCards(
                                 .semantics {
                                     if (active) selected = true
                                 }
-                        ) { onPlay(track) }
+                        ) {
+                            cardClickCount++
+                            onPlay(track)
+                        }
                     }
                     Spacer(Modifier.height(statusGap))
                     when {

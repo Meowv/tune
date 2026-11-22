@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import com.meowv.tune.R
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlayerUiState
+import com.meowv.tune.domain.TuneError
 import com.meowv.tune.domain.music.MusicFailure
 import com.meowv.tune.music.MusicLyrics
 import com.meowv.tune.ui.theme.TuneColors
@@ -282,9 +283,12 @@ private fun PlaybackTime(positionMs: Long, color: Color, isCar: Boolean) {
 
 @Composable
 internal fun musicPlaybackErrorText(state: PlayerUiState): String? =
-    if (state.musicFailure != null || state.phase == PlaybackPhase.ERROR && state.error == null)
-        stringResource(musicPlaybackFailureMessage(state.musicFailure))
-    else playbackErrorText(state.error, state.statusCode)
+    when {
+        state.musicFailure != null -> stringResource(musicPlaybackFailureMessage(state.musicFailure))
+        state.error == TuneError.PLAYBACK || state.phase == PlaybackPhase.ERROR && state.error == null ->
+            stringResource(R.string.music_failed)
+        else -> playbackErrorText(state.error, state.statusCode)
+    }
 
 internal fun musicPlaybackFailureMessage(failure: MusicFailure?) = when (failure) {
     MusicFailure.NOT_CONFIGURED -> R.string.music_not_configured

@@ -19,10 +19,12 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.meowv.tune.domain.*
+import com.meowv.tune.domain.music.MusicTrack
 import com.meowv.tune.ui.RadioScreen
 import com.meowv.tune.ui.isCarWindow
 import com.meowv.tune.ui.theme.TuneColors
@@ -120,5 +122,19 @@ class RadioCardStatusTest {
         assertTrue(commands.isEmpty())
         compose.onNodeWithTag("station_card_${second.uuid}").performClick()
         compose.runOnIdle { assertEquals(listOf(PlayerCommand.Play(second)), commands) }
+
+        compose.runOnIdle {
+            playback.value = PlayerUiState(
+                phase = PlaybackPhase.PLAYING, source = PlaybackSource.MUSIC,
+                music = MusicTrack("now-playing", "Test song", listOf("qix"))
+            )
+        }
+        compose.onNodeWithTag("station_cards").performTouchInput { swipeRight() }
+        card.assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(500)
+        compose.runOnIdle {
+            assertEquals(first.uuid, selected.value)
+            assertEquals(listOf(PlayerCommand.Play(second)), commands)
+        }
     }
 }

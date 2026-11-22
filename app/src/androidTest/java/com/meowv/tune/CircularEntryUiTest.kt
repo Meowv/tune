@@ -6,6 +6,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.meowv.tune.domain.*
+import com.meowv.tune.domain.music.MusicTrack
 import com.meowv.tune.ui.*
 import com.meowv.tune.ui.theme.TuneTheme
 import java.util.UUID
@@ -17,6 +18,49 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class CircularEntryUiTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun swipingUsesQueueAvailabilityWithoutOpeningThePlayerOrChangingMenu() {
+        val station = Station(UUID(0, 1), "Radio", null)
+        val playback = mutableStateOf(PlayerUiState(PlaybackPhase.PAUSED, station, canNext = true))
+        var page = TunePage.Radio
+        var opens = 0
+        var toggles = 0
+        val commands = mutableListOf<PlayerCommand>()
+        compose.setContent {
+            TuneTheme {
+                val rotation = remember { PlayerRotationState() }
+                MeowvBottomDock(TunePage.Radio, {
+                    CompactMediaBar(
+                        playback.value, playback.value.station, true, rotation,
+                        isCar = false, enabled = true, animationMillis = 0,
+                        onToggle = { toggles++ }, onOpen = { opens++ },
+                        onNext = { commands.add(PlayerCommand.Next) },
+                        onPrevious = { commands.add(PlayerCommand.Previous) }
+                    )
+                }) { page = it }
+            }
+        }
+        val entry = compose.onNodeWithTag("circular_player_entry")
+        entry.performTouchInput { swipeRight() }
+        entry.performTouchInput { swipeLeft() }
+        compose.runOnIdle {
+            assertEquals(listOf(PlayerCommand.Next), commands)
+            playback.value = PlayerUiState(
+                source = PlaybackSource.MUSIC, phase = PlaybackPhase.BUFFERING,
+                music = MusicTrack("buffering", "Test song", listOf("qix")), canPrevious = true
+            )
+        }
+        entry.performTouchInput { swipeLeft() }
+        entry.performTouchInput { swipeRight() }
+        compose.runOnIdle {
+            assertEquals(listOf(PlayerCommand.Next, PlayerCommand.Previous), commands)
+            assertEquals(TunePage.Radio, page)
+            assertEquals(0, opens)
+            assertEquals(0, toggles)
+        }
+        entry.performTouchInput { click() }
+        compose.runOnIdle { assertEquals(1, opens) }
+    }
 
     @Test fun heldControlsHighlightTheirWholeTargetWithoutActivatingEarly() {
         val station = Station(UUID(0, 1), "Radio", null)
