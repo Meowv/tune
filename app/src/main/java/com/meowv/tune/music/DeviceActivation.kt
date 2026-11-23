@@ -31,12 +31,13 @@ internal enum class MusicDevicePhase { CHECKING, OFFLINE, PENDING, ACTIVE, REVOK
 
 internal data class MusicDeviceState(
     val phase: MusicDevicePhase = MusicDevicePhase.CHECKING,
-    val shortCode: String? = null
+    val deviceCode: String? = null
 )
 
 internal class DeviceActivation(
     private val preferences: DataStore<Preferences>,
-    private val client: MusicActivationClient
+    private val client: MusicActivationClient,
+    private val androidId: () -> String?
 ) {
     private val mutableState = MutableStateFlow(MusicDeviceState())
     val state = mutableState.asStateFlow()
@@ -57,7 +58,7 @@ internal class DeviceActivation(
                     return@withLock null
                 }
                 if (saved[ServiceUrl] != serviceUrl) return@withLock null
-                val id = saved[InstallationId] ?: return@withLock null
+                val id = derivedId() ?: saved[InstallationId] ?: return@withLock null
                 val ciphertext = saved[EncryptedToken] ?: return@withLock null
                 decode(id, ciphertext)?.also { credential.set(Credential(it)) }
             }
@@ -118,19 +119,29 @@ internal class DeviceActivation(
     private suspend fun synchronize(): Long? {
         var identity = storage.withLock {
             val saved = preferences.data.first()
-            val id = saved[InstallationId]
-            if (saved[ServiceUrl] != serviceUrl) {
-                id?.let(MusicDeviceKeys::delete)
+            val derived = derivedId()
+            val savedId = saved[InstallationId]
+            if (derived != null && savedId != null && derived != savedId) {
+                MusicDeviceKeys.delete(savedId)
+                return@withLock createIdentity()
+            }
+            val id = derived ?: savedId
+            if (id == null) return@withLock createIdentity()
+            // 只有已有登记且服务地址变化时才换钥；清数据后 ServiceUrl 也为空，应复用 Keystore。
+            if (savedId != null && saved[ServiceUrl] != serviceUrl) {
+                MusicDeviceKeys.delete(id)
                 return@withLock createIdentity()
             }
             if (saved[Revoked] == true)
-                mutableState.value = MusicDeviceState(MusicDevicePhase.REVOKED, saved[ShortCode])
-            val key = id?.let(MusicDeviceKeys::publicKey)
-            if (id != null && key != null) Identity(id, key, saved[Registered] == true)
+                mutableState.value = MusicDeviceState(
+                    MusicDevicePhase.REVOKED, MusicDeviceIdentity.deviceCode(id)
+                )
+            val key = MusicDeviceKeys.publicKey(id)
+            if (key != null) Identity(id, key, saved[Registered] == true)
             else createIdentity()
         }
 
-        var shortCode = showShortCode(identity)
+        val deviceCode = showDeviceCode(identity)
         var reply = if (identity.registered) client.status(identity.id) else register(identity)
         if (reply.code == 404 && reply.errorCode() == "device_not_found") {
             storage.withLock {
@@ -144,40 +155,24 @@ internal class DeviceActivation(
             reply = register(identity)
         }
 
-        if (reply.code == 410 && reply.errorCode() == "device_removed") {
-            identity = storage.withLock {
-                MusicDeviceKeys.delete(identity.id)
-                createIdentity()
-            }
-            shortCode = showShortCode(identity)
-            reply = register(identity)
-        }
-
         if (reply.code !in setOf(200, 202)) {
-            if (reply.code == 409 && reply.errorCode() == "device_code_conflict") {
-                storage.withLock {
-                    MusicDeviceKeys.delete(identity.id)
-                    createIdentity()
-                }
-            }
             setConnectionFailure(MusicDevicePhase.UNAVAILABLE)
             return reply.retryAfterSeconds
         }
 
-        check(reply.text("installationId") == identity.id && reply.text("shortCode") == shortCode)
+        check(reply.text("installationId") == identity.id && reply.text("deviceCode") == deviceCode)
         when (reply.text("status")) {
             "pending" -> storage.withLock {
                 credential.set(null)
                 preferences.edit {
                     it[Registered] = true
                     it.remove(Revoked)
-                    it.remove(ShortCode)
                     it.remove(EncryptedToken)
                 }
                 setPhase(MusicDevicePhase.PENDING)
             }
             "active" -> {
-                // 注册重试可返回 active，只有状态接口提供密文。
+                // register/status 都可能返回 active 与密文；202 无密文时等下一次 status。
                 val ciphertext = reply.text("encryptedToken")
                 if (ciphertext == null && reply.code == 202) {
                     preferences.edit { it[Registered] = true }
@@ -189,7 +184,6 @@ internal class DeviceActivation(
                     preferences.edit {
                         it[Registered] = true
                         it.remove(Revoked)
-                        it.remove(ShortCode)
                         it[EncryptedToken] = checkNotNull(ciphertext)
                     }
                     val installed = credential.updateAndGet { current ->
@@ -203,7 +197,6 @@ internal class DeviceActivation(
                 preferences.edit {
                     it[Registered] = true
                     it[Revoked] = true
-                    it[ShortCode] = shortCode
                     it.remove(EncryptedToken)
                 }
                 setPhase(MusicDevicePhase.REVOKED)
@@ -217,24 +210,30 @@ internal class DeviceActivation(
         identity.id, identity.key, label(Build.MODEL, 80), label(Build.VERSION.RELEASE, 32)
     )
 
-    private fun showShortCode(identity: Identity): String {
-        val shortCode = MusicDeviceKeys.shortCode(identity.key)
-        if (state.value.shortCode != shortCode) mutableState.value = MusicDeviceState(shortCode = shortCode)
-        return shortCode
+    private fun showDeviceCode(identity: Identity): String {
+        val deviceCode = MusicDeviceIdentity.deviceCode(identity.id)
+        if (state.value.deviceCode != deviceCode) {
+            mutableState.value = MusicDeviceState(deviceCode = deviceCode)
+        }
+        return deviceCode
     }
 
     private suspend fun createIdentity(): Identity {
         credential.set(null)
         mutableState.value = MusicDeviceState()
-        val id = UUID.randomUUID().toString().replace("-", "")
+        val id = derivedId() ?: UUID.randomUUID().toString().replace("-", "")
         preferences.edit {
             it.clear()
             it[InstallationId] = id
             it[ServiceUrl] = serviceUrl
         }
-        val key = MusicDeviceKeys.generate(id)
+        val key = MusicDeviceKeys.ensure(id)
         return Identity(id, key, registered = false)
     }
+
+    private fun derivedId(): String? = androidId()
+        ?.takeIf(String::isNotBlank)
+        ?.let(MusicDeviceIdentity::installationId)
 
     private fun decode(id: String, ciphertext: String): String? = try {
         if (ciphertext.length != 342) null
@@ -279,7 +278,6 @@ internal class DeviceActivation(
         val Registered = booleanPreferencesKey("registered")
         val EncryptedToken = stringPreferencesKey("encrypted_token")
         val Revoked = booleanPreferencesKey("revoked")
-        val ShortCode = stringPreferencesKey("short_code")
         val Backoff = longArrayOf(5, 15, 60)
         val TokenPattern = Regex("mvm_[a-zA-Z0-9_-]{43}")
     }

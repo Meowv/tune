@@ -16,7 +16,7 @@
   <string name="music_device_active">已激活</string>
   <string name="music_device_revoked">已撤销</string>
   <string name="music_device_unavailable">暂时无法检查设备</string>
-  <string name="music_device_summary">%1$s · 短码 %2$s</string>
+  <string name="music_device_summary">%1$s · 设备码 %2$s</string>
   <string name="music_not_configured">音乐服务暂未就绪</string>
   <string name="music_previous">上一曲</string>
   <string name="music_next">下一曲</string>

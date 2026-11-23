@@ -3,6 +3,7 @@ package com.meowv.tune
 import android.app.Application
 import android.content.Context
 import android.os.SystemClock
+import android.provider.Settings
 import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
@@ -76,7 +77,11 @@ private val LastMirror = stringPreferencesKey("last_good_host")
 open class TuneApplication : Application(), SingletonImageLoader.Factory {
     internal open val musicActivation: DeviceActivation? by lazy {
         BuildConfig.MUSIC_API_BASE_URL.takeIf(String::isNotBlank)?.toHttpUrl()?.let {
-            DeviceActivation(musicDevicePreferences, MusicActivationClient(it, allowLocalHttp = BuildConfig.DEBUG))
+            DeviceActivation(
+                musicDevicePreferences,
+                MusicActivationClient(it, allowLocalHttp = BuildConfig.DEBUG),
+                androidId = { Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) }
+            )
         }
     }
 

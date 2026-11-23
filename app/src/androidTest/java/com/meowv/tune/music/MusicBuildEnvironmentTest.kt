@@ -40,7 +40,9 @@ class MusicBuildEnvironmentTest {
         val (url, file) = activationFixture()
         val storage = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         val prefs = PreferenceDataStoreFactory.create(scope = storage) { file }
-        val activation = DeviceActivation(prefs, MusicActivationClient(url, allowLocalHttp = true))
+        val activation = DeviceActivation(
+            prefs, MusicActivationClient(url, allowLocalHttp = true), androidId = { "test-${file.name}" }
+        )
         val foreground = launch { activation.runWhileForeground() }
         try {
             withTimeout(90_000) {
@@ -60,7 +62,9 @@ class MusicBuildEnvironmentTest {
         assertTrue(file.isFile)
         val storage = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         val prefs = PreferenceDataStoreFactory.create(scope = storage) { file }
-        val activation = DeviceActivation(prefs, MusicActivationClient(url, allowLocalHttp = true))
+        val activation = DeviceActivation(
+            prefs, MusicActivationClient(url, allowLocalHttp = true), androidId = { null }
+        )
         val foreground = launch(start = CoroutineStart.LAZY) { activation.runWhileForeground() }
         try {
             assertNotNull(activation.readToken())
@@ -88,7 +92,7 @@ class MusicBuildEnvironmentTest {
             val pending = withTimeout(75_000) {
                 activation.state.first { it.phase == MusicDevicePhase.PENDING }
             }
-            assertNotNull(pending.shortCode)
+            assertNotNull(pending.deviceCode)
             assertNull(activation.readToken())
             assertEquals(MusicFailure.NOT_CONFIGURED, probe(repository))
             report("Device registered again and is waiting for approval")

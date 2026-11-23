@@ -193,7 +193,7 @@ private fun MusicDeviceGroup(device: MusicDeviceState, isCar: Boolean) {
     SettingsGroup {
         SettingRow(
             R.drawable.ic_menu_music, R.string.setting_music_device, isCar,
-            subtitle = device.shortCode?.let { stringResource(R.string.music_device_summary, status, it) } ?: status
+            subtitle = device.deviceCode?.let { stringResource(R.string.music_device_summary, status, it) } ?: status
         )
     }
 }

@@ -30,7 +30,7 @@ class MusicDeviceSettingsTest {
     @Test fun carShowsReadOnlyDeviceState() = verifySettings(isCar = true)
 
     private fun verifySettings(isCar: Boolean) {
-        val device = mutableStateOf(MusicDeviceState(MusicDevicePhase.PENDING, "A1B2-C3D4"))
+        val device = mutableStateOf(MusicDeviceState(MusicDevicePhase.PENDING, "A1B2C-3D4E5"))
         compose.setContent {
             TuneTheme(ThemeMode.DARK) {
                 SettingsScreen(isCar, TuneSettings(), false, "", {}, {}, {}, {}, musicDevice = device.value)
@@ -38,16 +38,16 @@ class MusicDeviceSettingsTest {
         }
         compose.onNodeWithTag("page_settings").performScrollToNode(hasText("音乐设备"))
         compose.onNodeWithText("音乐设备").assertHasNoClickAction()
-        compose.onNodeWithText("待管理员激活 · 短码 A1B2-C3D4").assertIsDisplayed()
+        compose.onNodeWithText("待管理员激活 · 设备码 A1B2C-3D4E5").assertIsDisplayed()
         captureDeviceStatus(isCar, "pending")
         compose.runOnIdle { device.value = MusicDeviceState(MusicDevicePhase.CHECKING) }
         compose.onNodeWithText("正在登记或检查设备").assertIsDisplayed()
         captureDeviceStatus(isCar, "checking")
-        compose.runOnIdle { device.value = MusicDeviceState(MusicDevicePhase.ACTIVE, "A1B2-C3D4") }
-        compose.onNodeWithText("已激活 · 短码 A1B2-C3D4").assertIsDisplayed()
+        compose.runOnIdle { device.value = MusicDeviceState(MusicDevicePhase.ACTIVE, "A1B2C-3D4E5") }
+        compose.onNodeWithText("已激活 · 设备码 A1B2C-3D4E5").assertIsDisplayed()
         captureDeviceStatus(isCar, "active")
         compose.runOnIdle { device.value = device.value.copy(phase = MusicDevicePhase.REVOKED) }
-        compose.onNodeWithText("已撤销 · 短码 A1B2-C3D4").assertIsDisplayed()
+        compose.onNodeWithText("已撤销 · 设备码 A1B2C-3D4E5").assertIsDisplayed()
         captureDeviceStatus(isCar, "revoked")
     }
 
