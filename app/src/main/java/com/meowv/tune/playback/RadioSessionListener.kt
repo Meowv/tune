@@ -31,6 +31,7 @@ internal class RadioSessionListener(
     override fun onAvailableCommandsChanged(availableCommands: Player.Commands) =
         delegate.onAvailableCommandsChanged(commands())
 
+    // ForwardingPlayer.addListener 已把回调中的 player 换成会话代理。
     override fun onEvents(player: Player, events: Player.Events) = delegate.onEvents(player, events)
 
     override fun onTimelineChanged(timeline: Timeline, reason: Int) = delegate.onTimelineChanged(timeline, reason)

@@ -237,7 +237,7 @@ internal class RadioPlayback(
             }
             player.playbackState == Player.STATE_ENDED -> scheduleRecovery(TuneFailure(TuneError.PLAYBACK))
             player.playbackState == Player.STATE_IDLE -> {
-                if (player.playerError == null && player.mediaItemCount > 0) stop()
+                if (player.playerError == null && state.phase != PlaybackPhase.PAUSED && player.mediaItemCount > 0) stop()
             }
             !player.playWhenReady -> update(state.copy(phase = PlaybackPhase.PAUSED))
             else -> {
@@ -351,7 +351,7 @@ internal class RadioPlayback(
             }
             else -> {
                 if (!networkAllows()) return
-                if (player.mediaItemCount == 0) {
+                if (player.playbackState == Player.STATE_IDLE) {
                     val currentSelection = selection ?: return
                     resetRetryBudget()
                     startAttempt(trigger)
@@ -455,14 +455,14 @@ internal class RadioPlayback(
         diagnostics?.resolving()
         interruptions.reset()
         stallMonitor.reset()
-        audioFocus.abandon()
-        player.stop()
-        player.clearMediaItems()
         val playbackIntent = existingIntent ?: PlaybackIntent(next.station)
         selection = next
         intent = playbackIntent
         committed = false
         update(PlayerUiState(phase = phase, station = next.station, isLive = true))
+        audioFocus.abandon()
+        // 解析期间停止旧音频，待新音源可用时直接替换会话条目。
+        player.stop()
 
         val stream = try {
             resolve(playbackIntent)
@@ -479,13 +479,14 @@ internal class RadioPlayback(
             .setMediaId(next.station.uuid.toString())
             .setUri(stream.url.toString())
             .setMediaMetadata(sessionMetadata(next.station))
-        if (stream.isHls) item.setMimeType(MimeTypes.APPLICATION_M3U8)
+            .apply { if (stream.isHls) setMimeType(MimeTypes.APPLICATION_M3U8) }
+            .build()
         if (!audioFocus.acquire()) {
             fail(TuneError.AUDIO_FOCUS_LOST)
             return
         }
+        if (player.currentMediaItem == item) player.seekToDefaultPosition() else player.setMediaItem(item)
         update(state.copy(phase = PlaybackPhase.BUFFERING, error = null, statusCode = null))
-        player.setMediaItem(item.build())
         player.prepare()
         player.play()
         syncStallWatch()
@@ -570,12 +571,16 @@ internal class RadioPlayback(
     }
 
     // 系统媒体界面只读取这里的元数据，不额外暴露列表、历史或详情。
-    private fun sessionMetadata(station: Station): MediaMetadata = MediaMetadata.Builder()
-        .setTitle(station.name.ifBlank { context.getString(R.string.station_unnamed) })
-        .setArtist(station.countryCode?.displayName(Locale.getDefault()) ?: context.getString(R.string.app_name))
-        .setIsPlayable(true)
-        .apply { artworkUri(station.iconUrl)?.let { setArtworkUri(it) } }
-        .build()
+    private fun sessionMetadata(station: Station): MediaMetadata {
+        val title = station.name.ifBlank { context.getString(R.string.station_unnamed) }
+        val region = station.countryCode?.displayName(Locale.getDefault()) ?: context.getString(R.string.app_name)
+        return MediaMetadata.Builder()
+            .setTitle(title).setArtist(region)
+            .setDisplayTitle(title).setSubtitle(region)
+            .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION).setIsPlayable(true)
+            .setArtworkUri(artworkUri(station.iconUrl))
+            .build()
+    }
 
     private fun artworkUri(url: String?): Uri? = url
         ?.trim()
@@ -614,6 +619,7 @@ internal class RadioPlayback(
         stallMonitor.reset()
         player.volume = 1f
         player.pause()
+        clearSupersededItem()
         update(paused)
     }
 
@@ -679,7 +685,14 @@ internal class RadioPlayback(
         finishAttempt()
         stallMonitor.reset()
         audioFocus.abandon()
+        clearSupersededItem()
         update(state.copy(phase = PlaybackPhase.ERROR, station = station, error = kind, statusCode = status))
+    }
+
+    private fun clearSupersededItem() {
+        if (state.phase in PendingPhases && player.currentMediaItem?.mediaId != selection?.station?.uuid?.toString()) {
+            player.clearMediaItems()
+        }
     }
 
     private fun startAttempt(trigger: PlaybackTrigger) {

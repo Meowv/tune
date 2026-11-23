@@ -19,6 +19,7 @@ import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.google.common.collect.ImmutableList
+import com.meowv.tune.BuildConfig
 import com.meowv.tune.MainActivity
 import com.meowv.tune.R
 import com.meowv.tune.TuneApplication
@@ -36,6 +37,7 @@ import kotlinx.coroutines.launch
 @OptIn(UnstableApi::class)
 class RadioPlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
+    private var diagnostics: MediaSessionDiagnostics? = null
     private var publishedButtons: List<CommandButton> = emptyList()
     private var publishedCommands: Player.Commands? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -78,17 +80,32 @@ class RadioPlaybackService : MediaSessionService() {
             app.userSettings.settings.map { it.playbackOrder }.distinctUntilChanged()
                 .collect { music.setShuffle(it == PlaybackOrder.SHUFFLE) }
         }
-        coordinator = PlaybackCoordinator(engine, music, app.playerController::publish)
+        val playbackCoordinator = PlaybackCoordinator(engine, music, app.playerController::publish) { command ->
+            diagnostics?.log("appCommand", "command=$command")
+        }
+        coordinator = playbackCoordinator
         app.playerController.coordinator = coordinator
         app.playerController.engine = engine
         val activity = PendingIntent.getActivity(this, 0,
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val mediaSession = MediaSession.Builder(this, RadioSessionPlayer(player, coordinator))
+        val sessionPlayer = RadioSessionPlayer(player, playbackCoordinator)
+        val mediaSession = MediaSession.Builder(this, sessionPlayer)
             .setSessionActivity(activity)
             .setCallback(SessionCallback())
             .build()
         session = mediaSession
+        if (BuildConfig.DEBUG) {
+            val observer = MediaSessionDiagnostics { playbackCoordinator.activeSource }
+            diagnostics = observer
+            observer.log("sessionCreated")
+            sessionPlayer.addListener(observer)
+            scope.launch {
+                app.playerController.state.map { it.source }.distinctUntilChanged().collect { source ->
+                    observer.log("sourceChanged", "publishedSource=$source")
+                }
+            }
+        }
         setMediaNotificationProvider(
             object : DefaultMediaNotificationProvider(
                 this,
@@ -156,8 +173,13 @@ class RadioPlaybackService : MediaSessionService() {
         }
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
-        session.takeIf { canConnect(controllerInfo) }
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
+        if (!canConnect(controllerInfo)) {
+            diagnostics?.controller("serviceRejected", controllerInfo)
+            return null
+        }
+        return session
+    }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         (application as TuneApplication).playerController.coordinator?.stopAfterTaskRemoval()
@@ -176,9 +198,14 @@ class RadioPlaybackService : MediaSessionService() {
         }
         session?.let {
             val player = it.player
+            diagnostics?.let { observer ->
+                player.removeListener(observer)
+                observer.log("sessionReleased")
+            }
             it.release()
             player.release()
         }
+        diagnostics = null
         session = null
         super.onDestroy()
     }
@@ -213,8 +240,10 @@ class RadioPlaybackService : MediaSessionService() {
     private inner class SessionCallback : MediaSession.Callback {
         override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
             if (!canConnect(controller)) {
+                diagnostics?.controller("controllerRejected", controller)
                 return MediaSession.ConnectionResult.reject()
             }
+            diagnostics?.controller("controllerAccepted", controller)
             val commands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
                 .remove(Player.COMMAND_SET_MEDIA_ITEM)
                 .remove(Player.COMMAND_CHANGE_MEDIA_ITEMS)
@@ -223,6 +252,19 @@ class RadioPlaybackService : MediaSessionService() {
                 .setAvailablePlayerCommands(commands)
                 .setMediaButtonPreferences(mediaButtons())
                 .build()
+        }
+
+        override fun onPlayerInteractionFinished(
+            session: MediaSession,
+            controllerInfo: MediaSession.ControllerInfo,
+            playerCommands: Player.Commands
+        ) {
+            if (playerCommands.containsAny(Player.COMMAND_SEEK_TO_NEXT, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)) {
+                diagnostics?.controller("controllerNext", controllerInfo)
+            }
+            if (playerCommands.containsAny(Player.COMMAND_SEEK_TO_PREVIOUS, Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)) {
+                diagnostics?.controller("controllerPrevious", controllerInfo)
+            }
         }
     }
     private companion object {

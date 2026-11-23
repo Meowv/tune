@@ -9,7 +9,8 @@ import com.meowv.tune.domain.music.canStartPlayback
 internal class PlaybackCoordinator(
     private val radio: RadioPlayback,
     internal val music: MusicPlaybackEngine,
-    private val publish: (PlayerUiState) -> Unit
+    private val publish: (PlayerUiState) -> Unit,
+    private val onAppMediaSelection: (String) -> Unit = {}
 ) : RadioSessionPlayer.SessionCommands {
     var activeSource = PlaybackSource.RADIO
         private set
@@ -53,12 +54,24 @@ internal class PlaybackCoordinator(
 
     fun dispatch(command: PlayerCommand) {
         when (command) {
-            is PlayerCommand.Play -> playRadio(command.station)
-            is PlayerCommand.PlayMusic -> playMusic(command.track, command.seed)
+            is PlayerCommand.Play -> {
+                onAppMediaSelection("playRadio")
+                playRadio(command.station)
+            }
+            is PlayerCommand.PlayMusic -> {
+                onAppMediaSelection("playMusic")
+                playMusic(command.track, command.seed)
+            }
             is PlayerCommand.Seek -> if (activeSource == PlaybackSource.MUSIC) music.seek(command.positionMs)
             PlayerCommand.TogglePause -> if (activeSource == PlaybackSource.MUSIC) music.toggle() else radio.toggle()
-            PlayerCommand.Next -> onSessionNext()
-            PlayerCommand.Previous -> onSessionPrevious()
+            PlayerCommand.Next -> {
+                onAppMediaSelection("next")
+                onSessionNext()
+            }
+            PlayerCommand.Previous -> {
+                onAppMediaSelection("previous")
+                onSessionPrevious()
+            }
             PlayerCommand.Stop -> onSessionStop()
             PlayerCommand.CancelPending -> if (activeSource == PlaybackSource.RADIO) radio.cancelPending()
             PlayerCommand.CancelMusic -> if (activeSource == PlaybackSource.MUSIC) music.pause()

@@ -10,6 +10,7 @@ import android.app.ActivityManager
 import android.os.PowerManager
 import java.io.FileInputStream
 import androidx.lifecycle.Lifecycle
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -117,11 +118,64 @@ class MusicPlaybackIntegrationTest {
             // 让Media3实际读到EOF，而不是直接调用业务Next模拟歌曲结束。
             main { controller.seekTo(11000) }
             awaitMusic(2)
+            awaitSessionMusic(controller, tracks[1])
             assertEquals(token, main { controller.connectedToken })
             assertEquals(1, resolves[tracks[1].id]?.get())
             assertTrue(connection.state.value.canPrevious)
             main { controller.seekToPreviousMediaItem() }
             awaitMusic(1)
+            awaitSessionMusic(controller, tracks[0])
+        }
+    }
+
+    @Test fun switchingPausedMusicReplacesOneSessionItemAndReplayKeepsItsId() = runBlocking {
+        val resolveStarted = CompletableDeferred<Unit>()
+        val resolveNext = CompletableDeferred<Unit>()
+        resolveOverride = { id ->
+            if (id == tracks[1].id) {
+                resolveStarted.complete(Unit)
+                resolveNext.await()
+            }
+        }
+        withMusic {
+            connection.dispatch(PlayerCommand.PlayMusic(tracks[0]))
+            awaitMusic(1)
+            val controller = connect()
+            awaitSessionMusic(controller, tracks[0])
+            val transitions = mutableListOf<String?>()
+            val listener = object : Player.Listener {
+                override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                    transitions.add(mediaItem?.mediaId)
+                }
+            }
+            main { controller.addListener(listener); controller.pause() }
+            try {
+                awaitPhase(PlaybackPhase.PAUSED)
+                connection.dispatch(PlayerCommand.PlayMusic(tracks[1]))
+                withTimeout(4000) { resolveStarted.await() }
+                withTimeout(3000) {
+                    while (main { controller.playbackState != Player.STATE_IDLE || controller.isPlaying }) delay(25)
+                }
+                assertEquals("music:${tracks[0].id}", main { controller.currentMediaItem?.mediaId })
+
+                resolveNext.complete(Unit)
+                awaitMusic(2)
+                awaitSessionMusic(controller, tracks[1])
+                connection.dispatch(PlayerCommand.PlayMusic(tracks[1]))
+                awaitMusic(2)
+                awaitSessionMusic(controller, tracks[1])
+                assertEquals(listOf("music:${tracks[1].id}"), main { transitions.toList() })
+
+                resolveOverride = { id -> if (id == tracks[2].id) throw MusicException(MusicFailure.FORBIDDEN) }
+                connection.dispatch(PlayerCommand.PlayMusic(tracks[2]))
+                awaitPhase(PlaybackPhase.ERROR)
+                withTimeout(4000) {
+                    while (main { controller.currentMediaItem != null || controller.isPlaying }) delay(25)
+                }
+            } finally {
+                resolveNext.complete(Unit)
+                main { controller.removeListener(listener) }
+            }
         }
     }
 
@@ -130,13 +184,19 @@ class MusicPlaybackIntegrationTest {
             connection.dispatch(PlayerCommand.PlayMusic())
             awaitMusic(1)
             val controller = connect()
+            awaitSessionMusic(controller, tracks[0])
             val token = main { controller.connectedToken }
             connection.dispatch(PlayerCommand.Play(Station(UUID(0, 1), "Test station 1", app.country)))
             withTimeout(6000) { connection.state.first { it.source == PlaybackSource.RADIO && it.phase == PlaybackPhase.PLAYING } }
             assertNull(connection.state.value.music)
             assertFalse(main { controller.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM) })
+            withTimeout(4000) {
+                while (main { controller.currentMediaItem?.mediaId != UUID(0, 1).toString() }) delay(25)
+            }
+            assertEquals("Test station 1", main { controller.mediaMetadata.title.toString() })
             connection.dispatch(PlayerCommand.PlayMusic(tracks[1]))
             awaitMusic(2)
+            awaitSessionMusic(controller, tracks[1])
             assertNull(connection.state.value.station)
             assertEquals(token, main { controller.connectedToken })
         }
@@ -157,9 +217,12 @@ class MusicPlaybackIntegrationTest {
                 withTimeout(4000) { started[1].await() }
                 connection.dispatch(PlayerCommand.Next)
                 awaitMusic(3)
+                val controller = connect()
+                awaitSessionMusic(controller, tracks[2])
                 gates.forEach { it.complete(Unit) }
                 delay(400)
                 assertEquals(tracks[2].id, connection.state.value.music?.id)
+                awaitSessionMusic(controller, tracks[2])
                 assertFalse(connection.state.value.canPrevious)
             }
         } finally { gates.forEach { it.complete(Unit) } }
@@ -956,6 +1019,15 @@ class MusicPlaybackIntegrationTest {
     private suspend fun awaitMusic(number: Int) = withTimeout(6000) {
         connection.state.first { it.source == PlaybackSource.MUSIC && it.phase == PlaybackPhase.PLAYING && it.music?.id == tracks[number - 1].id }
     }
+
+    private suspend fun awaitSessionMusic(controller: MediaController, track: MusicTrack) = withTimeout(4000) {
+        while (!main {
+            controller.currentMediaItem?.mediaId == "music:${track.id}" &&
+                controller.mediaMetadata.title.toString() == track.title &&
+                controller.mediaMetadata.artist.toString() == track.artists.joinToString(" / ")
+        }) delay(25)
+    }
+
     private suspend fun awaitPhase(phase: PlaybackPhase) = withTimeout(4000) { connection.state.first { it.phase == phase } }
     private fun connect(): MediaController {
         val future = main { MediaController.Builder(app, SessionToken(app, ComponentName(app, RadioPlaybackService::class.java))).buildAsync() }

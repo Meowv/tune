@@ -3,6 +3,12 @@ package com.meowv.tune
 import android.app.Notification
 import android.app.NotificationManager
 import android.content.ComponentName
+import android.media.MediaMetadata as PlatformMetadata
+import android.media.session.MediaController as PlatformController
+import android.media.session.MediaSession as PlatformSession
+import android.media.session.PlaybackState as PlatformPlaybackState
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelFileDescriptor
 import androidx.lifecycle.Lifecycle
 import androidx.media3.common.Player
@@ -12,6 +18,8 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.google.common.util.concurrent.ListenableFuture
+import com.meowv.tune.domain.NetworkState
+import com.meowv.tune.domain.NetworkType
 import com.meowv.tune.domain.PlaybackOrder
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlayerCommand
@@ -19,12 +27,14 @@ import com.meowv.tune.domain.RadioScope
 import com.meowv.tune.domain.ScopeMode
 import com.meowv.tune.domain.Station
 import com.meowv.tune.domain.StationPage
+import com.meowv.tune.domain.TuneError
 import com.meowv.tune.domain.music.MusicTrack
 import com.meowv.tune.domain.music.PlayableAudio
 import com.meowv.tune.music.FakeMusicRepository
 import com.meowv.tune.playback.RadioPlaybackService
 import java.io.FileInputStream
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -68,7 +78,7 @@ class MediaSessionControlTest {
         app.resolveFailures.clear()
         app.playbackDelays.clear()
         app.latePlaybackDelays.clear()
-        app.mockNetwork.value = com.meowv.tune.domain.NetworkState(com.meowv.tune.domain.NetworkType.WIFI)
+        app.mockNetwork.value = NetworkState(NetworkType.WIFI)
         app.userSettings.update {
             it.copy(scope = RadioScope(ScopeMode.COUNTRY, app.country), playbackOrder = PlaybackOrder.SEQUENTIAL)
         }
@@ -162,6 +172,86 @@ class MediaSessionControlTest {
             awaitStation(2)
             shell("input keyevent KEYCODE_MEDIA_PREVIOUS")
             awaitStation(1)
+        }
+    }
+
+    @Test fun frameworkControllerKeepsStationMetadataThroughSwitchAndRetry() = runBlocking {
+        withPlayer {
+            playStation(1)
+            val platform = frameworkController(awaitNotification())
+            val firstId = station(1).uuid.toString()
+            val second = station(2)
+            val secondId = second.uuid.toString()
+            val changes = mutableListOf(firstId)
+            val callback = object : PlatformController.Callback() {
+                override fun onMetadataChanged(metadata: PlatformMetadata?) {
+                    val id = metadata?.getString(PlatformMetadata.METADATA_KEY_MEDIA_ID).orEmpty()
+                    if (id != changes.last()) changes.add(id)
+                }
+            }
+            onMain { platform.registerCallback(callback, Handler(Looper.getMainLooper())) }
+            try {
+                awaitFrameworkPlayback(platform, firstId, PlatformPlaybackState.STATE_PLAYING)
+                assertTrue(onMain { (requireNotNull(platform.playbackState).actions and PlatformPlaybackState.ACTION_SKIP_TO_NEXT) != 0L })
+                app.playbackDelays[second.uuid] = 1_500L
+
+                onMain { platform.transportControls.skipToNext() }
+                withTimeout(3000) { connection.state.first { it.phase == PlaybackPhase.RESOLVING && it.station?.uuid == second.uuid } }
+                assertEquals(firstId, onMain { platform.metadata?.getString(PlatformMetadata.METADATA_KEY_MEDIA_ID) })
+                awaitStation(2)
+                awaitFrameworkPlayback(platform, secondId, PlatformPlaybackState.STATE_PLAYING)
+                onMain {
+                    val metadata = requireNotNull(platform.metadata)
+                    assertEquals(second.name, metadata.getString(PlatformMetadata.METADATA_KEY_TITLE))
+                    assertEquals(second.name, metadata.description.title.toString())
+                    assertEquals("Japan", metadata.description.subtitle.toString())
+                    assertTrue((requireNotNull(platform.playbackState).actions and PlatformPlaybackState.ACTION_SKIP_TO_PREVIOUS) != 0L)
+                }
+
+                onMain { platform.transportControls.pause() }
+                awaitFrameworkPlayback(platform, secondId, PlatformPlaybackState.STATE_PAUSED)
+                onMain { platform.transportControls.play() }
+                awaitFrameworkPlayback(platform, secondId, PlatformPlaybackState.STATE_PLAYING)
+
+                app.playbackDelays.remove(second.uuid)
+                app.resolveFailures[second.uuid] = AtomicInteger(1)
+                connection.dispatch(PlayerCommand.Play(second))
+                withTimeout(3000) { connection.state.first { it.phase == PlaybackPhase.RETRYING } }
+                assertEquals(secondId, onMain { platform.metadata?.getString(PlatformMetadata.METADATA_KEY_MEDIA_ID) })
+                awaitStation(2)
+
+                onMain { platform.transportControls.skipToPrevious() }
+                awaitStation(1)
+                awaitFrameworkPlayback(platform, firstId, PlatformPlaybackState.STATE_PLAYING)
+                withTimeout(3000) { while (!onMain { changes.size >= 3 && changes.last() == firstId }) delay(25) }
+                assertEquals(listOf(firstId, secondId, firstId), onMain { changes.toList() })
+            } finally {
+                app.playbackDelays.remove(second.uuid)
+                app.resolveFailures.remove(second.uuid)
+                onMain { platform.unregisterCallback(callback) }
+            }
+        }
+    }
+
+    @Test fun networkLossDuringSwitchClearsTheSupersededStation() = runBlocking {
+        withPlayer {
+            playStation(1)
+            val media = connect()
+            val second = station(2)
+            app.playbackDelays[second.uuid] = 3_000L
+            try {
+                connection.dispatch(PlayerCommand.Play(second))
+                withTimeout(3000) { connection.state.first { it.phase == PlaybackPhase.RESOLVING && it.station?.uuid == second.uuid } }
+                app.mockNetwork.value = NetworkState()
+                withTimeout(3000) { connection.state.first { it.error == TuneError.NETWORK_OFFLINE } }
+                withTimeout(3000) {
+                    while (onMain { media.currentMediaItem != null || media.isPlaying }) delay(25)
+                }
+            } finally {
+                connection.dispatch(PlayerCommand.Stop)
+                app.playbackDelays.remove(second.uuid)
+                app.mockNetwork.value = NetworkState(NetworkType.WIFI)
+            }
         }
     }
 
@@ -290,6 +380,17 @@ class MediaSessionControlTest {
             delay(50)
         }
         throw AssertionError("播放中应存在媒体通知")
+    }
+
+    @Suppress("DEPRECATION")
+    private fun frameworkController(notification: Notification): PlatformController = PlatformController(
+        app, requireNotNull(notification.extras.getParcelable<PlatformSession.Token>(Notification.EXTRA_MEDIA_SESSION))
+    )
+
+    private suspend fun awaitFrameworkPlayback(platform: PlatformController, id: String, state: Int) = withTimeout(5000) {
+        while (!onMain {
+            platform.metadata?.getString(PlatformMetadata.METADATA_KEY_MEDIA_ID) == id && platform.playbackState?.state == state
+        }) delay(25)
     }
 
     private suspend fun awaitActionTitles(expected: List<String>) {

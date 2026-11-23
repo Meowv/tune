@@ -139,6 +139,7 @@ internal class MusicPlaybackEngine(
     private fun showRemembered(point: MusicResumePoint, failure: MusicFailure? = null) {
         desiredPlay = false
         loading = false
+        clearSupersededItem()
         resumePoint = point
         publishState(PlayerUiState(source = PlaybackSource.MUSIC, phase = PlaybackPhase.PAUSED,
             music = point.track, positionMs = point.positionMs, durationMs = point.track.durationMs,
@@ -221,7 +222,8 @@ internal class MusicPlaybackEngine(
         if (!preserveCurrent) {
             if (refreshProvider != null || excludedProvider != null) listening?.observe(false) else listening?.finish()
             itemId = null
-            player.stop(); player.clearMediaItems()
+            // 保留上一个会话条目，直到可用音源直接接替它。
+            player.stop()
             focus.abandon()
         }
         publishState(state.copy(phase = PlaybackPhase.RESOLVING, musicFailure = null, error = null, operationFailure = null, canSeek = false))
@@ -348,16 +350,22 @@ internal class MusicPlaybackEngine(
         lyricsRequest = null
         current = selection; audio = playable; confirmed = false
         endedItem = null
-        itemId = "music:$id:${selection.token}"
+        itemId = null
         publishState(PlayerUiState(source = PlaybackSource.MUSIC, phase = PlaybackPhase.BUFFERING, music = selection.track))
         if (!focus.acquire()) { fail(MusicFailure.PLAYBACK_UNAVAILABLE); return }
-        val metadata = MediaMetadata.Builder().setTitle(selection.track.title)
-            .setArtist(selection.track.artists.joinToString(" / ")).setAlbumTitle(selection.track.album).setIsPlayable(true)
+        val title = selection.track.title
+        val artist = selection.track.artists.joinToString(" / ")
+        val metadata = MediaMetadata.Builder().setTitle(title).setArtist(artist)
+            .setDisplayTitle(title).setSubtitle(artist)
+            .setAlbumTitle(selection.track.album).setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC).setIsPlayable(true)
             .apply { selection.track.coverUrl?.takeIf { MediaUrlPolicy.parse(it)?.isHttps == true }?.let { setArtworkUri(Uri.parse(it)) } }
             .build()
-        val item = MediaItem.Builder().setMediaId(itemId!!).setUri(playable.url).setMediaMetadata(metadata)
-        playable.mimeType?.let(item::setMimeType)
-        player.setMediaItem(item.build(), positionMs); player.prepare(); player.play()
+        val item = MediaItem.Builder().setMediaId("music:${selection.track.id}")
+            .setUri(playable.url).setMimeType(playable.mimeType).setMediaMetadata(metadata).build()
+        itemId = item.mediaId
+        if (player.currentMediaItem == item) player.seekTo(positionMs) else player.setMediaItem(item, positionMs)
+        player.prepare()
+        player.play()
         watchBuffer(id)
     }
 
@@ -451,6 +459,7 @@ internal class MusicPlaybackEngine(
         loading = false; desiredPlay = false
         if (reason != PauseReason.TRANSIENT_FOCUS) focus.abandon()
         player.pause(); player.volume = 1f
+        clearSupersededItem()
         if (reason == PauseReason.USER) resumePoint?.let {
             resumePoint = it.copy(playOnEntry = false).also(resumeStore::save)
         }
@@ -484,7 +493,8 @@ internal class MusicPlaybackEngine(
     }
 
     private fun loadLyrics() {
-        val track = current?.track ?: return
+        val selection = current ?: return
+        val track = selection.track
         val provider = audio?.providerId ?: return
         val owner = itemId ?: return
         lyricsRequest = scope.launch {
@@ -493,7 +503,7 @@ internal class MusicPlaybackEngine(
             } catch (_: MusicException) {
                 emptyList()
             }
-            if (isActive && owner == itemId && state.music?.id == track.id && lines.isNotEmpty()) {
+            if (isActive && current === selection && owner == itemId && lines.isNotEmpty()) {
                 publishState(state.copy(musicLyrics = lines))
             }
         }
@@ -548,6 +558,7 @@ internal class MusicPlaybackEngine(
         listening?.finish()
         invalidate(); loading = false; desiredPlay = false
         interruptions.reset(); focus.abandon(); player.pause()
+        clearSupersededItem()
         publishState(state.copy(phase = PlaybackPhase.ERROR, musicFailure = failure, canSeek = false))
     }
 
@@ -620,6 +631,10 @@ internal class MusicPlaybackEngine(
     }
 
     private fun itemMatches() = itemId != null && player.currentMediaItem?.mediaId == itemId
+
+    private fun clearSupersededItem() {
+        if (itemId == null && player.mediaItemCount > 0) player.clearMediaItems()
+    }
 
     private fun publishState(value: PlayerUiState) {
         val matches = itemMatches()

@@ -38,14 +38,17 @@ internal class RadioSessionPlayer(
     private val listeners = HashMap<Player.Listener, Player.Listener>()
 
     override fun addListener(listener: Player.Listener) {
+        if (listeners.containsKey(listener)) return
         val proxy = RadioSessionListener(listener, ::getAvailableCommands)
         listeners[listener] = proxy
         super.addListener(proxy)
     }
 
     override fun removeListener(listener: Player.Listener) {
-        super.removeListener(listeners.remove(listener) ?: listener)
+        listeners.remove(listener)?.let { super.removeListener(it) }
     }
+
+    override fun isCommandAvailable(command: Int): Boolean = availableCommands.contains(command)
 
     override fun getAvailableCommands(): Player.Commands = super.getAvailableCommands().buildUpon()
         .add(Player.COMMAND_PLAY_PAUSE)
