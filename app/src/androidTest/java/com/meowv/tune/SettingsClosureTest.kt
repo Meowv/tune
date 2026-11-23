@@ -1,5 +1,7 @@
 package com.meowv.tune
 
+import android.content.res.Configuration
+import android.os.Build
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -19,6 +21,7 @@ import com.meowv.tune.domain.Station
 import com.meowv.tune.domain.StationPage
 import com.meowv.tune.domain.ThemeMode
 import com.meowv.tune.domain.TuneSettings
+import com.meowv.tune.settings.themePrefs
 import java.util.UUID
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -69,11 +72,30 @@ class SettingsClosureTest {
 
     @Test
     fun themeSelectionPersists() = runBlocking<Unit> {
-        openPage("nav_settings")
-        compose.onNodeWithText("主题").performClick()
-        compose.onNodeWithTag("theme_LIGHT").assertExists().performClick()
-        compose.waitForIdle()
-        assertEquals(ThemeMode.LIGHT, app.userSettings.settings.first().themeMode)
+        val application = app
+        val startupTheme = themePrefs(application)
+        fun nightMode() = application.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        compose.waitUntil(5000) { startupTheme.read() == ThemeMode.FOLLOW_SYSTEM }
+        val systemMode = nightMode()
+        val selected = if (systemMode == Configuration.UI_MODE_NIGHT_YES) ThemeMode.LIGHT else ThemeMode.DARK
+        val expectedNightMode =
+            if (selected == ThemeMode.DARK) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
+        try {
+            openPage("nav_settings")
+            compose.onNodeWithText("主题").performClick()
+            compose.onNodeWithTag("theme_${selected.name}").performClick()
+            withTimeout(5000) { application.userSettings.settings.first { it.themeMode == selected } }
+            compose.waitUntil(5000) { startupTheme.read() == selected }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                compose.waitUntil(5000) { nightMode() == expectedNightMode }
+            }
+        } finally {
+            application.userSettings.update { it.copy(themeMode = ThemeMode.FOLLOW_SYSTEM) }
+            compose.waitUntil(5000) { startupTheme.read() == ThemeMode.FOLLOW_SYSTEM }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                compose.waitUntil(5000) { nightMode() == systemMode }
+            }
+        }
     }
 
     @Test

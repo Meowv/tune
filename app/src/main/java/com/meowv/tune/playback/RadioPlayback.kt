@@ -685,7 +685,7 @@ internal class RadioPlayback(
         finishAttempt()
         stallMonitor.reset()
         audioFocus.abandon()
-        clearSupersededItem()
+        if (state.phase in PendingPhases) player.clearMediaItems()
         update(state.copy(phase = PlaybackPhase.ERROR, station = station, error = kind, statusCode = status))
     }
 

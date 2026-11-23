@@ -1,8 +1,9 @@
 package com.meowv.tune.settings
 
+import android.app.UiModeManager
 import android.content.Context
 import android.content.SharedPreferences
-import android.content.res.Configuration
+import android.os.Build
 import com.meowv.tune.domain.ThemeMode
 
 private const val THEME_KEY = "mode"
@@ -14,34 +15,29 @@ internal val ThemeMode.storageValue: String
         ThemeMode.DARK -> "dark"
     }
 
-internal interface ThemeStore {
-    fun read(): String?
-    fun write(value: String)
-}
-
-internal class ThemePrefs(private val store: ThemeStore) {
-    fun read(): ThemeMode = ThemeMode.entries.firstOrNull { it.storageValue == store.read() }
-        ?: ThemeMode.FOLLOW_SYSTEM
-
-    fun write(mode: ThemeMode) = store.write(mode.storageValue)
-}
-
-internal fun themePrefs(context: Context): ThemePrefs {
-    val prefs: SharedPreferences = context.applicationContext.getSharedPreferences("tune_theme", Context.MODE_PRIVATE)
-    return ThemePrefs(object : ThemeStore {
-        override fun read(): String? = prefs.getString(THEME_KEY, null)
-        override fun write(value: String) {
-            prefs.edit().putString(THEME_KEY, value).apply()
-        }
-    })
-}
-
-/** DataStore 是运行时真相，这里只给启动首帧提供同步可读的模式。 */
-internal fun resolveThemeIsDark(context: Context, prefs: ThemePrefs = themePrefs(context)): Boolean {
-    val mode = prefs.read()
-    if (mode == ThemeMode.FOLLOW_SYSTEM) {
-        return context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
-            Configuration.UI_MODE_NIGHT_YES
+/** 从同步缓存读取启动首帧主题，DataStore 仍保存用户选择。 */
+internal class ThemePrefs(private val prefs: SharedPreferences) {
+    fun read(): ThemeMode {
+        val storedMode = prefs.getString(THEME_KEY, null)
+        return ThemeMode.entries.firstOrNull { it.storageValue == storedMode } ?: ThemeMode.FOLLOW_SYSTEM
     }
-    return mode == ThemeMode.DARK
+
+    fun write(mode: ThemeMode) {
+        prefs.edit().putString(THEME_KEY, mode.storageValue).apply()
+    }
+}
+
+internal fun themePrefs(context: Context): ThemePrefs = ThemePrefs(
+    context.applicationContext.getSharedPreferences("tune_theme", Context.MODE_PRIVATE)
+)
+
+internal fun applyApplicationNightMode(context: Context, mode: ThemeMode) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+    val nightMode = when (mode) {
+        ThemeMode.LIGHT -> UiModeManager.MODE_NIGHT_NO
+        ThemeMode.DARK -> UiModeManager.MODE_NIGHT_YES
+        // 对应用单独设置时，AUTO 会清除夜间模式覆盖。
+        ThemeMode.FOLLOW_SYSTEM -> UiModeManager.MODE_NIGHT_AUTO
+    }
+    context.getSystemService(UiModeManager::class.java)?.setApplicationNightMode(nightMode)
 }

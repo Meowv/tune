@@ -116,33 +116,19 @@ class DataStoreSettingsRepositoryTest {
 
     @Test fun themeModeFallsBackAndSurvivesReopen() = runBlocking {
         val file = File(folder.root, "theme.preferences_pb")
-        val mirror = FakeThemeStore()
-        open(file, mirror) { repository ->
+        open(file) { repository ->
             assertEquals(ThemeMode.FOLLOW_SYSTEM, repository.settings.first().themeMode)
             repository.update { it.copy(themeMode = ThemeMode.LIGHT) }
             assertEquals(ThemeMode.LIGHT, repository.settings.first().themeMode)
-            assertEquals("light", mirror.value)
         }
-        open(file, mirror) { repository ->
+        open(file) { repository ->
             assertEquals(ThemeMode.LIGHT, repository.settings.first().themeMode)
             repository.update { it.copy(themeMode = ThemeMode.DARK) }
-            assertEquals("dark", mirror.value)
+            assertEquals(ThemeMode.DARK, repository.settings.first().themeMode)
         }
     }
 
-    private class FakeThemeStore : ThemeStore {
-        var value: String? = null
-        override fun read(): String? = value
-        override fun write(value: String) {
-            this.value = value
-        }
-    }
-
-    private suspend fun open(
-        file: File,
-        mirror: ThemeStore? = null,
-        block: suspend (SettingsRepository) -> Unit
-    ) {
+    private suspend fun open(file: File, block: suspend (SettingsRepository) -> Unit) {
         val lifetime = CoroutineScope(Dispatchers.IO + SupervisorJob())
         try {
             val store = PreferenceDataStoreFactory.create(
@@ -150,8 +136,7 @@ class DataStoreSettingsRepositoryTest {
                 scope = lifetime,
                 produceFile = { file }
             )
-            val prefs = mirror?.let(::ThemePrefs)
-            withTimeout(5000) { block(DataStoreSettingsRepository(store, prefs)) }
+            withTimeout(5000) { block(DataStoreSettingsRepository(store)) }
         } finally {
             lifetime.coroutineContext.job.cancelAndJoin()
         }

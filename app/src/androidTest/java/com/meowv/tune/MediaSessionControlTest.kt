@@ -233,6 +233,32 @@ class MediaSessionControlTest {
         }
     }
 
+    @Test fun exhaustedRetryForSameStationClearsTheMediaSession() = runBlocking {
+        withPlayer {
+            val first = station(1)
+            playStation(1)
+            val media = connect()
+            awaitNotification()
+            assertEquals(first.uuid.toString(), onMain { media.currentMediaItem?.mediaId })
+
+            val scope = requireNotNull(app.radioQueue.activeScope.value)
+            app.radioQueue.updateDirectory(scope, StationPage(listOf(first)))
+            app.resolveFailures[first.uuid] = AtomicInteger(20)
+            try {
+                connection.dispatch(PlayerCommand.Play(first))
+                withTimeout(9000) {
+                    connection.state.first { it.phase == PlaybackPhase.ERROR && it.station?.uuid == first.uuid }
+                }
+                val manager = app.getSystemService(NotificationManager::class.java)
+                withTimeout(3000) {
+                    while (onMain { media.currentMediaItem != null } || manager.activeNotifications.isNotEmpty()) delay(25)
+                }
+            } finally {
+                app.resolveFailures.remove(first.uuid)
+            }
+        }
+    }
+
     @Test fun networkLossDuringSwitchClearsTheSupersededStation() = runBlocking {
         withPlayer {
             playStation(1)

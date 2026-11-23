@@ -37,7 +37,8 @@ import com.meowv.tune.music.MusicSearchViewModel
 import com.meowv.tune.ui.MusicSearchScreen
 import com.meowv.tune.music.MusicViewModel
 import com.meowv.tune.settings.SettingsViewModel
-import com.meowv.tune.settings.resolveThemeIsDark
+import com.meowv.tune.settings.applyApplicationNightMode
+import com.meowv.tune.settings.themePrefs
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -142,8 +143,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        darkTheme = resolveThemeIsDark(this)
-        // 显式主题必须在 installSplashScreen 与 super.onCreate 之前定好，否则启动首帧会闪色。
+        val startupTheme = themePrefs(this)
+        val launchSettings = TuneSettings(themeMode = startupTheme.read())
+        darkTheme = resolveDark(launchSettings.themeMode)
         setTheme(if (darkTheme) R.style.Theme_MeowvTune_Splash_Dark else R.style.Theme_MeowvTune_Splash_Light)
         val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
@@ -156,6 +158,9 @@ class MainActivity : ComponentActivity() {
         }
         lifecycleScope.launch {
             settingsModel.settings.filterNotNull().map { it.themeMode }.distinctUntilChanged().collect { mode ->
+                // 先更新首帧缓存，系统应用夜间模式时可能立即重建 Activity。
+                startupTheme.write(mode)
+                applyApplicationNightMode(this@MainActivity, mode)
                 val dark = resolveDark(mode)
                 if (dark != darkTheme) {
                     darkTheme = dark
@@ -214,9 +219,10 @@ class MainActivity : ComponentActivity() {
             val local by updateModel.local.collectAsStateWithLifecycle()
             val install by updateModel.installState.collectAsStateWithLifecycle()
             val upgradedTo by updateModel.upgradedTo.collectAsStateWithLifecycle()
-            TuneTheme(themeMode = settings?.themeMode ?: ThemeMode.FOLLOW_SYSTEM) {
+            val currentSettings = settings ?: launchSettings
+            TuneTheme(themeMode = currentSettings.themeMode) {
                 TuneApp(
-                    settings = settings ?: TuneSettings(),
+                    settings = currentSettings,
                     musicState = musicState,
                     musicBrowse = musicBrowse,
                     musicDevice = musicDevice,

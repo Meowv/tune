@@ -23,7 +23,7 @@ private val Context.tunePreferences by preferencesDataStore(
 )
 
 fun settingsRepository(context: Context): SettingsRepository =
-    DataStoreSettingsRepository(context.applicationContext.tunePreferences, themePrefs(context))
+    DataStoreSettingsRepository(context.applicationContext.tunePreferences)
 
 internal fun musicResumeStore(context: Context) = MusicResumeStore(context.applicationContext.tunePreferences)
 
@@ -34,14 +34,10 @@ private val Context.musicFeedPreferences by preferencesDataStore(
 
 internal fun musicFeedStore(context: Context) = MusicFeedStore(context.applicationContext.musicFeedPreferences)
 
-internal class DataStoreSettingsRepository(
-    private val store: DataStore<Preferences>,
-    private val themePrefs: ThemePrefs? = null
-) : SettingsRepository {
+internal class DataStoreSettingsRepository(private val store: DataStore<Preferences>) : SettingsRepository {
     override val settings = store.data.map(::decode)
 
     override suspend fun update(transform: (TuneSettings) -> TuneSettings) {
-        var updatedTheme: ThemeMode? = null
         store.edit { prefs ->
             val current = decode(prefs)
             val updated = transform(current)
@@ -53,9 +49,7 @@ internal class DataStoreSettingsRepository(
             prefs[Order] = updated.playbackOrder.name
             prefs[AutoPlay] = updated.autoPlay
             prefs[Theme] = updated.themeMode.storageValue
-            updatedTheme = updated.themeMode
         }
-        updatedTheme?.let { themePrefs?.write(it) }
     }
 
     override suspend fun recordSuccessfulStation(uuid: UUID) {
