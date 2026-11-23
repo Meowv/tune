@@ -37,12 +37,11 @@ class UpdatePageTest {
         openSettings()
         val isCar = compose.onAllNodesWithTag("shell_car").fetchSemanticsNodes().isNotEmpty()
         val settings = compose.onNodeWithTag("page_settings").getUnclippedBoundsInRoot()
-        val wide = isCar && settings.right - settings.left >= 660.dp
-        if (wide) {
-            val playback = compose.onNodeWithText("播放").getUnclippedBoundsInRoot()
-            val about = compose.onNodeWithText("关于").getUnclippedBoundsInRoot()
-            assertEquals(playback.top.value, about.top.value, 1f)
-            assertTrue(about.left > playback.right)
+        if (isCar && settings.right - settings.left >= 660.dp) {
+            val autoplay = compose.onNodeWithTag("setting_${R.string.setting_autoplay}").getUnclippedBoundsInRoot()
+            val source = compose.onNodeWithTag("setting_${R.string.setting_source}").getUnclippedBoundsInRoot()
+            assertEquals(autoplay.top.value, source.top.value, 1f)
+            assertTrue(source.left > autoplay.right)
         }
         capture("settings")
         scrollTo("版本与更新")
@@ -58,6 +57,7 @@ class UpdatePageTest {
         }
         // 覆盖层刚组合时首帧可能还没完成布局，等一帧再断言可见。
         compose.waitForIdle()
+        compose.onNodeWithText("当前版本 v$localVersion").assertIsDisplayed()
         compose.onNodeWithTag("update_status_title").assertIsDisplayed()
         compose.onNodeWithText("发现新版本 1.1.0").assertIsDisplayed()
         val status = compose.onNodeWithTag("update_status_title").getUnclippedBoundsInRoot()
@@ -67,7 +67,11 @@ class UpdatePageTest {
             val updateBounds = compose.onNodeWithTag("page_update").getUnclippedBoundsInRoot()
             val playerBounds = compose.onNodeWithTag("mini_player_bar").assertIsDisplayed().getUnclippedBoundsInRoot()
             assertTrue(updateBounds.bottom <= playerBounds.top)
-            if (wide) assertTrue(status.left > version.right) else assertTrue(status.bottom <= version.top)
+            if (updateBounds.right - updateBounds.left >= 668.dp) {
+                assertTrue(status.left > version.right)
+            } else {
+                assertTrue(status.bottom <= version.top)
+            }
             compose.waitUntil(5_000) { compose.activity.hasWindowFocus() }
             InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_TAB)
             compose.onNodeWithTag("update_back")

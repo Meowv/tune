@@ -46,7 +46,6 @@ class SettingsClosureTest {
     fun settingsExposeOnlySupportedEntries() {
         openPage("nav_settings")
         compose.onNodeWithText("自动播放").assertExists()
-        compose.onNodeWithText("播放").assertExists()
         listOf(
             "启动自动播放", "媒体断开暂停", "仅 Wi-Fi 播放", "流量提醒",
             "主题", "布局", "大字显示", "数据与关于"
@@ -57,6 +56,9 @@ class SettingsClosureTest {
         scrollSettingsTo("开源许可")
         listOf("刷新数据", "清理缓存", "数据来源", "开源许可").forEach {
             compose.onNodeWithText(it).assertExists()
+        }
+        listOf("播放", "数据", "关于").forEach {
+            compose.onNodeWithText(it).assertDoesNotExist()
         }
         compose.onNodeWithText("刷新目录").assertDoesNotExist()
         compose.onNodeWithTag("settings_diagnostics").assertDoesNotExist()
@@ -89,10 +91,14 @@ class SettingsClosureTest {
         scrollSettingsTo("数据来源")
         compose.onNodeWithText("数据来源").performClick()
         compose.onNodeWithText("radio-browser.info", substring = true).assertExists()
+        compose.onNodeWithText("音乐 · 网易云音乐与 QQ 音乐").assertExists()
+        compose.onNodeWithText("本机记录").assertExists()
         compose.onNodeWithText("关闭").performClick()
         scrollSettingsTo("开源许可")
         compose.onNodeWithText("开源许可").performClick()
-        compose.onNodeWithText("Apache 2.0", substring = true).assertExists()
+        listOf("MIT", "Apache 2.0", "BSD 3-Clause", "dnsjava").forEach {
+            compose.onNodeWithText(it).assertExists()
+        }
         compose.onNodeWithText("关闭").performClick()
     }
 

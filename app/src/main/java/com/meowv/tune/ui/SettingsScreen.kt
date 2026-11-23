@@ -16,7 +16,6 @@ import androidx.compose.foundation.progressSemantics
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -40,11 +39,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.meowv.tune.music.MusicDevicePhase
-import com.meowv.tune.music.MusicDeviceState
 import com.meowv.tune.R
 import com.meowv.tune.domain.TuneSettings
+import com.meowv.tune.music.MusicDevicePhase
+import com.meowv.tune.music.MusicDeviceState
 import com.meowv.tune.ui.theme.TuneBrushes
 import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.ui.theme.TuneMotion
@@ -67,7 +65,7 @@ internal fun SettingsScreen(
 ) {
     var dialog by rememberSaveable { mutableStateOf(SettingsDialog.NONE) }
     val playback: @Composable () -> Unit = {
-        SettingsGroup(isCar, R.string.setting_group_playback) {
+        SettingsGroup {
             SettingRow(
                 R.drawable.ic_ui_autoplay, R.string.setting_autoplay, isCar,
                 checked = settings.autoPlay,
@@ -78,7 +76,7 @@ internal fun SettingsScreen(
         }
     }
     val data: @Composable () -> Unit = {
-        SettingsGroup(isCar, R.string.setting_group_data) {
+        SettingsGroup {
             SettingRow(
                 R.drawable.ic_ui_refresh, R.string.setting_refresh, isCar,
                 enabled = !refreshing,
@@ -90,7 +88,7 @@ internal fun SettingsScreen(
         }
     }
     val about: @Composable () -> Unit = {
-        SettingsGroup(isCar, R.string.setting_group_about) {
+        SettingsGroup {
             SettingRow(
                 R.drawable.ic_ui_database, R.string.setting_source, isCar,
                 trailing = { Chevron(isCar) }, onClick = { dialog = SettingsDialog.SOURCE }
@@ -138,8 +136,22 @@ internal fun SettingsScreen(
     }
     when (dialog) {
         SettingsDialog.NONE -> Unit
-        SettingsDialog.SOURCE -> TextDialog(isCar, R.string.setting_source, R.string.about_source_body) { dialog = SettingsDialog.NONE }
-        SettingsDialog.LICENSES -> TextDialog(isCar, R.string.setting_licenses, R.string.about_licenses_body) { dialog = SettingsDialog.NONE }
+        SettingsDialog.SOURCE -> SettingsDetailsDialog(
+            isCar, R.string.setting_source, R.drawable.ic_ui_database,
+            onDismiss = { dialog = SettingsDialog.NONE }
+        ) {
+            DetailEntry(isCar, R.string.about_source_radio, R.string.about_source_radio_body)
+            DetailEntry(isCar, R.string.about_source_music, R.string.about_source_music_body)
+            DetailEntry(isCar, R.string.about_source_local, R.string.about_source_local_body)
+        }
+        SettingsDialog.LICENSES -> SettingsDetailsDialog(
+            isCar, R.string.setting_licenses, R.drawable.ic_ui_scroll,
+            onDismiss = { dialog = SettingsDialog.NONE }
+        ) {
+            DetailEntry(isCar, R.string.about_license_mit, R.string.brand_full)
+            DetailEntry(isCar, R.string.about_license_apache, R.string.about_license_apache_libraries)
+            DetailEntry(isCar, R.string.about_license_bsd, R.string.about_license_bsd_libraries)
+        }
     }
 }
 
@@ -153,7 +165,7 @@ private fun MusicDeviceGroup(device: MusicDeviceState, isCar: Boolean) {
         MusicDevicePhase.REVOKED -> R.string.music_device_revoked
         MusicDevicePhase.UNAVAILABLE -> R.string.music_device_unavailable
     })
-    SettingsGroup(isCar) {
+    SettingsGroup {
         SettingRow(
             R.drawable.ic_menu_music, R.string.setting_music_device, isCar,
             subtitle = device.shortCode?.let { stringResource(R.string.music_device_summary, status, it) } ?: status
@@ -194,20 +206,32 @@ private fun Chevron(isCar: Boolean) {
 private enum class SettingsDialog { NONE, SOURCE, LICENSES }
 
 @Composable
-private fun TextDialog(isCar: Boolean, @StringRes title: Int, @StringRes body: Int, onDismiss: () -> Unit) {
+private fun SettingsDetailsDialog(
+    isCar: Boolean,
+    @StringRes title: Int,
+    @DrawableRes icon: Int,
+    onDismiss: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(
-                stringResource(title), color = TuneColors.Text, style = TuneTypography.pageTitle(isCar),
-                modifier = Modifier.semantics { heading() }
-            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Medium),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TuneIcon(icon, Modifier.size(TuneSizes.IconLg), TuneColors.PrimaryLight)
+                Text(
+                    stringResource(title), color = TuneColors.Text, style = TuneTypography.pageTitle(isCar),
+                    modifier = Modifier.semantics { heading() }
+                )
+            }
         },
         text = {
-            Text(
-                stringResource(body), color = TuneColors.Muted,
-                style = TuneTypography.rowTitle(isCar).copy(fontWeight = FontWeight.Normal),
-                modifier = Modifier.verticalScroll(rememberScrollState())
+            Column(
+                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(TuneSpacing.Large),
+                content = content
             )
         },
         confirmButton = {
@@ -222,30 +246,28 @@ private fun TextDialog(isCar: Boolean, @StringRes title: Int, @StringRes body: I
 }
 
 @Composable
-private fun SettingsGroup(
-    isCar: Boolean,
-    @StringRes title: Int? = null,
-    content: @Composable ColumnScope.() -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(TuneSpacing.Small)) {
-        if (title != null) {
-            Text(
-                stringResource(title), color = TuneColors.Muted,
-                style = TuneTypography.meta(isCar).copy(fontWeight = FontWeight.SemiBold, letterSpacing = .5.sp),
-                modifier = Modifier.padding(horizontal = TuneSpacing.Hairline).semantics { heading() }
-            )
-        }
-        Surface(
-            color = TuneColors.Surface,
-            shape = RoundedCornerShape(if (isCar) 19.dp else 18.dp),
-            border = BorderStroke(1.dp, TuneColors.Border.copy(alpha = .5f))
-        ) {
-            Column(
-                Modifier.fillMaxWidth()
-                    .background(TuneBrushes.Card),
-                content = content
-            )
-        }
+private fun DetailEntry(isCar: Boolean, @StringRes title: Int, @StringRes body: Int) {
+    Column(verticalArrangement = Arrangement.spacedBy(TuneSpacing.Hairline)) {
+        Text(
+            stringResource(title), color = TuneColors.Text,
+            style = TuneTypography.rowTitle(isCar).copy(fontWeight = FontWeight.SemiBold),
+            modifier = Modifier.semantics { heading() }
+        )
+        Text(
+            stringResource(body), color = TuneColors.Muted,
+            style = TuneTypography.rowTitle(isCar).copy(fontWeight = FontWeight.Normal)
+        )
+    }
+}
+
+@Composable
+private fun SettingsGroup(content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        color = TuneColors.Surface,
+        shape = TuneShapes.SettingsGroup,
+        border = BorderStroke(1.dp, TuneColors.Border.copy(alpha = .5f))
+    ) {
+        Column(Modifier.fillMaxWidth().background(TuneBrushes.Card), content = content)
     }
 }
 
