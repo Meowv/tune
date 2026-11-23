@@ -50,6 +50,7 @@ import androidx.core.view.WindowInsetsCompat
 import com.meowv.tune.R
 import com.meowv.tune.domain.*
 import com.meowv.tune.radio.CountryOptions
+import com.meowv.tune.ui.theme.LocalTuneIsDark
 import com.meowv.tune.ui.theme.TuneBrushes
 import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.ui.theme.TuneMotion
@@ -301,7 +302,7 @@ private fun StationRow(
                     Modifier.size(if (isCar) 20.dp else 18.dp),
                     color = TuneColors.Primary,
                     strokeWidth = 2.dp,
-                    trackColor = TuneColors.Primary.copy(alpha = .22f),
+                    trackColor = TuneColors.TrackOff,
                     strokeCap = StrokeCap.Round
                 )
                 isCurrent && phase == PlaybackPhase.ERROR -> TuneIcon(
@@ -310,7 +311,7 @@ private fun StationRow(
                 isCurrent && playing -> PlayingWaveBars(Modifier.size(glyph), TuneColors.Primary)
                 else -> TuneIcon(
                     R.drawable.ic_radio_play, Modifier.size(glyph),
-                    if (action == null) tint.copy(alpha = TuneColors.DisabledAlpha) else tint
+                    if (action == null) TuneColors.DisabledContent else tint
                 )
             }
         }
@@ -542,7 +543,7 @@ internal fun DirectoryActionChip(
         shape = TuneShapes.Chip,
         border = BorderStroke(
             if (focused) 2.dp else 1.dp,
-            if (focused) TuneColors.Primary else TuneColors.BorderSoft
+            if (focused) TuneColors.Primary else TuneColors.BorderStrong
         ),
         modifier = modifier.heightIn(min = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
             .onFocusChanged { focused = it.isFocused }
@@ -557,11 +558,11 @@ internal fun DirectoryActionChip(
         ) {
             TuneIcon(icon, Modifier.size(if (isCar) TuneSizes.IconMd else TuneSizes.IconSm), TuneColors.IconIdle)
             Text(
-                label, color = if (trailing == null) TuneColors.Muted else TuneColors.Text,
+                label, color = TuneColors.Text,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                 style = TuneTypography.control(isCar), modifier = Modifier.weight(1f, fill = false)
             )
-            if (trailing != null) TuneIcon(trailing, Modifier.size(if (isCar) 18.dp else TuneSizes.IconXs), TuneColors.Muted)
+            if (trailing != null) TuneIcon(trailing, Modifier.size(if (isCar) TuneSizes.IconTiny else TuneSizes.IconXs), TuneColors.Muted)
         }
     }
 }
@@ -577,7 +578,7 @@ internal fun LayoutSwitcher(mode: RadioDisplayMode, onChange: (RadioDisplayMode)
         Modifier.clip(TuneShapes.Navigation)
             .background(TuneColors.Raised, TuneShapes.Navigation)
             // 未选中一侧只有图标，加一道极淡描边把控件边界交代清楚。
-            .border(1.dp, TuneColors.BorderSoft, TuneShapes.Navigation),
+            .border(1.dp, TuneColors.BorderStrong, TuneShapes.Navigation),
         verticalAlignment = Alignment.CenterVertically
     ) {
         listOf(RadioDisplayMode.LIST, RadioDisplayMode.CARD).forEach { value ->
@@ -630,7 +631,7 @@ internal fun DirectoryLoading(modifier: Modifier = Modifier, size: Dp = 28.dp, t
             Modifier.size(size),
             color = TuneColors.Primary,
             strokeWidth = 2.5.dp,
-            trackColor = TuneColors.Primary.copy(alpha = .22f),
+            trackColor = TuneColors.TrackOff,
             strokeCap = StrokeCap.Round
         )
     }
@@ -650,7 +651,7 @@ internal fun DirectoryMessage(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        TuneIcon(icon, Modifier.size(30.dp), tint)
+        TuneIcon(icon, Modifier.size(TuneSizes.IconHero), tint)
         Spacer(Modifier.height(12.dp))
         Text(
             stringResource(message), color = TuneColors.Muted, fontSize = 14.sp,
@@ -703,10 +704,12 @@ internal fun ScopePicker(
     if (isCar) {
         Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
             val view = androidx.compose.ui.platform.LocalView.current
-            DisposableEffect(view) {
+            val themeIsDark = LocalTuneIsDark.current
+            DisposableEffect(view, themeIsDark) {
                 val window = (view.parent as DialogWindowProvider).window
+                window.setDimAmount(.72f)
                 WindowCompat.getInsetsController(window, view).apply {
-                    isAppearanceLightStatusBars = false
+                    isAppearanceLightStatusBars = !themeIsDark
                     show(WindowInsetsCompat.Type.statusBars())
                     hide(WindowInsetsCompat.Type.navigationBars())
                 }
@@ -715,7 +718,7 @@ internal fun ScopePicker(
             Box(
                 Modifier.widthIn(max = 580.dp).fillMaxWidth(.9f).height(height)
                     .clip(TuneShapes.Dialog).background(TuneBrushes.Dialog)
-                    .border(1.dp, TuneColors.Border, TuneShapes.Dialog)
+                    .border(1.dp, TuneColors.BorderStrong, TuneShapes.Dialog)
             ) {
                 ScopeOptions(isCar, scope, countries, onRetry, onDismiss, onSelect)
             }
@@ -725,7 +728,8 @@ internal fun ScopePicker(
             onDismissRequest = onDismiss,
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = TuneColors.Surface, contentColor = TuneColors.Text,
-            dragHandle = { BottomSheetDefaults.DragHandle(color = TuneColors.Border) }
+            scrimColor = TuneColors.Scrim,
+            dragHandle = { BottomSheetDefaults.DragHandle(color = TuneColors.BorderStrong) }
         ) {
             Box(Modifier.fillMaxWidth().heightIn(max = height)) {
                 ScopeOptions(isCar, scope, countries, onRetry, onDismiss, onSelect)
@@ -771,14 +775,14 @@ private fun ScopeOptions(
                 modifier = Modifier.size(if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
                     .testTag("scope_close").semantics { contentDescription = closeLabel }
             ) {
-                TuneIcon(R.drawable.ic_close, Modifier.size(22.dp), TuneColors.Muted)
+                TuneIcon(R.drawable.ic_close, Modifier.size(TuneSizes.IconMd), TuneColors.Muted)
             }
         }
         LazyVerticalGrid(
             columns = if (isCar) GridCells.Adaptive(152.dp) else GridCells.Fixed(1),
             modifier = Modifier.weight(1f).fillMaxWidth().focusGroup().testTag("scope_options"),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(if (isCar) 8.dp else 2.dp)
+            verticalArrangement = Arrangement.spacedBy(TuneSpacing.Small)
         ) {
             item(key = "AUTO") {
                 ScopeOption(isCar, "Auto", stringResource(R.string.scope_auto), scope.mode == ScopeMode.AUTO) {
@@ -812,10 +816,10 @@ private fun ScopeOption(isCar: Boolean, tag: String, label: String, selected: Bo
     Row(
         Modifier.fillMaxWidth().heightIn(min = 56.dp)
             .clip(shape)
-            .background(if (selected) TuneColors.Primary.copy(alpha = .15f) else if (isCar) TuneColors.Raised else TuneColors.Surface)
+            .background(if (selected) TuneColors.Selected else TuneColors.OptionSurface)
             .border(
-                if (focused) 2.dp else 1.dp,
-                if (focused || selected) TuneColors.Primary else TuneColors.BorderSoft,
+                if (focused || selected) 2.dp else 1.dp,
+                if (focused || selected) TuneColors.Primary else TuneColors.BorderStrong,
                 shape
             )
             .onFocusChanged { focused = it.isFocused }
@@ -828,7 +832,7 @@ private fun ScopeOption(isCar: Boolean, tag: String, label: String, selected: Bo
             label, color = if (selected) TuneColors.PrimaryLight else TuneColors.Text,
             style = TuneTypography.rowTitle(isCar), modifier = Modifier.weight(1f).clearAndSetSemantics { }
         )
-        if (selected) TuneIcon(R.drawable.ic_check, Modifier.size(22.dp))
+        if (selected) TuneIcon(R.drawable.ic_check, Modifier.size(TuneSizes.IconMd), TuneColors.Primary)
     }
 }
 

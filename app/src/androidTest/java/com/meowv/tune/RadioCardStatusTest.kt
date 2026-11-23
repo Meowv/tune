@@ -53,7 +53,7 @@ class RadioCardStatusTest {
         val commands = mutableListOf<PlayerCommand>()
         compose.setContent {
             val config = LocalConfiguration.current
-            TuneTheme {
+            TuneTheme(ThemeMode.DARK) {
                 Box(Modifier.fillMaxSize().background(TuneColors.Background)) {
                     RadioScreen(
                         isCar = isCarWindow(config.screenWidthDp.toFloat(), config.screenHeightDp.toFloat()),

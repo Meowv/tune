@@ -183,7 +183,7 @@ internal fun NowPlayingScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
-                        BrandLogo(Modifier.size(if (isCar) 112.dp else 96.dp))
+                        BrandLogo(Modifier.size(if (isCar) 112.dp else 96.dp), withPlate = true)
                         Spacer(Modifier.height(24.dp))
                         Text(
                             stringResource(if (isMusic) R.string.player_music_unselected else R.string.player_unselected),
@@ -279,18 +279,21 @@ internal fun NowPlayingScreen(
 
 @Composable
 private fun NowPlayingBackdrop(wide: Boolean, modifier: Modifier = Modifier) {
+    val background = TuneColors.Background
+    val glow = TuneColors.Accent.copy(alpha = .16f)
+    val shade = TuneColors.Raised.copy(alpha = .56f)
     Canvas(modifier) {
-        drawRect(TuneColors.Background)
+        drawRect(background)
         drawRect(
             Brush.radialGradient(
-                colors = listOf(TuneColors.Accent.copy(alpha = .16f), Color.Transparent),
+                colors = listOf(glow, Color.Transparent),
                 center = Offset(size.width * if (wide) .31f else .5f, size.height * if (wide) .50f else .34f),
                 radius = (size.minDimension * if (wide) .55f else .68f).coerceAtLeast(1f)
             )
         )
         drawRect(
             Brush.radialGradient(
-                colors = listOf(TuneColors.Raised.copy(alpha = .56f), Color.Transparent),
+                colors = listOf(shade, Color.Transparent),
                 center = Offset(size.width * .95f, size.height * .85f),
                 radius = (size.maxDimension * .52f).coerceAtLeast(1f)
             )
@@ -720,7 +723,7 @@ private fun NowPlayingArtworkGesture(
 @Composable
 private fun NowPlayingArtwork(media: NowPlayingMedia, modifier: Modifier) {
     val shape = TuneShapes.Card
-    Box(modifier.shadow(18.dp, shape, clip = false).clip(shape)) {
+    Box(modifier.shadow(18.dp, shape, clip = false, ambientColor = TuneColors.Shadow, spotColor = TuneColors.Shadow).clip(shape)) {
         MediaArtwork(media.artworkUrl, media.isMusic, Modifier.matchParentSize())
         Box(
             Modifier.matchParentSize()
@@ -832,7 +835,7 @@ private fun PrimaryPlaybackControl(
         isCar -> 70.dp
         else -> 63.dp
     }
-    val foreground = if (connected) TuneColors.Background else TuneColors.Muted
+    val foreground = if (connected) TuneColors.OnPrimary else TuneColors.Muted
     val surface = Brush.linearGradient(
         if (connected) listOf(TuneColors.PrimaryLight, TuneColors.Accent)
         else listOf(TuneColors.Raised, TuneColors.Surface)
@@ -857,9 +860,12 @@ private fun PrimaryPlaybackControl(
                     scaleX = scale
                     scaleY = scale
                 }
-                .shadow(if (connected) 8.dp else 0.dp, CircleShape, clip = false)
+                .shadow(
+                    if (connected) 8.dp else 0.dp, CircleShape, clip = false,
+                    ambientColor = TuneColors.Shadow, spotColor = TuneColors.Shadow
+                )
                 .background(surface, CircleShape)
-                .then(if (focused) Modifier.border(2.dp, TuneColors.Text, CircleShape) else Modifier),
+                .then(if (focused) Modifier.border(2.dp, TuneColors.FocusOnAccent, CircleShape) else Modifier),
             contentAlignment = Alignment.Center
         ) {
             Crossfade(
@@ -947,7 +953,7 @@ private fun NowPlayingIconButton(
 ) {
     var focused by remember { mutableStateOf(false) }
     val tint by animateColorAsState(
-        targetValue = if (enabled) TuneColors.Text else TuneColors.Muted.copy(alpha = TuneColors.DisabledAlpha),
+        targetValue = if (enabled) TuneColors.Text else TuneColors.DisabledContent,
         animationSpec = tween(animationMillis),
         label = "now_playing_icon_tint"
     )
@@ -991,7 +997,7 @@ private fun NowPlayingIconButton(
             Box(
                 Modifier.size(surfaceSize)
                     .background(TuneColors.Raised.copy(alpha = .75f), TuneShapes.Station)
-                    .border(1.dp, TuneColors.BorderSoft, TuneShapes.Station)
+                    .border(1.dp, TuneColors.BorderStrong, TuneShapes.Station)
             )
         }
         TuneIcon(icon, Modifier.size(iconSize), tint)
@@ -1067,7 +1073,7 @@ private fun NowPlayingTools(
     Row(
         modifier.height(height).clip(shape)
             .background(TuneColors.Player.copy(alpha = .88f))
-            .border(1.dp, TuneColors.Border, shape)
+            .border(1.dp, TuneColors.BorderStrong, shape)
             .focusGroup()
             .testTag("now_playing_tools"),
         verticalAlignment = Alignment.CenterVertically

@@ -17,6 +17,7 @@ import com.meowv.tune.domain.RadioScope
 import com.meowv.tune.domain.ScopeMode
 import com.meowv.tune.domain.Station
 import com.meowv.tune.domain.StationPage
+import com.meowv.tune.domain.ThemeMode
 import com.meowv.tune.domain.TuneSettings
 import java.util.UUID
 import kotlinx.coroutines.flow.first
@@ -46,9 +47,10 @@ class SettingsClosureTest {
     fun settingsExposeOnlySupportedEntries() {
         openPage("nav_settings")
         compose.onNodeWithText("自动播放").assertExists()
+        compose.onNodeWithText("主题").assertExists()
         listOf(
             "启动自动播放", "媒体断开暂停", "仅 Wi-Fi 播放", "流量提醒",
-            "主题", "布局", "大字显示", "数据与关于"
+            "布局", "大字显示", "数据与关于"
         ).forEach {
             compose.onNodeWithText(it).assertDoesNotExist()
         }
@@ -63,6 +65,15 @@ class SettingsClosureTest {
         compose.onNodeWithText("刷新目录").assertDoesNotExist()
         compose.onNodeWithTag("settings_diagnostics").assertDoesNotExist()
         compose.onAllNodes(hasText("Meowv Tune ·", substring = true)).assertCountEquals(0)
+    }
+
+    @Test
+    fun themeSelectionPersists() = runBlocking<Unit> {
+        openPage("nav_settings")
+        compose.onNodeWithText("主题").performClick()
+        compose.onNodeWithTag("theme_LIGHT").assertExists().performClick()
+        compose.waitForIdle()
+        assertEquals(ThemeMode.LIGHT, app.userSettings.settings.first().themeMode)
     }
 
     @Test

@@ -30,6 +30,7 @@ class DataStoreSettingsRepositoryTest {
                 launch(Dispatchers.Default) { repository.update { it.copy(scope = japan) } }
                 launch(Dispatchers.Default) { repository.update { it.copy(autoPlay = true) } }
                 launch(Dispatchers.Default) { repository.update { it.copy(musicDisplayMode = RadioDisplayMode.CARD) } }
+                launch(Dispatchers.Default) { repository.update { it.copy(themeMode = ThemeMode.DARK) } }
                 launch(Dispatchers.Default) {
                     repository.update {
                         it.copy(displayMode = RadioDisplayMode.CARD, playbackOrder = PlaybackOrder.SEQUENTIAL)
@@ -43,7 +44,7 @@ class DataStoreSettingsRepositoryTest {
                 TuneSettings(
                     scope = japan, autoPlay = true, lastSuccessfulStation = uuid,
                     displayMode = RadioDisplayMode.CARD, playbackOrder = PlaybackOrder.SEQUENTIAL,
-                    musicDisplayMode = RadioDisplayMode.CARD
+                    musicDisplayMode = RadioDisplayMode.CARD, themeMode = ThemeMode.DARK
                 ),
                 repository.settings.first()
             )
@@ -81,6 +82,7 @@ class DataStoreSettingsRepositoryTest {
                 it[booleanPreferencesKey("large_text")] = true
                 it[booleanPreferencesKey("pause_on_disconnect")] = false
                 it[stringPreferencesKey("layout")] = "CAR"
+                it[stringPreferencesKey("theme_mode")] = "UNKNOWN"
             }
             assertEquals(TuneSettings(), DataStoreSettingsRepository(store).settings.first())
         } finally {
@@ -112,7 +114,35 @@ class DataStoreSettingsRepositoryTest {
         }
     }
 
-    private suspend fun open(file: File, block: suspend (SettingsRepository) -> Unit) {
+    @Test fun themeModeFallsBackAndSurvivesReopen() = runBlocking {
+        val file = File(folder.root, "theme.preferences_pb")
+        val mirror = FakeThemeStore()
+        open(file, mirror) { repository ->
+            assertEquals(ThemeMode.FOLLOW_SYSTEM, repository.settings.first().themeMode)
+            repository.update { it.copy(themeMode = ThemeMode.LIGHT) }
+            assertEquals(ThemeMode.LIGHT, repository.settings.first().themeMode)
+            assertEquals("light", mirror.value)
+        }
+        open(file, mirror) { repository ->
+            assertEquals(ThemeMode.LIGHT, repository.settings.first().themeMode)
+            repository.update { it.copy(themeMode = ThemeMode.DARK) }
+            assertEquals("dark", mirror.value)
+        }
+    }
+
+    private class FakeThemeStore : ThemeStore {
+        var value: String? = null
+        override fun read(): String? = value
+        override fun write(value: String) {
+            this.value = value
+        }
+    }
+
+    private suspend fun open(
+        file: File,
+        mirror: ThemeStore? = null,
+        block: suspend (SettingsRepository) -> Unit
+    ) {
         val lifetime = CoroutineScope(Dispatchers.IO + SupervisorJob())
         try {
             val store = PreferenceDataStoreFactory.create(
@@ -120,7 +150,8 @@ class DataStoreSettingsRepositoryTest {
                 scope = lifetime,
                 produceFile = { file }
             )
-            withTimeout(5000) { block(DataStoreSettingsRepository(store)) }
+            val prefs = mirror?.let(::ThemePrefs)
+            withTimeout(5000) { block(DataStoreSettingsRepository(store, prefs)) }
         } finally {
             lifetime.coroutineContext.job.cancelAndJoin()
         }

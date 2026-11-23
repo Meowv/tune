@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.junit4.StateRestorationTester
+import com.meowv.tune.domain.ThemeMode
 import com.meowv.tune.domain.TuneSettings
 import com.meowv.tune.ui.theme.TuneTheme
 import com.meowv.tune.update.*
@@ -33,7 +34,7 @@ class SettingsUpdateUiTest {
     @Test fun notesStartWithFiveEntriesAndRestoreExpandedState() {
         val restoration = StateRestorationTester(compose)
         restoration.setContent {
-            TuneTheme { Surface { RenderUpdate(UpdateUiState.UpdateAvailable(info)) } }
+            TuneTheme(ThemeMode.DARK) { Surface { RenderUpdate(UpdateUiState.UpdateAvailable(info)) } }
         }
         compose.onNodeWithText("更新条目 5").assertExists()
         compose.onNodeWithText("更新条目 6").assertDoesNotExist()
@@ -47,7 +48,7 @@ class SettingsUpdateUiTest {
 
     @Test fun expandedNotesSurviveSwitchingBetweenOneAndTwoColumns() {
         val width = mutableStateOf(320.dp)
-        compose.setContent { TuneTheme { Surface {
+        compose.setContent { TuneTheme(ThemeMode.DARK) { Surface {
             UpdateScreen(false, local, UpdateUiState.UpdateAvailable(info), InstallState.Idle,
                 null, {}, {}, {}, {}, {}, Modifier.requiredWidth(width.value).fillMaxSize())
         } } }
@@ -64,7 +65,7 @@ class SettingsUpdateUiTest {
         val install = mutableStateOf<InstallState>(InstallState.Idle)
         var checks = 0
         var installs = 0
-        compose.setContent { TuneTheme { Surface {
+        compose.setContent { TuneTheme(ThemeMode.DARK) { Surface {
             UpdateScreen(false, local, state.value, install.value, null, {}, { checks++ }, {}, {}, { installs++ }, Modifier.fillMaxSize())
         } } }
         compose.onNodeWithText("检查应用更新").assertExists()
@@ -106,7 +107,7 @@ class SettingsUpdateUiTest {
         val refreshing = mutableStateOf(false)
         var toggles = 0
         var refreshes = 0
-        compose.setContent { TuneTheme { Surface {
+        compose.setContent { TuneTheme(ThemeMode.DARK) { Surface {
             SettingsScreen(false, settings.value, refreshing.value, "vtest · 检查更新失败",
                 { settings.value = it(settings.value); toggles++ }, { refreshes++ }, {}, {})
         } } }

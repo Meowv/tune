@@ -14,6 +14,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollToNode
+import com.meowv.tune.domain.ThemeMode
 import com.meowv.tune.domain.TuneSettings
 import com.meowv.tune.music.MusicDevicePhase
 import com.meowv.tune.music.MusicDeviceState
@@ -31,7 +32,7 @@ class MusicDeviceSettingsTest {
     private fun verifySettings(isCar: Boolean) {
         val device = mutableStateOf(MusicDeviceState(MusicDevicePhase.PENDING, "A1B2-C3D4"))
         compose.setContent {
-            TuneTheme {
+            TuneTheme(ThemeMode.DARK) {
                 SettingsScreen(isCar, TuneSettings(), false, "", {}, {}, {}, {}, musicDevice = device.value)
             }
         }

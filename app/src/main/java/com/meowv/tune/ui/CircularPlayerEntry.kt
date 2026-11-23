@@ -180,7 +180,7 @@ private fun MiniPlayerToggle(
         ) {
             TuneIcon(
                 icon, Modifier.size(if (isCar) TuneSizes.IconLg else TuneSizes.IconMd),
-                TuneColors.PrimaryLight.copy(alpha = if (enabled) 1f else TuneColors.DisabledAlpha)
+                if (enabled) TuneColors.PrimaryLight else TuneColors.DisabledContent
             )
         }
     }
@@ -295,7 +295,8 @@ private fun CircularPlayerEntry(
                     BrandLogo(
                         Modifier.fillMaxSize().padding(7.dp)
                             .graphicsLayer { rotationZ = if (rotation.stationKey == stationKey) rotation.angle else 0f }
-                            .testTag("circular_player_logo")
+                            .testTag("circular_player_logo"),
+                        withPlate = true
                     )
                 } else {
                     key(stationKey, url) {

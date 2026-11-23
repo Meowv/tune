@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.progressSemantics
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -24,6 +25,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,15 +33,20 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogWindowProvider
 import com.meowv.tune.R
+import com.meowv.tune.domain.ThemeMode
 import com.meowv.tune.domain.TuneSettings
 import com.meowv.tune.music.MusicDevicePhase
 import com.meowv.tune.music.MusicDeviceState
@@ -73,6 +80,15 @@ internal fun SettingsScreen(
             ) {
                 onSettingsChange { current -> current.copy(autoPlay = !current.autoPlay) }
             }
+        }
+    }
+    val appearance: @Composable () -> Unit = {
+        SettingsGroup {
+            SettingRow(
+                R.drawable.ic_ui_theme, R.string.setting_theme, isCar,
+                subtitle = stringResource(settings.themeMode.label()),
+                trailing = { Chevron(isCar) }, onClick = { dialog = SettingsDialog.THEME }
+            )
         }
     }
     val data: @Composable () -> Unit = {
@@ -122,12 +138,14 @@ internal fun SettingsScreen(
                 item(key = "settings_left_column") {
                     Column(verticalArrangement = Arrangement.spacedBy(TuneSpacing.Large)) {
                         playback()
+                        appearance()
                         data()
                         musicDevice?.let { MusicDeviceGroup(it, isCar) }
                     }
                 }
             } else {
                 item(key = "playback_settings") { playback() }
+                item(key = "appearance_settings") { appearance() }
                 item(key = "data_settings") { data() }
                 if (musicDevice != null) item(key = "music_device") { MusicDeviceGroup(musicDevice, isCar) }
             }
@@ -136,6 +154,13 @@ internal fun SettingsScreen(
     }
     when (dialog) {
         SettingsDialog.NONE -> Unit
+        SettingsDialog.THEME -> ThemeDialog(
+            isCar, settings.themeMode,
+            onDismiss = { dialog = SettingsDialog.NONE }
+        ) { mode ->
+            onSettingsChange { current -> current.copy(themeMode = mode) }
+            dialog = SettingsDialog.NONE
+        }
         SettingsDialog.SOURCE -> SettingsDetailsDialog(
             isCar, R.string.setting_source, R.drawable.ic_ui_database,
             onDismiss = { dialog = SettingsDialog.NONE }
@@ -188,7 +213,7 @@ private fun InlineSpinner(isCar: Boolean) {
         Modifier.size(if (isCar) 20.dp else 18.dp),
         color = TuneColors.Primary,
         strokeWidth = 2.dp,
-        trackColor = TuneColors.Primary.copy(alpha = .22f),
+        trackColor = TuneColors.TrackOff,
         strokeCap = StrokeCap.Round
     )
 }
@@ -203,7 +228,73 @@ private fun Chevron(isCar: Boolean) {
     )
 }
 
-private enum class SettingsDialog { NONE, SOURCE, LICENSES }
+@StringRes
+private fun ThemeMode.label(): Int = when (this) {
+    ThemeMode.FOLLOW_SYSTEM -> R.string.theme_follow_system
+    ThemeMode.LIGHT -> R.string.theme_light
+    ThemeMode.DARK -> R.string.theme_dark
+}
+
+@Composable
+private fun ThemeDialog(
+    isCar: Boolean,
+    selected: ThemeMode,
+    onDismiss: () -> Unit,
+    onSelect: (ThemeMode) -> Unit
+) {
+    SettingsDetailsDialog(
+        isCar, R.string.setting_theme, R.drawable.ic_ui_theme, onDismiss = onDismiss
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(TuneSpacing.Small)) {
+            ThemeMode.entries.forEach { mode ->
+                ThemeOption(isCar, mode, selected == mode) { onSelect(mode) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThemeOption(isCar: Boolean, mode: ThemeMode, selected: Boolean, onSelect: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    val shape = TuneShapes.Control
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = if (isCar) 56.dp else 52.dp)
+            .clip(shape)
+            .background(if (selected) TuneColors.Selected else TuneColors.OptionSurface)
+            .border(
+                if (focused || selected) 2.dp else 1.dp,
+                if (focused || selected) TuneColors.Primary else TuneColors.BorderStrong,
+                shape
+            )
+            .onFocusChanged { focused = it.isFocused }
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect)
+            .testTag("theme_${mode.name}")
+            .padding(horizontal = TuneSpacing.Large, vertical = TuneSpacing.Medium),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Medium)
+    ) {
+        Text(
+            stringResource(mode.label()),
+            color = if (selected) TuneColors.PrimaryLight else TuneColors.Text,
+            style = TuneTypography.rowTitle(isCar),
+            modifier = Modifier.weight(1f)
+        )
+        if (selected) {
+            TuneIcon(R.drawable.ic_ui_check, Modifier.size(TuneSizes.IconSm), TuneColors.Primary)
+        }
+    }
+}
+
+private enum class SettingsDialog { NONE, THEME, SOURCE, LICENSES }
+
+@Composable
+private fun RememberDialogDim() {
+    val view = LocalView.current
+    DisposableEffect(view) {
+        (view.parent as? DialogWindowProvider)?.window?.setDimAmount(.72f)
+        onDispose { }
+    }
+}
 
 @Composable
 private fun SettingsDetailsDialog(
@@ -228,6 +319,7 @@ private fun SettingsDetailsDialog(
             }
         },
         text = {
+            RememberDialogDim()
             Column(
                 Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(TuneSpacing.Large),
@@ -265,7 +357,7 @@ private fun SettingsGroup(content: @Composable ColumnScope.() -> Unit) {
     Surface(
         color = TuneColors.Surface,
         shape = TuneShapes.SettingsGroup,
-        border = BorderStroke(1.dp, TuneColors.Border.copy(alpha = .5f))
+        border = BorderStroke(1.dp, TuneColors.BorderStrong)
     ) {
         Column(Modifier.fillMaxWidth().background(TuneBrushes.Card), content = content)
     }
@@ -275,7 +367,7 @@ private fun SettingsGroup(content: @Composable ColumnScope.() -> Unit) {
 private fun SettingsDivider(isCar: Boolean) {
     HorizontalDivider(
         Modifier.padding(start = if (isCar) 68.dp else 65.dp, end = TuneSpacing.Large),
-        color = TuneColors.Border.copy(alpha = .38f),
+        color = TuneColors.Divider,
         thickness = .5.dp
     )
 }
@@ -292,7 +384,9 @@ private fun SettingRow(
     onClick: (() -> Unit)? = null
 ) {
     val interaction = remember { MutableInteractionSource() }
-    val contentAlpha = if (enabled) 1f else .55f
+    val labelColor = if (enabled) TuneColors.Text else TuneColors.DisabledContent
+    val subtitleColor = if (enabled) TuneColors.Muted else TuneColors.DisabledContent
+    val iconColor = if (enabled) TuneColors.PrimaryLight else TuneColors.DisabledContent
     val rowModifier = Modifier.fillMaxWidth().heightIn(min = if (isCar) 68.dp else 64.dp)
         .controlFeedback(interaction, RectangleShape, enabled && onClick != null)
         .testTag("setting_$label")
@@ -320,52 +414,69 @@ private fun SettingRow(
     ) {
         Box(
             Modifier.size(if (isCar) 40.dp else 37.dp)
-                .background(TuneColors.Primary.copy(alpha = if (isCar) .13f else .09f), TuneShapes.Control),
+                .background(
+                    TuneColors.Primary.copy(alpha = if (!enabled) .04f else if (isCar) .13f else .09f),
+                    TuneShapes.Control
+                ),
             contentAlignment = Alignment.Center
         ) {
-            TuneIcon(resource, Modifier.size(TuneSizes.IconSm), TuneColors.PrimaryLight.copy(alpha = contentAlpha))
+            TuneIcon(resource, Modifier.size(TuneSizes.IconSm), iconColor)
         }
         Column(Modifier.weight(1f)) {
             Text(
-                stringResource(label), color = TuneColors.Text.copy(alpha = contentAlpha),
+                stringResource(label), color = labelColor,
                 style = TuneTypography.rowTitle(isCar).copy(fontWeight = FontWeight.SemiBold)
             )
             if (subtitle != null) {
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    subtitle, color = TuneColors.Muted.copy(alpha = contentAlpha),
+                    subtitle, color = subtitleColor,
                     style = TuneTypography.secondary(isCar)
                 )
             }
         }
+        val rowTrailing = trailing
         if (checked != null) {
-            ToggleSwitch(checked)
-        } else {
-            trailing?.invoke()
+            ToggleSwitch(checked, enabled)
+        } else if (rowTrailing != null) {
+            rowTrailing()
         }
     }
 }
 
 /** 点击由整行统一处理，Switch 只展示状态，避免重复触发。 */
 @Composable
-private fun ToggleSwitch(checked: Boolean) {
+private fun ToggleSwitch(checked: Boolean, enabled: Boolean = true) {
     val thumbOffset by animateDpAsState(
         targetValue = if (checked) 23.dp else 3.dp,
         animationSpec = tween(if (rememberMotionEnabled()) TuneMotion.ColorChange else 0),
         label = "setting_switch_thumb"
     )
-    val track = if (checked) Brush.linearGradient(listOf(TuneColors.Primary, TuneColors.Accent))
-    else Brush.linearGradient(listOf(TuneColors.Raised, TuneColors.Player))
+    val track = when {
+        !enabled -> Brush.linearGradient(listOf(TuneColors.DisabledContainer, TuneColors.DisabledContainer))
+        checked -> Brush.linearGradient(listOf(TuneColors.Primary, TuneColors.Accent))
+        else -> Brush.linearGradient(listOf(TuneColors.TrackOff, TuneColors.TrackOff))
+    }
+    val outline = when {
+        !enabled -> TuneColors.BorderSoft
+        checked -> TuneColors.Primary
+        else -> TuneColors.BorderStrong
+    }
+    val thumb = when {
+        !enabled -> TuneColors.DisabledContent
+        checked -> TuneColors.OnPrimary
+        else -> TuneColors.Text
+    }
     Box(
         Modifier.size(width = 45.dp, height = 26.dp)
             .background(track, CircleShape)
-            .border(1.dp, if (checked) TuneColors.Primary else TuneColors.Border, CircleShape)
+            .border(1.dp, outline, CircleShape)
             .clearAndSetSemantics { },
         contentAlignment = Alignment.CenterStart
     ) {
         Box(
             Modifier.offset(x = thumbOffset).size(19.dp)
-                .background(if (checked) TuneColors.Text else TuneColors.Muted, CircleShape)
+                .background(thumb, CircleShape)
         )
     }
 }

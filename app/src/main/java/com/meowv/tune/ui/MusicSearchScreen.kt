@@ -244,7 +244,7 @@ private fun SearchInput(
                 Modifier.heightIn(min = touch)
                     .clip(shape)
                     .background(if (focused) TuneColors.Raised else TuneColors.Surface)
-                    .border(if (focused) 2.dp else 1.dp, if (focused) TuneColors.Primary else TuneColors.Border, shape)
+                    .border(if (focused) 2.dp else 1.dp, if (focused) TuneColors.Primary else TuneColors.BorderStrong, shape)
                     .padding(start = TuneSpacing.Medium),
                 horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Small),
                 verticalAlignment = Alignment.CenterVertically
@@ -287,7 +287,7 @@ private fun SearchIconButton(
     var focused by remember { mutableStateOf(false) }
     val shape = TuneShapes.Control
     val surface = if (showSurface) {
-        Modifier.background(TuneColors.Surface, shape).border(1.dp, TuneColors.BorderSoft, shape)
+        Modifier.background(TuneColors.Surface, shape).border(1.dp, TuneColors.BorderStrong, shape)
     } else Modifier
     val focusOutline = if (focused) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier
     IconButton(
@@ -299,7 +299,7 @@ private fun SearchIconButton(
     ) {
         Icon(
             painterResource(icon), stringResource(description), Modifier.size(TuneSizes.IconMd),
-            tint = if (enabled) TuneColors.PrimaryLight else TuneColors.Muted.copy(alpha = TuneColors.DisabledAlpha)
+            tint = if (enabled) TuneColors.Primary else TuneColors.DisabledContent
         )
     }
 }
@@ -329,7 +329,7 @@ private fun SearchHistory(
         FlowRow(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Small),
-            verticalArrangement = Arrangement.spacedBy(TuneSpacing.Hairline)
+            verticalArrangement = Arrangement.spacedBy(TuneSpacing.Small)
         ) {
             history.forEachIndexed { index, query ->
                 var focused by remember(query) { mutableStateOf(false) }
@@ -346,7 +346,7 @@ private fun SearchHistory(
                         shape = TuneShapes.Chip,
                         border = BorderStroke(
                             if (focused) 2.dp else 1.dp,
-                            if (focused) TuneColors.Primary else TuneColors.BorderSoft
+                            if (focused) TuneColors.Primary else TuneColors.BorderStrong
                         )
                     ) {
                         Box(

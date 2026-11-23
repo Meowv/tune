@@ -2,6 +2,8 @@ package com.meowv.tune
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -35,6 +37,7 @@ import com.meowv.tune.music.MusicSearchViewModel
 import com.meowv.tune.ui.MusicSearchScreen
 import com.meowv.tune.music.MusicViewModel
 import com.meowv.tune.settings.SettingsViewModel
+import com.meowv.tune.settings.resolveThemeIsDark
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -43,6 +46,7 @@ import com.meowv.tune.ui.TuneApp
 import com.meowv.tune.ui.theme.TuneTheme
 import com.meowv.tune.domain.TuneError
 import com.meowv.tune.domain.TuneSettings
+import com.meowv.tune.domain.ThemeMode
 import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.domain.TuneFailure
 import com.meowv.tune.radio.CountryResolver
@@ -62,6 +66,7 @@ class MainActivity : ComponentActivity() {
     private var firstFrameReady = false
     private var hasEnteredForeground = false
     private var carShell = false
+    private var darkTheme = false
     private var mediaLease: AutoCloseable? = null
     private var playbackEntryJob: Job? = null
     private var resumeRadioOnEntry = false
@@ -137,13 +142,29 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        darkTheme = resolveThemeIsDark(this)
+        // 显式主题必须在 installSplashScreen 与 super.onCreate 之前定好，否则启动首帧会闪色。
+        setTheme(if (darkTheme) R.style.Theme_MeowvTune_Splash_Dark else R.style.Theme_MeowvTune_Splash_Light)
         val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
-        val background = getColor(R.color.background)
-        enableEdgeToEdge(SystemBarStyle.dark(background), SystemBarStyle.dark(background))
+        val background = getColor(if (darkTheme) R.color.theme_background_dark else R.color.theme_background_light)
+        val barStyle = if (darkTheme) SystemBarStyle.dark(background) else SystemBarStyle.light(background, background)
+        enableEdgeToEdge(barStyle, barStyle)
         splash.setKeepOnScreenCondition { !firstFrameReady }
         lifecycleScope.launch {
             settingsModel.settings.filterNotNull().map { it.scope }.distinctUntilChanged().collect(radioModel::setScope)
+        }
+        lifecycleScope.launch {
+            settingsModel.settings.filterNotNull().map { it.themeMode }.distinctUntilChanged().collect { mode ->
+                val dark = resolveDark(mode)
+                if (dark != darkTheme) {
+                    darkTheme = dark
+                    window.setBackgroundDrawable(
+                        ColorDrawable(getColor(if (dark) R.color.theme_background_dark else R.color.theme_background_light))
+                    )
+                    applySystemBars()
+                }
+            }
         }
         // 设置页刷新的结果统一走同一条 Snackbar：先复位状态再提示，避免旋转后重复弹出。
         lifecycleScope.launch {
@@ -193,7 +214,7 @@ class MainActivity : ComponentActivity() {
             val local by updateModel.local.collectAsStateWithLifecycle()
             val install by updateModel.installState.collectAsStateWithLifecycle()
             val upgradedTo by updateModel.upgradedTo.collectAsStateWithLifecycle()
-            TuneTheme {
+            TuneTheme(themeMode = settings?.themeMode ?: ThemeMode.FOLLOW_SYSTEM) {
                 TuneApp(
                     settings = settings ?: TuneSettings(),
                     musicState = musicState,
@@ -361,10 +382,17 @@ class MainActivity : ComponentActivity() {
         }
     )
 
+    private fun resolveDark(mode: ThemeMode): Boolean = when (mode) {
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+        ThemeMode.FOLLOW_SYSTEM ->
+            resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+    }
+
     private fun applySystemBars() {
         WindowCompat.getInsetsController(window, window.decorView).apply {
-            isAppearanceLightStatusBars = false
-            isAppearanceLightNavigationBars = false
+            isAppearanceLightStatusBars = !darkTheme
+            isAppearanceLightNavigationBars = !darkTheme
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             show(WindowInsetsCompat.Type.statusBars())
             if (carShell) {

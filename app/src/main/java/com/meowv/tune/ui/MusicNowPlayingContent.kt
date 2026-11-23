@@ -238,16 +238,20 @@ private fun MusicSeek(
 
 @Composable
 private fun MusicProgressTrack(progress: Float, connected: Boolean, modifier: Modifier = Modifier) {
+    val trackColor = TuneColors.BorderStrong
+    val fillStartColor = TuneColors.Accent
+    val fillEndColor = TuneColors.PrimaryLight
+    val idleColor = TuneColors.Muted
     Canvas(modifier.height(4.dp)) {
         val radius = CornerRadius(size.height / 2f)
         val filledWidth = size.width * progress
-        drawRoundRect(TuneColors.Border, cornerRadius = radius)
+        drawRoundRect(trackColor, cornerRadius = radius)
         if (filledWidth > 0f) {
             val filledStart = if (layoutDirection == LayoutDirection.Ltr) 0f else size.width - filledWidth
             val stops = if (connected) {
-                listOf(TuneColors.Accent, TuneColors.PrimaryLight)
+                listOf(fillStartColor, fillEndColor)
             } else {
-                listOf(TuneColors.Muted, TuneColors.Muted)
+                listOf(idleColor, idleColor)
             }
             drawRoundRect(
                 brush = Brush.horizontalGradient(stops, startX = filledStart, endX = filledStart + filledWidth),

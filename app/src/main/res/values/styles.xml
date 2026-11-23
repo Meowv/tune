@@ -2,18 +2,53 @@
 <resources>
     <style name="Theme.MeowvTune" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightStatusBar">@bool/theme_light_system_bar</item>
         <item name="android:statusBarColor">@color/background</item>
         <item name="android:navigationBarColor">@color/background</item>
         <item name="android:windowBackground">@color/background</item>
-        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:colorAccent">@color/primary</item>
     </style>
+
     <style name="Theme.MeowvTune.Splash" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/background</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/ic_meowvtune_splash</item>
         <item name="postSplashScreenTheme">@style/Theme.MeowvTune</item>
         <item name="android:statusBarColor">@color/background</item>
         <item name="android:navigationBarColor">@color/background</item>
+        <item name="android:windowLightStatusBar">@bool/theme_light_system_bar</item>
+        <item name="android:windowLightNavigationBar">@bool/theme_light_system_bar</item>
+    </style>
+
+    <style name="Theme.MeowvTune.Light">
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:statusBarColor">#F7F8FC</item>
+        <item name="android:navigationBarColor">#F7F8FC</item>
+        <item name="android:windowBackground">#F7F8FC</item>
+    </style>
+
+    <style name="Theme.MeowvTune.Dark">
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:statusBarColor">#0B1020</item>
+        <item name="android:navigationBarColor">#0B1020</item>
+        <item name="android:windowBackground">#0B1020</item>
+    </style>
+
+    <style name="Theme.MeowvTune.Splash.Light">
+        <item name="windowSplashScreenBackground">#F7F8FC</item>
+        <item name="postSplashScreenTheme">@style/Theme.MeowvTune.Light</item>
+        <item name="android:statusBarColor">#F7F8FC</item>
+        <item name="android:navigationBarColor">#F7F8FC</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+
+    <style name="Theme.MeowvTune.Splash.Dark">
+        <item name="windowSplashScreenBackground">#0B1020</item>
+        <item name="postSplashScreenTheme">@style/Theme.MeowvTune.Dark</item>
+        <item name="android:statusBarColor">#0B1020</item>
+        <item name="android:navigationBarColor">#0B1020</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
     </style>

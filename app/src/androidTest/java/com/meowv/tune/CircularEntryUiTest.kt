@@ -27,7 +27,7 @@ class CircularEntryUiTest {
         var toggles = 0
         val commands = mutableListOf<PlayerCommand>()
         compose.setContent {
-            TuneTheme {
+            TuneTheme(ThemeMode.DARK) {
                 val rotation = remember { PlayerRotationState() }
                 MeowvBottomDock(TunePage.Radio, {
                     CompactMediaBar(
@@ -68,7 +68,7 @@ class CircularEntryUiTest {
         var toggles = 0
         var selectedPage = TunePage.Radio
         compose.setContent {
-            TuneTheme {
+            TuneTheme(ThemeMode.DARK) {
                 val rotation = remember { PlayerRotationState() }
                 MeowvBottomDock(TunePage.Radio, {
                     CompactMediaBar(
@@ -117,7 +117,7 @@ class CircularEntryUiTest {
         var motionEnabled = true
         var opens = 0
         compose.setContent {
-            TuneTheme {
+            TuneTheme(ThemeMode.DARK) {
                 motionEnabled = rememberMotionEnabled()
                 MeowvBottomDock(page.value, {
                     CompactMediaBar(

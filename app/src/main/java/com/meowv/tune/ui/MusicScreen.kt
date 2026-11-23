@@ -441,13 +441,13 @@ internal fun MusicTrackRow(
             when (visual) {
                 StationPlaybackVisual.Connecting, StationPlaybackVisual.Buffering, StationPlaybackVisual.Retrying ->
                     CircularProgressIndicator(Modifier.size(TuneSizes.IconSm), color = TuneColors.Primary,
-                        strokeWidth = 2.dp, strokeCap = StrokeCap.Round, trackColor = TuneColors.Primary.copy(alpha = .22f))
+                        strokeWidth = 2.dp, strokeCap = StrokeCap.Round, trackColor = TuneColors.TrackOff)
                 StationPlaybackVisual.Playing -> PlayingWaveBars(
                     Modifier.size(TuneSizes.IconMd), TuneColors.Primary, animationsEnabled
                 )
                 StationPlaybackVisual.Error -> TuneIcon(R.drawable.ic_refresh, Modifier.size(TuneSizes.IconMd), TuneColors.Error)
                 else -> TuneIcon(R.drawable.ic_radio_play, Modifier.size(TuneSizes.IconMd),
-                    if (!enabled) TuneColors.IconIdle.copy(alpha = TuneColors.DisabledAlpha)
+                    if (!enabled) TuneColors.DisabledContent
                     else if (current) TuneColors.Primary else TuneColors.IconIdle)
             }
         }

@@ -61,6 +61,8 @@ interface PlayerController {
     suspend fun dispatch(command: PlayerCommand)
 }
 
+enum class ThemeMode { FOLLOW_SYSTEM, LIGHT, DARK }
+
 data class TuneSettings(
     val scope: RadioScope = RadioScope(),
     val autoPlay: Boolean = false,
@@ -68,7 +70,8 @@ data class TuneSettings(
     val lastPlayedStation: Station? = null,
     val displayMode: RadioDisplayMode = RadioDisplayMode.LIST,
     val playbackOrder: PlaybackOrder = PlaybackOrder.SHUFFLE,
-    val musicDisplayMode: RadioDisplayMode = RadioDisplayMode.LIST
+    val musicDisplayMode: RadioDisplayMode = RadioDisplayMode.LIST,
+    val themeMode: ThemeMode = ThemeMode.FOLLOW_SYSTEM
 )
 
 interface SettingsRepository {

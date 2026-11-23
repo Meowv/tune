@@ -43,6 +43,10 @@
   <string name="music_search_history_clear">清空</string>
   <string name="setting_autoplay_summary">启动后继续上次收听</string>
   <string name="setting_autoplay">自动播放</string>
+  <string name="setting_theme">主题</string>
+  <string name="theme_follow_system">跟随系统</string>
+  <string name="theme_light">浅色</string>
+  <string name="theme_dark">深色</string>
   <string name="setting_refresh">刷新数据</string>
   <string name="setting_source">数据来源</string>
   <string name="setting_licenses">开源许可</string>

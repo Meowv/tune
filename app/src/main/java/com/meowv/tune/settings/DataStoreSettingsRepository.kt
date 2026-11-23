@@ -23,7 +23,7 @@ private val Context.tunePreferences by preferencesDataStore(
 )
 
 fun settingsRepository(context: Context): SettingsRepository =
-    DataStoreSettingsRepository(context.applicationContext.tunePreferences)
+    DataStoreSettingsRepository(context.applicationContext.tunePreferences, themePrefs(context))
 
 internal fun musicResumeStore(context: Context) = MusicResumeStore(context.applicationContext.tunePreferences)
 
@@ -34,10 +34,14 @@ private val Context.musicFeedPreferences by preferencesDataStore(
 
 internal fun musicFeedStore(context: Context) = MusicFeedStore(context.applicationContext.musicFeedPreferences)
 
-internal class DataStoreSettingsRepository(private val store: DataStore<Preferences>) : SettingsRepository {
+internal class DataStoreSettingsRepository(
+    private val store: DataStore<Preferences>,
+    private val themePrefs: ThemePrefs? = null
+) : SettingsRepository {
     override val settings = store.data.map(::decode)
 
     override suspend fun update(transform: (TuneSettings) -> TuneSettings) {
+        var updatedTheme: ThemeMode? = null
         store.edit { prefs ->
             val current = decode(prefs)
             val updated = transform(current)
@@ -48,7 +52,10 @@ internal class DataStoreSettingsRepository(private val store: DataStore<Preferen
             prefs[MusicDisplayMode] = updated.musicDisplayMode.name
             prefs[Order] = updated.playbackOrder.name
             prefs[AutoPlay] = updated.autoPlay
+            prefs[Theme] = updated.themeMode.storageValue
+            updatedTheme = updated.themeMode
         }
+        updatedTheme?.let { themePrefs?.write(it) }
     }
 
     override suspend fun recordSuccessfulStation(uuid: UUID) {
@@ -117,7 +124,9 @@ internal class DataStoreSettingsRepository(private val store: DataStore<Preferen
             playbackOrder = PlaybackOrder.entries.firstOrNull { it.name == values[Order] }
                 ?: PlaybackOrder.SHUFFLE,
             musicDisplayMode = RadioDisplayMode.entries.firstOrNull { it.name == values[MusicDisplayMode] }
-                ?: RadioDisplayMode.LIST
+                ?: RadioDisplayMode.LIST,
+            themeMode = ThemeMode.entries.firstOrNull { it.storageValue == values[Theme] }
+                ?: ThemeMode.FOLLOW_SYSTEM
         )
     }
 
@@ -130,5 +139,6 @@ internal class DataStoreSettingsRepository(private val store: DataStore<Preferen
         val DisplayMode = stringPreferencesKey("radio_display_mode")
         val MusicDisplayMode = stringPreferencesKey("music_display_mode")
         val Order = stringPreferencesKey("playback_order")
+        val Theme = stringPreferencesKey("theme_mode")
     }
 }

@@ -18,6 +18,7 @@ import com.meowv.tune.domain.PlaybackSource
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.domain.PlayerCommand
 import com.meowv.tune.domain.RadioDisplayMode
+import com.meowv.tune.domain.ThemeMode
 import com.meowv.tune.domain.TuneError
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
@@ -45,7 +46,7 @@ class MusicScreenTest {
     }
 
     @Test fun unconfiguredHidesTheNoticeAndRetry() {
-        compose.setContent { TuneTheme {
+        compose.setContent { TuneTheme(ThemeMode.DARK) {
             TestMusicScreen(isCar, MusicUiState.NotConfigured, MusicFeed(), true, {}, {}, {})
         } }
         compose.onNodeWithText("音乐服务暂未就绪").assertDoesNotExist()
@@ -57,7 +58,7 @@ class MusicScreenTest {
 
     @Test fun waitingForAccessHidesTheNoticeWithOrWithoutCachedTracks() {
         val browse = mutableStateOf(MusicFeed(failure = MusicFailure.NOT_CONFIGURED))
-        compose.setContent { TuneTheme {
+        compose.setContent { TuneTheme(ThemeMode.DARK) {
             TestMusicScreen(isCar, MusicUiState.Idle, browse.value, true, {}, {}, {})
         } }
         compose.onNodeWithText("音乐服务暂未就绪").assertDoesNotExist()
@@ -73,7 +74,7 @@ class MusicScreenTest {
 
     @Test fun listAndCardsDisplayTheSameTrack() {
         val track = MusicTrack("original-001", "睡醒就好了（测试片段）", listOf("qix"))
-        compose.setContent { TuneTheme {
+        compose.setContent { TuneTheme(ThemeMode.DARK) {
             TestMusicScreen(isCar, MusicUiState.Idle, MusicFeed(tracks = listOf(track)), true, {}, {}, {})
         } }
         compose.onNodeWithTag("music_feed_track_original-001").assertIsDisplayed()
@@ -89,7 +90,7 @@ class MusicScreenTest {
             source = PlaybackSource.MUSIC, phase = PlaybackPhase.PAUSED, music = tracks.first()
         ))
         val commands = mutableListOf<PlayerCommand>()
-        compose.setContent { TuneTheme {
+        compose.setContent { TuneTheme(ThemeMode.DARK) {
             TestMusicScreen(isCar, paused, MusicFeed(tracks = tracks), true, { commands.add(it) }, {}, {})
         } }
         compose.onNodeWithTag("layout_card").performClick()
@@ -110,7 +111,7 @@ class MusicScreenTest {
             source = PlaybackSource.MUSIC, phase = PlaybackPhase.PLAYING, music = tracks.first()
         ))
         val commands = mutableListOf<PlayerCommand>()
-        compose.setContent { TuneTheme {
+        compose.setContent { TuneTheme(ThemeMode.DARK) {
             TestMusicScreen(isCar, MusicUiState.Active(playback.value), MusicFeed(tracks = tracks), true,
                 { commands.add(it) }, {}, {})
         } }
@@ -142,7 +143,7 @@ class MusicScreenTest {
             MusicFailure.CONNECTION to R.string.playback_connection
         )
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        compose.setContent { TuneTheme {
+        compose.setContent { TuneTheme(ThemeMode.DARK) {
             TestMusicScreen(isCar, MusicUiState.Active(playback.value), MusicFeed(tracks = listOf(track)),
                 true, {}, {}, {})
         } }
@@ -157,7 +158,7 @@ class MusicScreenTest {
     @Test fun artworkUsesTheFallbackForMissingOrFailedImagesAndPrefersLoadedImages() {
         val app = InstrumentationRegistry.getInstrumentation().targetContext
         val url = mutableStateOf<String?>(null)
-        compose.setContent { TuneTheme { MediaArtwork(url.value, true, Modifier.size(144.dp)) } }
+        compose.setContent { TuneTheme(ThemeMode.DARK) { MediaArtwork(url.value, true, Modifier.size(144.dp)) } }
         val fallback = compose.onNodeWithTag("media_artwork_fallback", useUnmergedTree = true)
         fallback.assertIsDisplayed()
 
@@ -177,7 +178,7 @@ class MusicScreenTest {
             durationMs = 12000, positionMs = 2000, canSeek = true
         ))
         val seeks = mutableListOf<Long>()
-        compose.setContent { TuneTheme {
+        compose.setContent { TuneTheme(ThemeMode.DARK) {
             NowPlayingScreen(
                 isCar = isCar, connected = true, state = state.value, station = null,
                 shuffle = false, sleepTimer = SleepTimerState(), onCollapse = {}, onToggle = {},
@@ -238,7 +239,7 @@ class MusicScreenTest {
         compose.setContent {
             val density = LocalDensity.current.density
             CompositionLocalProvider(LocalDensity provides Density(density, fontScale = 1.5f)) {
-                TuneTheme {
+                TuneTheme(ThemeMode.DARK) {
                     NowPlayingScreen(
                         isCar = isCar, connected = true, state = state.value, station = null,
                         shuffle = false, sleepTimer = SleepTimerState(), onCollapse = {}, onToggle = {},
@@ -261,7 +262,7 @@ class MusicScreenTest {
 
     @Test fun emptyMusicPlayerCanReturnToTheMusicPage() {
         var choices = 0
-        compose.setContent { TuneTheme {
+        compose.setContent { TuneTheme(ThemeMode.DARK) {
             NowPlayingScreen(
                 isCar = isCar, connected = true,
                 state = PlayerUiState(source = PlaybackSource.MUSIC), station = null,

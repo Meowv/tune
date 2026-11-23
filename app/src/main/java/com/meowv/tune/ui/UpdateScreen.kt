@@ -141,7 +141,7 @@ private fun UpdateTopBar(isCar: Boolean, onBack: () -> Unit) {
                 .semantics { contentDescription = backLabel },
             contentAlignment = Alignment.Center
         ) {
-            TuneIcon(R.drawable.ic_arrow_back, Modifier.size(22.dp), TuneColors.Text)
+            TuneIcon(R.drawable.ic_arrow_back, Modifier.size(TuneSizes.IconMd), TuneColors.Text)
         }
         Spacer(Modifier.width(TuneSpacing.Medium))
         Text(
@@ -254,7 +254,7 @@ private fun DownloadProgress(isCar: Boolean, download: InstallState.Downloading)
             LinearProgressIndicator(
                 modifier = track,
                 color = TuneColors.Primary,
-                trackColor = TuneColors.Primary.copy(alpha = .18f)
+                trackColor = TuneColors.TrackOff
             )
         } else {
             Box(track.background(TuneColors.BorderSoft).progressSemantics()) {
@@ -267,7 +267,7 @@ private fun DownloadProgress(isCar: Boolean, download: InstallState.Downloading)
             modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape)
                 .testTag("update_progress"),
             color = TuneColors.Primary,
-            trackColor = TuneColors.Primary.copy(alpha = .18f)
+            trackColor = TuneColors.TrackOff
         )
     }
     Spacer(Modifier.height(TuneSpacing.Small))
@@ -393,18 +393,22 @@ private fun PrimaryButton(
     val background = when {
         !primary -> TuneColors.Raised
         enabled -> TuneColors.Primary
-        else -> TuneColors.Primary.copy(alpha = .16f)
+        else -> TuneColors.DisabledContainer
     }
     val textColor = when {
         !primary -> TuneColors.Text
-        enabled -> TuneColors.Background
-        else -> TuneColors.Primary
+        enabled -> TuneColors.OnPrimary
+        else -> TuneColors.DisabledContent
     }
     var focused by remember { mutableStateOf(false) }
     Button(
         onClick = onClick,
         enabled = enabled,
-        border = if (focused) BorderStroke(2.dp, TuneColors.Text) else BorderStroke(1.dp, TuneColors.Border),
+        border = if (focused) {
+            BorderStroke(2.dp, if (primary && enabled) TuneColors.FocusOnAccent else TuneColors.Primary)
+        } else {
+            BorderStroke(1.dp, TuneColors.BorderStrong)
+        },
         modifier = Modifier.fillMaxWidth()
             .heightIn(min = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
             .onFocusChanged { focused = it.isFocused }.testTag(tag),
@@ -438,7 +442,7 @@ private fun StatusIcon(isCar: Boolean, state: UpdateUiState, install: InstallSta
                     Modifier.size(if (isCar) 24.dp else 22.dp),
                     color = TuneColors.Primary,
                     strokeWidth = 2.dp,
-                    trackColor = TuneColors.Primary.copy(alpha = .22f),
+                    trackColor = TuneColors.TrackOff,
                     strokeCap = StrokeCap.Round
                 )
             } else {
@@ -587,7 +591,7 @@ private fun InfoRow(
             textAlign = TextAlign.End
         )
     }
-    if (showDivider) HorizontalDivider(color = TuneColors.Border.copy(alpha = .45f))
+    if (showDivider) HorizontalDivider(color = TuneColors.Divider)
 }
 
 @Composable
@@ -652,7 +656,7 @@ private fun UpdateCard(
         modifier = modifier,
         color = TuneColors.Surface,
         shape = TuneShapes.Dialog,
-        border = BorderStroke(1.dp, TuneColors.Border.copy(alpha = .65f))
+        border = BorderStroke(1.dp, TuneColors.BorderStrong)
     ) {
         Column(
             Modifier.fillMaxWidth().then(if (highlighted) Modifier.background(TuneBrushes.Card) else Modifier)

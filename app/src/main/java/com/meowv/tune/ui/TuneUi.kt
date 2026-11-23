@@ -31,11 +31,13 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.meowv.tune.R
 import com.meowv.tune.domain.PlaybackPhase
@@ -372,7 +374,14 @@ internal fun TuneApp(
                     properties = androidx.compose.ui.window.DialogProperties(
                         usePlatformDefaultWidth = false, decorFitsSystemWindows = false
                     )
-                ) { musicSearchContent(false, playerEntry) }
+                ) {
+                    val view = LocalView.current
+                    DisposableEffect(view) {
+                        (view.parent as? DialogWindowProvider)?.window?.setDimAmount(.72f)
+                        onDispose { }
+                    }
+                    musicSearchContent(false, playerEntry)
+                }
             }
             if (!isCar && showUpdate) {
                 updateContent(

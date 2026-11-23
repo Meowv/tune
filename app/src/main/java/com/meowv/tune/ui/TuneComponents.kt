@@ -78,6 +78,7 @@ import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.meowv.tune.R
 import com.meowv.tune.domain.Station
+import com.meowv.tune.ui.theme.LocalTuneIsDark
 import com.meowv.tune.ui.theme.TuneBrushes
 import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.ui.theme.TuneMotion
@@ -89,13 +90,24 @@ import com.meowv.tune.ui.theme.TuneTypography
 import kotlin.math.abs
 
 @Composable
-internal fun TuneIcon(@DrawableRes resource: Int, modifier: Modifier = Modifier, tint: Color = TuneColors.Primary) {
+internal fun TuneIcon(@DrawableRes resource: Int, modifier: Modifier = Modifier, tint: Color = TuneColors.IconIdle) {
     Icon(painterResource(resource), contentDescription = null, modifier = modifier, tint = tint)
 }
 
 @Composable
-internal fun BrandLogo(modifier: Modifier = Modifier) {
-    Image(painterResource(R.drawable.ic_meowvtune_logo), contentDescription = null, modifier = modifier)
+internal fun BrandLogo(modifier: Modifier = Modifier, withPlate: Boolean = false) {
+    if (withPlate && LocalTuneIsDark.current) {
+        Box(modifier, contentAlignment = Alignment.Center) {
+            Box(Modifier.matchParentSize().background(TuneColors.PrimaryLight, CircleShape))
+            Image(
+                painterResource(R.drawable.ic_meowvtune_logo),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    } else {
+        Image(painterResource(R.drawable.ic_meowvtune_logo), contentDescription = null, modifier = modifier)
+    }
 }
 
 @Composable
@@ -133,8 +145,8 @@ internal fun Modifier.controlFeedback(
     val focused by interaction.collectIsFocusedAsState()
     val fill by animateColorAsState(
         targetValue = when {
-            enabled && pressed -> TuneColors.Primary.copy(alpha = .23f)
-            enabled && focused -> TuneColors.Primary.copy(alpha = .10f)
+            enabled && pressed -> TuneColors.PressedOverlay
+            enabled && focused -> TuneColors.FocusOverlay
             else -> Color.Transparent
         },
         animationSpec = tween(if (rememberMotionEnabled()) durationMillis else 0),
@@ -218,21 +230,18 @@ internal fun StationBadge(station: Station?, size: Dp) {
 
 @Composable
 internal fun MediaArtwork(url: String?, isMusic: Boolean, modifier: Modifier = Modifier) {
-    val fallback = painterResource(if (isMusic) R.drawable.music_artwork_fallback else R.drawable.radio_artwork_fallback)
     val context = LocalContext.current
     val duration = if (isMusic && rememberMotionEnabled()) 160 else 0
     val request = remember(context, url, duration) {
         ImageRequest.Builder(context).data(url?.takeIf(String::isNotBlank)).crossfade(duration).build()
     }
+    // 占位层由 Compose 绘制，避免 WebP 里写死的深色底在浅色主题下露出。
     Box(modifier.background(TuneColors.Raised), contentAlignment = Alignment.Center) {
         var showFallback by remember(url) { mutableStateOf(true) }
         AsyncImage(
             model = request,
             contentDescription = null,
             modifier = Modifier.matchParentSize(),
-            placeholder = fallback,
-            error = fallback,
-            fallback = fallback,
             contentScale = if (isMusic) ContentScale.Crop else BadgeContentScale,
             onLoading = { showFallback = true },
             onSuccess = { showFallback = false },
@@ -241,8 +250,11 @@ internal fun MediaArtwork(url: String?, isMusic: Boolean, modifier: Modifier = M
         if (showFallback) {
             Box(Modifier.matchParentSize(), contentAlignment = Alignment.Center) {
                 val glyph = Modifier.fillMaxSize(if (isMusic) .50f else .46f).testTag("media_artwork_fallback")
-                if (isMusic) Image(painterResource(R.drawable.music_record), null, glyph)
-                else TuneIcon(R.drawable.ic_radio, glyph, TuneColors.PrimaryLight)
+                TuneIcon(
+                    if (isMusic) R.drawable.ic_music else R.drawable.ic_radio,
+                    glyph,
+                    TuneColors.PrimaryLight
+                )
             }
         }
     }
@@ -456,10 +468,6 @@ private fun NavigationItem(
     }
 }
 
-private val SelectedMediaRow = Brush.horizontalGradient(
-    listOf(TuneColors.Primary.copy(alpha = .19f), TuneColors.Selected.copy(alpha = .38f))
-)
-
 @Composable
 internal fun Modifier.mediaRowHighlight(selected: Boolean, isCar: Boolean): Modifier {
     val selection by animateFloatAsState(
@@ -467,13 +475,17 @@ internal fun Modifier.mediaRowHighlight(selected: Boolean, isCar: Boolean): Modi
         tween(if (rememberMotionEnabled()) TuneMotion.ColorChange else 0),
         label = "media_row_selection"
     )
+    val rowBrush = Brush.horizontalGradient(
+        listOf(TuneColors.PressedOverlay, TuneColors.FocusOverlay)
+    )
+    val primary = TuneColors.Primary
     return drawBehind {
         if (selection > 0f) {
-            drawRect(SelectedMediaRow, alpha = selection)
+            drawRect(rowBrush, alpha = selection)
             val width = 2.dp.toPx()
             val height = (if (isCar) 30.dp else 26.dp).toPx().coerceAtMost(size.height)
             drawRoundRect(
-                TuneColors.Primary.copy(alpha = selection),
+                primary.copy(alpha = selection),
                 Offset(0f, (size.height - height) / 2f),
                 Size(width, height),
                 CornerRadius(width / 2f)
@@ -517,15 +529,21 @@ internal fun mediaCardSize(viewport: Dp, availableHeight: Dp, isCar: Boolean): D
     return DpSize(width, minOf(height, width * ratio))
 }
 
-internal fun Modifier.mediaCardSurface(focused: Boolean): Modifier =
-    shadow(10.dp, TuneShapes.Card)
+@Composable
+internal fun Modifier.mediaCardSurface(focused: Boolean): Modifier {
+    val cardBrush = TuneBrushes.Card
+    val primary = TuneColors.Primary
+    val borderColor = TuneColors.BorderStrong
+    val shadowColor = TuneColors.Shadow
+    return shadow(10.dp, TuneShapes.Card, ambientColor = shadowColor, spotColor = shadowColor)
         .clip(TuneShapes.Card)
-        .background(TuneBrushes.Card)
+        .background(cardBrush)
         .border(
             if (focused) 2.dp else 1.dp,
-            if (focused) TuneColors.Primary else TuneColors.Border.copy(alpha = .8f),
+            if (focused) primary else borderColor,
             TuneShapes.Card
         )
+}
 
 internal val MediaPagerPositionHeight = 12.dp
 
@@ -544,7 +562,7 @@ internal fun MediaPagerPosition(page: Int, count: Int, visibleOnPage: Boolean) {
             val active = first + index == page
             Box(
                 Modifier.size(if (active) 18.dp else 5.dp, 5.dp)
-                    .background(if (active) TuneColors.Primary else TuneColors.Border, CircleShape)
+                    .background(if (active) TuneColors.Primary else TuneColors.BorderStrong, CircleShape)
             )
         }
     }
@@ -579,7 +597,10 @@ internal fun PreviewControl(
                 .background(background, CircleShape),
             contentAlignment = Alignment.Center
         ) {
-            TuneIcon(icon, Modifier.requiredSize(iconSize), tint)
+            TuneIcon(
+                icon, Modifier.requiredSize(iconSize),
+                if (onClick == null) TuneColors.DisabledContent else tint
+            )
         }
     }
 }

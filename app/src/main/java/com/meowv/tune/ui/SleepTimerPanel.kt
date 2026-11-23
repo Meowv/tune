@@ -42,6 +42,7 @@ import androidx.core.view.WindowInsetsCompat
 import com.meowv.tune.R
 import com.meowv.tune.playback.SleepTimerState
 import com.meowv.tune.playback.sleepTimerRemainingMinutes
+import com.meowv.tune.ui.theme.LocalTuneIsDark
 import com.meowv.tune.ui.theme.TuneBrushes
 import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.ui.theme.TuneShapes
@@ -81,7 +82,7 @@ internal fun SleepTimerPanel(
                 modifier = Modifier.widthIn(max = 500.dp).fillMaxWidth(.94f),
                 shape = TuneShapes.Dialog,
                 color = TuneColors.Surface,
-                border = BorderStroke(1.dp, TuneColors.Border)
+                border = BorderStroke(1.dp, TuneColors.BorderStrong)
             ) { content() }
         }
     } else {
@@ -91,8 +92,8 @@ internal fun SleepTimerPanel(
             shape = RoundedCornerShape(topStart = 27.dp, topEnd = 27.dp),
             containerColor = TuneColors.Raised,
             contentColor = TuneColors.Text,
-            scrimColor = TuneColors.Background.copy(alpha = .72f),
-            dragHandle = { BottomSheetDefaults.DragHandle(color = TuneColors.Border) }
+            scrimColor = TuneColors.Scrim,
+            dragHandle = { BottomSheetDefaults.DragHandle(color = TuneColors.BorderStrong) }
         ) { content() }
     }
 }
@@ -201,13 +202,12 @@ private fun SleepTimerPreset(
     Box(
         modifier.heightIn(min = if (isCar) TuneSizes.TouchCar else 53.dp)
             .clip(shape)
-            .background(if (selected) TuneColors.Segment else TuneColors.Raised)
+            .background(if (selected) TuneColors.Selected else TuneColors.OptionSurface)
             .border(
                 width = if (focused) 2.dp else 1.dp,
                 color = when {
-                    focused -> TuneColors.PrimaryLight
-                    selected -> TuneColors.Primary
-                    else -> TuneColors.Border
+                    focused || selected -> TuneColors.Primary
+                    else -> TuneColors.BorderStrong
                 },
                 shape = shape
             )
@@ -215,7 +215,7 @@ private fun SleepTimerPreset(
             .clickable(role = Role.Button, onClick = onClick)
             .testTag("sleep_timer_$minutes")
             .semantics { this.selected = selected }
-            .padding(horizontal = TuneSpacing.Hairline, vertical = TuneSpacing.Small),
+            .padding(horizontal = TuneSpacing.Small, vertical = TuneSpacing.Medium),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -238,7 +238,12 @@ private fun SleepTimerMenuRow(
     Row(
         Modifier.fillMaxWidth().heightIn(min = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
             .clip(TuneShapes.Control)
-            .then(if (focused) Modifier.border(2.dp, TuneColors.Primary, TuneShapes.Control) else Modifier)
+            .background(if (focused) TuneColors.Selected else TuneColors.Surface)
+            .border(
+                if (focused) 2.dp else 1.dp,
+                if (focused) TuneColors.Primary else TuneColors.BorderStrong,
+                TuneShapes.Control
+            )
             .onFocusChanged { focused = it.isFocused }
             .clickable(role = Role.Button, onClick = onClick)
             .testTag(tag)
@@ -299,7 +304,7 @@ internal fun CustomSleepTimerDialog(
                 unfocusedContainerColor = TuneColors.Background,
                 errorContainerColor = TuneColors.Background,
                 focusedBorderColor = TuneColors.Primary,
-                unfocusedBorderColor = TuneColors.Border,
+                unfocusedBorderColor = TuneColors.BorderStrong,
                 unfocusedSupportingTextColor = TuneColors.Muted,
                 focusedSupportingTextColor = TuneColors.Muted
             ),
@@ -316,9 +321,9 @@ internal fun CustomSleepTimerDialog(
             shape = TuneShapes.Control,
             colors = ButtonDefaults.buttonColors(
                 containerColor = TuneColors.Primary,
-                contentColor = TuneColors.Background,
-                disabledContainerColor = TuneColors.Segment,
-                disabledContentColor = TuneColors.Muted
+                contentColor = TuneColors.OnPrimary,
+                disabledContainerColor = TuneColors.DisabledContainer,
+                disabledContentColor = TuneColors.DisabledContent
             )
         ) { Text(stringResource(R.string.sleep_timer_start), style = TuneTypography.control(isCar)) }
     }
@@ -327,7 +332,7 @@ internal fun CustomSleepTimerDialog(
             onClick = onDismiss,
             modifier = Modifier.heightIn(min = actionHeight),
             shape = TuneShapes.Control,
-            border = BorderStroke(1.dp, TuneColors.Border),
+            border = BorderStroke(1.dp, TuneColors.BorderStrong),
             colors = ButtonDefaults.outlinedButtonColors(contentColor = TuneColors.Text)
         ) {
             Text(stringResource(R.string.action_cancel), style = TuneTypography.control(isCar))
@@ -351,7 +356,7 @@ internal fun CustomSleepTimerDialog(
                     shape = TuneShapes.Dialog,
                     color = TuneColors.Surface,
                     contentColor = TuneColors.Text,
-                    border = BorderStroke(1.dp, TuneColors.Border)
+                    border = BorderStroke(1.dp, TuneColors.BorderStrong)
                 ) {
                     Column(
                         Modifier.background(TuneBrushes.Dialog).verticalScroll(rememberScrollState())
@@ -397,12 +402,13 @@ internal fun CustomSleepTimerDialog(
 @Composable
 private fun TimerDialogChrome(isCar: Boolean) {
     val view = LocalView.current
-    DisposableEffect(view, isCar) {
+    val themeIsDark = LocalTuneIsDark.current
+    DisposableEffect(view, isCar, themeIsDark) {
         val window = (view.parent as DialogWindowProvider).window
         window.setDimAmount(.72f)
         if (isCar) {
             WindowCompat.getInsetsController(window, view).apply {
-                isAppearanceLightStatusBars = false
+                isAppearanceLightStatusBars = !themeIsDark
                 show(WindowInsetsCompat.Type.statusBars())
                 hide(WindowInsetsCompat.Type.navigationBars())
             }
