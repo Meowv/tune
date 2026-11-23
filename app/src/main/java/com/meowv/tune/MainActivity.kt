@@ -293,7 +293,13 @@ class MainActivity : ComponentActivity() {
         // 旧记录只有 UUID 时补齐展示元数据；关闭自动播放也恢复目标，但不发播放命令。
         if (uuid != null && settings.lastPlayedStation == null && !settings.autoPlay) {
             val remembered = runCatching { tuneApp.radioRepository.stationByUuid(uuid) }.getOrNull()
-            if (remembered != null) tuneApp.userSettings.refreshRememberedStation(remembered)
+            if (remembered != null) {
+                try {
+                    tuneApp.userSettings.refreshRememberedStation(remembered)
+                } catch (_: java.io.IOException) {
+                    android.util.Log.w("MainActivity", "Could not refresh the saved station")
+                }
+            }
         }
         if (!settings.autoPlay) return
         withTimeoutOrNull(8000) {
@@ -301,7 +307,12 @@ class MainActivity : ComponentActivity() {
         } ?: return
         // 目录可能比媒体服务连接更快就绪，等控制器可用再发命令。
         withTimeoutOrNull(5000) { tuneApp.playerController.connected.first { it } } ?: return
-        if (!tuneApp.userSettings.settings.first().autoPlay ||
+        val autoPlay = try {
+            tuneApp.userSettings.settings.first().autoPlay
+        } catch (_: java.io.IOException) {
+            settingsModel.settings.value?.autoPlay == true
+        }
+        if (!autoPlay ||
             tuneApp.playerController.state.value.phase != com.meowv.tune.domain.PlaybackPhase.IDLE
         ) return
         if (uuid != null) dispatchPlayback(PlayerCommand.Resume(uuid))

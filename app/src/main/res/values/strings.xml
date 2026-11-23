@@ -14,6 +14,8 @@
   <string name="music_device_offline">等待网络连接</string>
   <string name="music_device_pending">待管理员激活</string>
   <string name="music_device_active">已激活</string>
+  <string name="music_device_reapproval">请联系管理员重新激活</string>
+  <string name="music_device_key_fingerprint">公钥指纹 %1$s</string>
   <string name="music_device_revoked">已撤销</string>
   <string name="music_device_unavailable">暂时无法检查设备</string>
   <string name="music_device_summary">%1$s · 设备码 %2$s</string>

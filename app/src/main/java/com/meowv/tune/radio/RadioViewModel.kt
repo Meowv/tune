@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class CountryOptions(
     val countries: List<RadioCountry> = emptyList(),
@@ -117,7 +118,7 @@ class RadioViewModel(
             directory.value = RadioUiState(scope = scope)
         }
         startLoad {
-            for (candidate in countryResolver.candidates(scope, repository)) {
+            for (candidate in withContext(Dispatchers.Default) { countryResolver.candidates(scope, repository) }) {
                 val country = candidate.country
                 val cached = cache?.stations(candidate)
                 ensureActive()
@@ -169,8 +170,9 @@ class RadioViewModel(
         val candidate = resolved ?: return
         val country = candidate.country ?: return
         if (load?.isActive == true || page.nextOffset == null) return
+        val previousPage = page
         startLoad {
-            val next = cachedLoad(candidate) { appendCountryPage(repository, country, page) }
+            val next = cachedLoad(candidate) { appendCountryPage(repository, country, previousPage) }
             ensureActive()
             publish(candidate, next)
         }
@@ -178,8 +180,8 @@ class RadioViewModel(
 
     private fun startLoad(block: suspend CoroutineScope.() -> Unit) {
         directory.update { it.copy(isLoading = true, error = null) }
-        // 目录请求的 JSON 解析与列表映射都在这条协程里，放到 Default 避免占用主线程。
-        load = viewModelScope.launch(Dispatchers.Default) {
+        // 解析在后台执行，目录、队列与请求取消统一在主线程提交。
+        load = viewModelScope.launch {
             try {
                 block()
             } catch (failure: TuneFailure) {
@@ -190,7 +192,7 @@ class RadioViewModel(
     }
 
     private suspend fun cachedLoad(candidate: ResolvedRadioScope, fetch: suspend () -> StationPage): StationPage =
-        cache?.refreshStations(candidate, fetch) ?: fetch()
+        withContext(Dispatchers.Default) { cache?.refreshStations(candidate, fetch) ?: fetch() }
 
     private fun publish(
         candidate: ResolvedRadioScope,

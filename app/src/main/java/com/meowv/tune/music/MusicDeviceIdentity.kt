@@ -21,6 +21,10 @@ internal object MusicDeviceIdentity {
         return hex.take(5) + "-" + hex.drop(5)
     }
 
+    fun keyFingerprint(publicKey: ByteArray): String =
+        MessageDigest.getInstance("SHA-256").digest(publicKey).take(8)
+            .joinToString("") { String.format(Locale.ROOT, "%02X", it) }
+
     private fun sha256(value: String): ByteArray =
         MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
 }

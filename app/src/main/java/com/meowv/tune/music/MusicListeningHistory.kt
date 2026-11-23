@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 
 internal data class MusicRecording(
@@ -141,17 +142,20 @@ internal class MusicListeningHistory(
     }
 
     suspend fun rank(tracks: List<MusicTrack>, discoveryIds: Set<String>, previous: MusicTrack? = null): List<MusicTrack> {
-        return MusicRecommendationRanker.rank(tracks, discoveryIds, snapshot(), now(), previous)
+        val history = snapshot()
+        return withContext(Dispatchers.Default) {
+            MusicRecommendationRanker.rank(tracks, discoveryIds, history, now(), previous)
+        }
     }
 
-    suspend fun freshCount(tracks: List<MusicTrack>): Int {
+    suspend fun freshCount(tracks: List<MusicTrack>): Int = withContext(Dispatchers.Default) {
         val cutoff = now() - Day
         val heard = snapshot().filter { !it.skipped && it.atMs >= cutoff }.map { it.recording }
         val fresh = mutableListOf<MusicRecording>()
         tracks.map(MusicRecording::of).forEach { track ->
             if (heard.none(track::matches) && fresh.none(track::matches)) fresh.add(track)
         }
-        return fresh.size
+        fresh.size
     }
 
     private suspend fun snapshot() = lock.withLock { load(); retain(events) }

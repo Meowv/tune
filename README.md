@@ -86,7 +86,7 @@
 
 激活后可按歌名或歌手搜索。本机最多保存最近 10 条搜索记录，可点选复用或一键清空。
 
-App 首次打开时自动登记。进入设置查看「音乐设备」设备码，管理员在音乐 API 的 `/setup` 核对设备码并激活。App 在前台自动领取令牌。同一设备（同用户、同签名）卸载重装或清数据后会沿用同一设备码，已激活设备会自动换钥并重新激活；已撤销设备不会被自动恢复，需管理员重新激活。管理员删除已撤销记录后，设备再次上线会以同一设备码重新登记为待激活，需再次审批。更换 API 地址后会重新登记；从旧版本升级到稳定设备码方案时会重新登记一次。
+App 首次打开时自动登记。管理员在音乐 API 的 `/setup` 核对 App 设置中的设备码和公钥指纹后激活，App 在前台自动领取令牌。同一设备（同用户、同签名）重装或清数据后仍使用原设备码。如果本地密钥已丢失，管理员需撤销并删除旧记录，等待 App 重新登记，再核对并激活。QQ 会员权限需要单独授予。已撤销设备在旧记录仍存在时保持撤销状态。更换 API 地址后会重新登记。
 
 Debug 默认连接 `http://10.0.2.2:5000/api/music/`，Release 使用 HTTPS。可在本机 `music-service.properties` 或环境变量中用 `MUSIC_DEBUG_API_BASE_URL` 和 `MUSIC_RELEASE_API_BASE_URL` 指定地址。
 
@@ -199,9 +199,9 @@ keyPassword=YOUR_KEY_PASSWORD
 
 - `versionName` 需要在 `app/build.gradle.kts` 中手动维护；仅 `--bump` 递增 `versionCode`，脚本失败时会回滚该版本码。
 - 直接执行 Gradle 时，APK 位于 `app/build/outputs/apk/release/`；不会更新 `app/build/meowvtune/` 中已有的发布归档。
-- 构建脚本会在有签名且可读取 APK 元数据时生成发布目录 `app/build/meowvtune/`，包含 APK 与 `stable.json`。
+- 构建脚本会在有签名且可读取 APK 元数据时生成发布目录 `app/build/meowvtune/`，包含 APK 与 `stable.json`。更新日志保留原有缩进和空行。
 - 可在根目录创建 `release-notes.txt`，每行一条更新说明，写入版本清单。
-- `build.sh release` 会替换本地发布目录中的旧产物；如果 `STUDIO_DATA_DIR` 存在，还会替换其 `meowvtune/` 子目录并同步 APK 与清单，默认路径为 `../meowv.com/build/studio.meowv.com/data`。
+- `build.sh release` 会先准备并校验本地发布副本。如果 `STUDIO_DATA_DIR` 存在，也会准备其 `meowvtune/` 副本。所有副本校验通过后才替换目录，替换失败时尝试恢复旧产物。Studio 默认路径为 `../meowv.com/build/studio.meowv.com/data`。
 - 本地生成与同步不会自动部署到远端；需要将发布产物部署到自己维护的 HTTPS 服务，确保清单中的 APK 下载地址可访问。
 - **请勿提交 keystore、密码或签名配置。** 仓库的 `.gitignore` 已忽略 `keystore.properties`。
 - 未配置签名时仍可构建未签名 Release APK，但不能将其作为可供用户升级的正式安装包。

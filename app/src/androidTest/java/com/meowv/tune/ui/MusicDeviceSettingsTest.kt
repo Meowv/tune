@@ -49,6 +49,14 @@ class MusicDeviceSettingsTest {
         compose.runOnIdle { device.value = device.value.copy(phase = MusicDevicePhase.REVOKED) }
         compose.onNodeWithText("已撤销 · 设备码 A1B2C-3D4E5").assertIsDisplayed()
         captureDeviceStatus(isCar, "revoked")
+        compose.runOnIdle {
+            device.value = device.value.copy(
+                phase = MusicDevicePhase.REAPPROVAL_REQUIRED,
+                keyFingerprint = "0123456789ABCDEF"
+            )
+        }
+        compose.onNodeWithText("请联系管理员重新激活 · 设备码 A1B2C-3D4E5\n公钥指纹 0123456789ABCDEF")
+            .assertIsDisplayed()
     }
 
     private fun captureDeviceStatus(isCar: Boolean, name: String) {

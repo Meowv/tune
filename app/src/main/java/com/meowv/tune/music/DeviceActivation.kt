@@ -27,11 +27,12 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
-internal enum class MusicDevicePhase { CHECKING, OFFLINE, PENDING, ACTIVE, REVOKED, UNAVAILABLE }
+internal enum class MusicDevicePhase { CHECKING, OFFLINE, PENDING, ACTIVE, REVOKED, REAPPROVAL_REQUIRED, UNAVAILABLE }
 
 internal data class MusicDeviceState(
     val phase: MusicDevicePhase = MusicDevicePhase.CHECKING,
-    val deviceCode: String? = null
+    val deviceCode: String? = null,
+    val keyFingerprint: String? = null
 )
 
 internal class DeviceActivation(
@@ -93,7 +94,7 @@ internal class DeviceActivation(
                 }
 
                 when (state.value.phase) {
-                    MusicDevicePhase.REVOKED -> attempts = Backoff.lastIndex
+                    MusicDevicePhase.REVOKED, MusicDevicePhase.REAPPROVAL_REQUIRED -> attempts = Backoff.lastIndex
                     MusicDevicePhase.ACTIVE -> {
                         // 有效凭据不轮询；回前台和业务请求 401 时重新查状态。
                         if (credential.get()?.usableToken != null) {
@@ -133,9 +134,7 @@ internal class DeviceActivation(
                 return@withLock createIdentity()
             }
             if (saved[Revoked] == true)
-                mutableState.value = MusicDeviceState(
-                    MusicDevicePhase.REVOKED, MusicDeviceIdentity.deviceCode(id)
-                )
+                setPhase(MusicDevicePhase.REVOKED)
             val key = MusicDeviceKeys.publicKey(id)
             if (key != null) Identity(id, key, saved[Registered] == true)
             else createIdentity()
@@ -155,6 +154,11 @@ internal class DeviceActivation(
             reply = register(identity)
         }
 
+        if (reply.code == 409 && reply.errorCode() == "device_reapproval_required") {
+            credential.set(null)
+            setPhase(MusicDevicePhase.REAPPROVAL_REQUIRED)
+            return reply.retryAfterSeconds
+        }
         if (reply.code !in setOf(200, 202)) {
             setConnectionFailure(MusicDevicePhase.UNAVAILABLE)
             return reply.retryAfterSeconds
@@ -179,6 +183,18 @@ internal class DeviceActivation(
                     return null
                 }
                 val clear = ciphertext?.let { decode(identity.id, it) }
+                if (clear == null && identity.registered) {
+                    // 本地密钥与服务端记录失配时，下一轮重新登记以取得明确的换钥状态。
+                    storage.withLock {
+                        credential.set(null)
+                        preferences.edit {
+                            it.remove(Registered)
+                            it.remove(EncryptedToken)
+                        }
+                    }
+                    setPhase(MusicDevicePhase.CHECKING)
+                    return null
+                }
                 checkNotNull(clear)
                 storage.withLock {
                     preferences.edit {
@@ -212,9 +228,8 @@ internal class DeviceActivation(
 
     private fun showDeviceCode(identity: Identity): String {
         val deviceCode = MusicDeviceIdentity.deviceCode(identity.id)
-        if (state.value.deviceCode != deviceCode) {
-            mutableState.value = MusicDeviceState(deviceCode = deviceCode)
-        }
+        val fingerprint = MusicDeviceIdentity.keyFingerprint(identity.key)
+        mutableState.update { it.copy(deviceCode = deviceCode, keyFingerprint = fingerprint) }
         return deviceCode
     }
 
@@ -259,7 +274,9 @@ internal class DeviceActivation(
         value.filterNot(Char::isISOControl).trim().take(max).ifBlank { "?" }
 
     private fun setConnectionFailure(phase: MusicDevicePhase) {
-        if (credential.get()?.usableToken == null && state.value.phase != MusicDevicePhase.REVOKED) setPhase(phase)
+        if (credential.get()?.usableToken == null && state.value.phase !in
+            setOf(MusicDevicePhase.REVOKED, MusicDevicePhase.REAPPROVAL_REQUIRED)
+        ) setPhase(phase)
     }
 
     private fun setPhase(phase: MusicDevicePhase) {

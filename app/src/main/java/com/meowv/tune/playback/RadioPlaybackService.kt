@@ -25,6 +25,7 @@ import com.meowv.tune.R
 import com.meowv.tune.TuneApplication
 import com.meowv.tune.domain.PlaybackSource
 import com.meowv.tune.domain.PlaybackOrder
+import com.meowv.tune.settings.retrySettingsRead
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -77,7 +78,7 @@ class RadioPlaybackService : MediaSessionService() {
         val music = MusicPlaybackEngine(this, player, { app.musicRepository }, app.networkState,
             app.musicResume, app.musicFeed, app.musicListening) { state -> coordinator?.publishMusic(state) }
         scope.launch {
-            app.userSettings.settings.map { it.playbackOrder }.distinctUntilChanged()
+            app.userSettings.settings.retrySettingsRead().map { it.playbackOrder }.distinctUntilChanged()
                 .collect { music.setShuffle(it == PlaybackOrder.SHUFFLE) }
         }
         val playbackCoordinator = PlaybackCoordinator(engine, music, app.playerController::publish) { command ->

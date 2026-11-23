@@ -28,7 +28,7 @@ internal class MusicQueueManager(
     private val pending = ArrayDeque<MusicTrack>()
     private val history = mutableListOf<MusicTrack>()
     private val considered = LinkedHashSet<String>()
-    private val recordings = mutableListOf<MusicRecording>()
+    private val recordings = ArrayDeque<MusicRecording>()
     private var feedVersion = feedStore?.snapshot?.value?.version
     private var rolling = false
     private var retriedCursor = false
@@ -203,6 +203,8 @@ internal class MusicQueueManager(
         val known = considered + played + skipped + pending.map { it.id } + history.map { it.id }
         fun fresh(track: MusicTrack) = track.canStartPlayback && track.id !in known && !seenRecording(track)
 
+        radioBuffer.removeAll { !fresh(it) }
+        searchBuffer.removeAll { !fresh(it) }
         val radio = mutableListOf<MusicTrack>()
         val search = mutableListOf<MusicTrack>()
         var radioFetched = false
@@ -347,8 +349,8 @@ internal class MusicQueueManager(
         // 当前歌曲和已播放历史继续可用，旧批次的待播曲目和前进记录从这里换掉。
         while (history.lastIndex > index) history.removeAt(history.lastIndex)
         resetCandidates(MusicQueueSeed(snapshot.tracks, snapshot.nextCursor, snapshot.rolling, snapshot.version))
-        val currentId = history.getOrNull(index)?.id
-        pending.addAll(snapshot.tracks.filter { it.canStartPlayback && it.id != currentId })
+        val used = played + skipped + history.map { it.id }
+        pending.addAll(snapshot.tracks.filter { it.canStartPlayback && it.id !in used })
         history.forEach(::remember)
         snapshot.tracks.forEach(::remember)
         return true
@@ -377,7 +379,12 @@ internal class MusicQueueManager(
     }
 
     private fun remember(track: MusicTrack) {
-        if (considered.add(track.id) && listening != null) recordings.add(MusicRecording.of(track))
+        if (!considered.add(track.id)) return
+        if (considered.size > MAX_CONSIDERED) considered.remove(considered.first())
+        if (listening != null) {
+            recordings.addLast(MusicRecording.of(track))
+            if (recordings.size > MAX_CONSIDERED) recordings.removeFirst()
+        }
     }
 
     private fun remember(window: LinkedHashSet<String>, id: String) {
@@ -408,6 +415,7 @@ internal class MusicQueueManager(
     }.filter { it.isNotEmpty() }.toSet()
 
     private companion object {
+        const val MAX_CONSIDERED = 1024
         const val MAX_EMPTY_CYCLES = 2
         const val SEARCH_PAGES_PER_ROUND = 2
         const val SEARCH_PAGE_SIZE = 20

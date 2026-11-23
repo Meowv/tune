@@ -55,13 +55,17 @@ internal object MusicJson {
     fun decodeFeedSnapshot(body: String): MusicFeedSnapshot? = try {
         parse {
             val root = Json.parseToJsonElement(body).jsonObject
+            val recommendations = root.array("recommendations").map { track(it.jsonObject) }
+            val fallback = root.array("fallback").takeLast(MusicFeedStore.MaxFallbackTracks).map { track(it.jsonObject) }
+            val retainedIds = (recommendations + fallback).mapTo(HashSet()) { it.id }
             MusicFeedSnapshot(
                 version = root.optionalLong("version") ?: error("version"),
                 complete = root.boolean("complete"),
-                recommendations = root.array("recommendations").map { track(it.jsonObject) },
-                fallback = root.array("fallback").map { track(it.jsonObject) },
+                recommendations = recommendations,
+                fallback = fallback,
                 rolling = (root["rolling"] as? JsonPrimitive)?.booleanOrNull == true,
-                discoveryTrackIds = (root["discoveryTrackIds"] as? JsonArray)?.map { it.text() }?.toSet().orEmpty()
+                discoveryTrackIds = (root["discoveryTrackIds"] as? JsonArray)?.map { it.text() }.orEmpty()
+                    .filterTo(HashSet()) { it in retainedIds }
             )
         }
     } catch (_: MusicException) {

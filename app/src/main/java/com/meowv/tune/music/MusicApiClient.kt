@@ -13,7 +13,9 @@ import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
@@ -33,12 +35,13 @@ internal class MusicApiClient(
 
     override suspend fun search(query: String, limit: Int, cursor: String?): MusicPage {
         if (query.trim().length !in 1..100 || query.any(Char::isISOControl)) throw MusicException(MusicFailure.INVALID_REQUEST)
-        return MusicJson.page(request("search", limit, cursor, query))
+        val body = request("search", limit, cursor, query, timeoutSeconds = 10)
+        return withContext(Dispatchers.Default) { MusicJson.page(body) }
     }
     override suspend fun recommendations(limit: Int, cursor: String?): MusicPage {
         val url = baseUrl.newBuilder().addPathSegment("recommendations").build()
-        return MusicJson.page(execute(Request.Builder().url(url).get(), maxBytes = 1024L * 1024),
-            recommendation = true).copy(nextCursor = null)
+        val body = execute(Request.Builder().url(url).get(), maxBytes = 1024L * 1024)
+        return withContext(Dispatchers.Default) { MusicJson.page(body, recommendation = true).copy(nextCursor = null) }
     }
     override suspend fun candidates(limit: Int, cursor: String?): MusicPage {
         val url = baseUrl.newBuilder().addPathSegment("recommendations").addPathSegment("candidates")
@@ -51,11 +54,12 @@ internal class MusicApiClient(
             if (failure.failure == MusicFailure.RATE_LIMITED) requestGate.block(failure.retryAfterSeconds)
             throw failure
         }
-        return MusicJson.page(body, recommendation = true)
+        return withContext(Dispatchers.Default) { MusicJson.page(body, recommendation = true) }
     }
 
     override suspend fun radioRecommendations(): List<MusicTrack> = try {
-        MusicJson.page(request("recommendations/radio", 20, null), recommendation = true).items
+        val body = request("recommendations/radio", 20, null)
+        withContext(Dispatchers.Default) { MusicJson.page(body, recommendation = true).items }
     } catch (failure: MusicException) {
         if (failure.failure == MusicFailure.TRACK_NOT_FOUND) emptyList() else throw failure
     }
@@ -88,15 +92,22 @@ internal class MusicApiClient(
             }
     }
 
-    private suspend fun request(path: String, limit: Int, cursor: String?, query: String? = null): String {
+    private suspend fun request(
+        path: String, limit: Int, cursor: String?, query: String? = null, timeoutSeconds: Long = 8
+    ): String {
         if (limit !in 1..50 || cursor != null && cursor.length !in 1..128) throw MusicException(MusicFailure.INVALID_REQUEST)
         val url = baseUrl.newBuilder().addPathSegments(path).addQueryParameter("limit", limit.toString()).apply {
             query?.let { addQueryParameter("q", it) }; cursor?.let { addQueryParameter("cursor", it) }
         }.build()
-        return execute(Request.Builder().url(url).get())
+        return execute(Request.Builder().url(url).get(), timeoutSeconds = timeoutSeconds)
     }
 
-    private suspend fun execute(builder: Request.Builder, blockOnFailure: Boolean = true, maxBytes: Long = MAX_BYTES): String {
+    private suspend fun execute(
+        builder: Request.Builder,
+        blockOnFailure: Boolean = true,
+        maxBytes: Long = MAX_BYTES,
+        timeoutSeconds: Long = 8
+    ): String {
         requestGate.check()
         val token = accessToken()?.takeIf { it.length in 32..1024 && it.none(Char::isISOControl) }
             ?: throw MusicException(MusicFailure.NOT_CONFIGURED)
@@ -104,6 +115,7 @@ internal class MusicApiClient(
             .header("Cache-Control", "no-store").build()
         return suspendCancellableCoroutine { continuation ->
             val call = http.newCall(request)
+            call.timeout().timeout(timeoutSeconds, TimeUnit.SECONDS)
             continuation.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
@@ -169,7 +181,8 @@ internal fun musicHttpClient(baseUrl: HttpUrl, allowLocalHttp: Boolean, client: 
             chain.proceed(chain.request())
         }.build() else MediaUrlPolicy.client(httpsOnly = true)
     return transport.newBuilder().followRedirects(false).followSslRedirects(false)
-        .retryOnConnectionFailure(false).callTimeout(8, TimeUnit.SECONDS).cache(null).build()
+        .readTimeout(8, TimeUnit.SECONDS).retryOnConnectionFailure(false)
+        .callTimeout(8, TimeUnit.SECONDS).cache(null).build()
 }
 
 internal fun isDebugMusicHost(host: String): Boolean = host in setOf("localhost", "127.0.0.1", "10.0.2.2", "10.0.3.2") ||

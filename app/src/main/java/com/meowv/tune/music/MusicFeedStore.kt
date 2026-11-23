@@ -8,6 +8,7 @@ import com.meowv.tune.domain.music.MusicPage
 import com.meowv.tune.domain.music.MusicTrack
 import com.meowv.tune.domain.music.canStartPlayback
 import java.io.IOException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,16 +42,18 @@ internal class MusicFeedStore(private val preferences: DataStore<Preferences>? =
         val tracks = page.items.filter { it.canStartPlayback }.distinctBy { it.id }
         if (page.partial && (previous.complete || previous.tracks.isNotEmpty() || tracks.isEmpty())) return@update previous
         val rolling = page.strategy == "rolling_candidates"
-        val changed = !page.partial &&
+        val nextCursor = page.nextCursor.takeIf { rolling }
+        val membershipChanged = !page.partial &&
             previous.recommendations.mapTo(HashSet()) { it.id } != tracks.mapTo(HashSet()) { it.id }
+        val changed = previous.recommendations != tracks || previous.rolling != rolling || previous.nextCursor != nextCursor
         return@update previous.copy(
             version = if (changed) previous.version + 1 else previous.version,
             complete = !page.partial,
             recommendations = tracks,
-            fallback = if (changed) emptyList() else previous.fallback,
+            fallback = if (membershipChanged) emptyList() else previous.fallback,
             rolling = rolling,
-            nextCursor = if (rolling) page.nextCursor else null,
-            discoveryTrackIds = page.discoveryTrackIds + if (changed) emptySet() else
+            nextCursor = nextCursor,
+            discoveryTrackIds = page.discoveryTrackIds + if (membershipChanged) emptySet() else
                 previous.discoveryTrackIds.intersect(previous.fallback.map { it.id }.toSet())
         )
     }
@@ -59,9 +62,13 @@ internal class MusicFeedStore(private val preferences: DataStore<Preferences>? =
         if (version != previous.version) return@update previous
         val existing = previous.tracks.mapTo(HashSet()) { it.id }
         val added = tracks.filter { it.canStartPlayback && existing.add(it.id) }
-        if (added.isEmpty()) previous else previous.copy(
-            fallback = previous.fallback + added,
-            discoveryTrackIds = previous.discoveryTrackIds + discoveryIds.intersect(added.map { it.id }.toSet())
+        if (added.isEmpty()) return@update previous
+        val fallback = (previous.fallback + added).takeLast(MaxFallbackTracks)
+        val retainedIds = (previous.recommendations + fallback).mapTo(HashSet()) { it.id }
+        previous.copy(
+            fallback = fallback,
+            discoveryTrackIds = previous.discoveryTrackIds.intersect(retainedIds) +
+                discoveryIds.intersect(fallback.mapTo(HashSet()) { it.id })
         )
     }
 
@@ -73,7 +80,8 @@ internal class MusicFeedStore(private val preferences: DataStore<Preferences>? =
     private suspend fun restoreLocked(): MusicFeedSnapshot {
         if (!restored) {
             val saved = try {
-                preferences?.data?.first()?.get(Key)?.let(MusicJson::decodeFeedSnapshot)
+                val encoded = preferences?.data?.first()?.get(Key)
+                withContext(Dispatchers.Default) { encoded?.let(MusicJson::decodeFeedSnapshot) }
             } catch (_: IOException) {
                 return mutableSnapshot.value
             }
@@ -94,7 +102,8 @@ internal class MusicFeedStore(private val preferences: DataStore<Preferences>? =
             // 播放服务或页面离开时，已开始写入的版本和曲目仍作为一个整体提交。
             withContext(NonCancellable) {
                 try {
-                    preferences.edit { it[Key] = MusicJson.encodeFeedSnapshot(updated) }
+                    val encoded = withContext(Dispatchers.Default) { MusicJson.encodeFeedSnapshot(updated) }
+                preferences.edit { it[Key] = encoded }
                     dirty = false
                 } catch (_: IOException) {
                     // 本地写入故障不影响补歌，之后的更新会再次尝试保存。
@@ -105,5 +114,8 @@ internal class MusicFeedStore(private val preferences: DataStore<Preferences>? =
         updated
     }
 
-    private companion object { val Key = stringPreferencesKey("music_feed_snapshot") }
+    companion object {
+        internal const val MaxFallbackTracks = 200
+        private val Key = stringPreferencesKey("music_feed_snapshot")
+    }
 }

@@ -25,8 +25,11 @@ import com.meowv.tune.domain.Station
 import com.meowv.tune.domain.StationPage
 import com.meowv.tune.domain.TuneError
 import com.meowv.tune.domain.TuneFailure
+import com.meowv.tune.domain.TuneSettings
 import com.meowv.tune.radio.CountryResolver
 import com.meowv.tune.radio.appendCountryPage
+import com.meowv.tune.settings.retrySettingsRead
+import java.io.IOException
 import java.net.SocketTimeoutException
 import java.util.Locale
 import java.util.UUID
@@ -42,9 +45,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -82,6 +83,7 @@ internal class RadioPlayback(
     private var awaitingFirstPlayback = false
     private val diagnostics = PlaybackDiagnostics.forDebug(PlaybackSource.RADIO)
     private var state = PlayerUiState()
+    private var lastSettings = TuneSettings()
     private val stallMonitor = PlaybackStallMonitor(
         scope = scope,
         nowMillis = android.os.SystemClock::elapsedRealtime,
@@ -103,7 +105,10 @@ internal class RadioPlayback(
         }
         // 顺序设置只决定下一台策略，上一台始终沿成功播放历史返回。
         scope.launch {
-            settings.settings.map { it.playbackOrder }.distinctUntilChanged().collect(queue::setPlaybackOrder)
+            settings.settings.retrySettingsRead().collect { value ->
+                lastSettings = value
+                queue.setPlaybackOrder(value.playbackOrder)
+            }
         }
     }
 
@@ -168,7 +173,7 @@ internal class RadioPlayback(
      */
     fun resumeLast(uuid: UUID) = submit {
         if (selection != null || state.phase != PlaybackPhase.IDLE) return@submit
-        val user = settings.settings.first()
+        val user = readSettings()
         if (!user.autoPlay) return@submit
         val activeScope = queue.activeScope.value ?: return@submit
         val station = try {
@@ -227,7 +232,13 @@ internal class RadioPlayback(
                 if (!committed) {
                     committed = queue.recordSuccessfulPlayback(currentSelection)
                     // 只有服务确认成功的台站才写回自播恢复点。
-                    if (committed) scope.launch { settings.recordSuccessfulStation(currentSelection.station) }
+                    if (committed) scope.launch {
+                        try {
+                            settings.recordSuccessfulStation(currentSelection.station)
+                        } catch (_: IOException) {
+                            android.util.Log.w("RadioPlayback", "Could not save the last station")
+                        }
+                    }
                 }
                 val clearFocusError = if (state.error == TuneError.AUDIO_FOCUS_LOST) null else state.error
                 update(state.copy(phase = PlaybackPhase.PLAYING, error = clearFocusError))
@@ -314,7 +325,13 @@ internal class RadioPlayback(
 
     // 命令到达时再读一次设置，避免设置流首次发射晚于用户第一次切台。
     private suspend fun syncPlaybackOrder() {
-        queue.setPlaybackOrder(settings.settings.first().playbackOrder)
+        queue.setPlaybackOrder(readSettings().playbackOrder)
+    }
+
+    private suspend fun readSettings(): TuneSettings = try {
+        settings.settings.first().also { lastSettings = it }
+    } catch (_: IOException) {
+        lastSettings
     }
 
     private suspend fun togglePlayback() {
@@ -375,7 +392,7 @@ internal class RadioPlayback(
     private suspend fun restoreFromSession(trigger: PlaybackTrigger) {
         if (!networkAllows()) return
         startAttempt(trigger)
-        val user = settings.settings.first()
+        val user = readSettings()
         if (queue.activeScope.value == null) {
             for (candidate in CountryResolver(context).candidates(user.scope, repository)) {
                 val page = candidate.country?.let {

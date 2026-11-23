@@ -53,5 +53,5 @@ MeowvTune 是使用 Kotlin 与 Jetpack Compose 开发的单模块 Android 应用
 - Release 使用 R8、资源裁剪与压缩 DEX；Media3 复用依赖自带的 consumer 规则。图片使用无损 WebP，调整编码时验证尺寸和 RGBA 像素一致。
 - 发布产物位于 `app/build/meowvtune/`。`build.sh release` 会替换该目录，并在 `STUDIO_DATA_DIR` 存在时同步替换其 `meowvtune/` 子目录；不自动部署远端。更新清单地址和渠道由 `UPDATE_MANIFEST_URL`、`UPDATE_CHANNEL` 配置。
 - `local.properties`、`keystore.properties`、`music-service.properties`、`*.jks` 和 `*.keystore` 仅属于本机环境，必须保持未跟踪。
-- 音乐构建配置只注入 API 地址。设备令牌由 App 登记并经管理员激活后领取；已激活设备重装/清数据会沿用设备码自动换钥重激活，已撤销设备不会自动恢复。音乐设备设置项只展示状态与设备码，QQ 会员权限由管理页单独授予。
+- 音乐构建配置只注入 API 地址。设备令牌由 App 登记并经管理员激活后领取；已激活设备须验证当前令牌才能换钥，丢失密钥后沿用设备码重新登记并由管理员审批，已撤销设备不会自动恢复。音乐设备设置项展示状态、设备码及审批用公钥指纹，QQ 会员权限由管理页单独授予。
 - 不得在源码、测试、命令、日志或回复中输出签名口令及其他凭据。

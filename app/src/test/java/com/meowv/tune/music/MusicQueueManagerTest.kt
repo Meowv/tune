@@ -77,6 +77,26 @@ class MusicQueueManagerTest {
         assertEquals(setOf(tracks[3].id), feed.snapshot.value.discoveryTrackIds)
     }
 
+    @Test fun refreshedCursorForTheSameTracksReachesTheActiveQueue() = runBlocking {
+        val feed = MusicFeedStore()
+        val page = MusicPage(tracks.take(2), "old", strategy = "rolling_candidates")
+        val initial = feed.updateRecommendations(page)
+        val source = object : MusicRepository by FakeMusicRepository(emptyList()) {
+            override suspend fun candidates(limit: Int, cursor: String?): MusicPage {
+                assertEquals("new", cursor)
+                return MusicPage(listOf(tracks[2]), strategy = "rolling_candidates")
+            }
+        }
+        val queue = MusicQueueManager({ source }, feedStore = feed)
+        queue.reset(MusicQueueSeed(initial.tracks, initial.nextCursor, rolling = true, feedVersion = initial.version))
+        repeat(2) { assertTrue(queue.recordSuccessfulPlayback(checkNotNull(queue.next()))) }
+
+        feed.updateRecommendations(page.copy(nextCursor = "new"))
+
+        assertEquals(tracks[2], queue.next()?.track)
+        assertEquals(tracks[0], queue.previous()?.track)
+    }
+
     @Test fun retainsOnlyTracksAppendedToThePlaybackQueue() = runBlocking {
         val original = tracks.first()
         val candidates = (1..13).map { MusicTrack("fallback-$it", "Fallback $it", listOf("qix")) }

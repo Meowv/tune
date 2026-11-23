@@ -188,12 +188,16 @@ private fun MusicDeviceGroup(device: MusicDeviceState, isCar: Boolean) {
         MusicDevicePhase.PENDING -> R.string.music_device_pending
         MusicDevicePhase.ACTIVE -> R.string.music_device_active
         MusicDevicePhase.REVOKED -> R.string.music_device_revoked
+        MusicDevicePhase.REAPPROVAL_REQUIRED -> R.string.music_device_reapproval
         MusicDevicePhase.UNAVAILABLE -> R.string.music_device_unavailable
     })
+    val summary = device.deviceCode?.let { stringResource(R.string.music_device_summary, status, it) } ?: status
+    val fingerprint = device.keyFingerprint?.takeIf { device.phase != MusicDevicePhase.ACTIVE }
+        ?.let { stringResource(R.string.music_device_key_fingerprint, it) }
     SettingsGroup {
         SettingRow(
             R.drawable.ic_menu_music, R.string.setting_music_device, isCar,
-            subtitle = device.deviceCode?.let { stringResource(R.string.music_device_summary, status, it) } ?: status
+            subtitle = listOfNotNull(summary, fingerprint).joinToString("\n")
         )
     }
 }

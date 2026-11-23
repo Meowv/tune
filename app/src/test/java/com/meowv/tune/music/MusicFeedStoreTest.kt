@@ -40,11 +40,11 @@ class MusicFeedStoreTest {
 
             val renamed = a.copy(title = "A updated")
             val reordered = store.updateRecommendations(MusicPage(listOf(b, renamed, b), strategy = "rolling_candidates"))
-            assertEquals(oldVersion, reordered.version)
+            assertEquals(oldVersion + 1, reordered.version)
             assertEquals(listOf(b, renamed, fallback), reordered.tracks)
 
             val changed = store.updateRecommendations(MusicPage(listOf(renamed)))
-            assertEquals(oldVersion + 1, changed.version)
+            assertEquals(reordered.version + 1, changed.version)
             assertEquals(listOf(renamed), changed.tracks)
             assertEquals(changed, store.appendFallback(oldVersion, listOf(fallback)))
         }
@@ -52,6 +52,16 @@ class MusicFeedStoreTest {
             assertTrue(store.restore().fallback.isEmpty())
             assertEquals(listOf("a"), store.snapshot.value.tracks.map { it.id })
         }
+    }
+
+    @Test fun fallbackRetainsTheNewestTracksAndTheirDiscoveryFlags() = runBlocking {
+        val store = MusicFeedStore()
+        val version = store.updateRecommendations(MusicPage(listOf(a))).version
+        val candidates = (1..MusicFeedStore.MaxFallbackTracks + 10).map { fallback.copy(id = "candidate-$it") }
+        val snapshot = store.appendFallback(version, candidates, candidates.mapTo(HashSet()) { it.id })
+        val retained = candidates.takeLast(MusicFeedStore.MaxFallbackTracks)
+        assertEquals(retained, snapshot.fallback)
+        assertEquals(retained.mapTo(HashSet()) { it.id }, snapshot.discoveryTrackIds)
     }
 
     private suspend fun <T> open(file: File, block: suspend (MusicFeedStore) -> T): T {

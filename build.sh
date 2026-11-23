@@ -180,12 +180,18 @@ find_aapt() {
 publish_release() {
     local apk="$1"
     local aapt badging package version_name version_code min_sdk channel
-    local sha256 size apk_name apk_url notes notes_count
+    local apk_name apk_url
+
+    if [[ "$apk" == *unsigned* ]]; then
+        printf '\n未生成发布目录：APK 未签名。产物保留在 outputs 目录。\n' >&2
+        if [[ "$BUMP" -eq 1 ]]; then return 1; fi
+        return 0
+    fi
 
     aapt="$(find_aapt || true)"
     if [[ -z "$aapt" ]]; then
-        echo "未找到 aapt，跳过 stable.json（APK 仍保留在 outputs 目录）。" >&2
-        return 0
+        echo "未找到 aapt，APK 保留在 outputs 目录。" >&2
+        return 1
     fi
 
     badging="$("$aapt" dump badging "$apk")"
@@ -194,41 +200,52 @@ publish_release() {
     version_code="$(sed -n "s/^package:.*versionCode='\([^']*\)'.*/\1/p" <<<"$badging" | head -1)"
     min_sdk="$(sed -n "s/^sdkVersion:'\([^']*\)'.*/\1/p" <<<"$badging" | head -1)"
     if [[ -z "$package" || -z "$version_name" || -z "$version_code" || -z "$min_sdk" ]]; then
-        echo "无法从 APK 读取版本信息，跳过 stable.json。" >&2
-        return 0
+        echo "无法从 APK 读取版本信息。" >&2
+        return 1
     fi
 
     channel="$(sed -n 's/.*"UPDATE_CHANNEL", "\\"\([^"\\]*\)\\"".*/\1/p' app/build.gradle.kts | head -1)"
     channel="${channel:-stable}"
-    sha256="$(shasum -a 256 "$apk" | awk '{print $1}')"
-    size="$(wc -c < "$apk" | tr -d ' ')"
+    if [[ ! "$version_name" =~ ^[0-9A-Za-z][0-9A-Za-z._+-]*$ ]]; then
+        echo "APK 版本名称不能用作发布文件名。" >&2
+        return 1
+    fi
     apk_name="MeowvTune-$version_name.apk"
-    # APK 与清单放在同一目录，地址里不带版本号子路径。
     apk_url="${APK_BASE_URL%/}/$apk_name"
-    notes=""
-    if [[ -f "$RELEASE_NOTES_FILE" ]]; then
-        notes="$(cat "$RELEASE_NOTES_FILE")"
-    fi
-    notes_count="$(printf '%s\n' "$notes" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
-
-    # 每次只保留本次发布的两个文件，避免旧版本混在上传目录里。
-    rm -rf "$PUBLISH_DIR"
-    mkdir -p "$PUBLISH_DIR"
-    cp "$apk" "$PUBLISH_DIR/$apk_name"
-
-    # 未签名的包不能发给客户端，清单也就不该生成。
-    if [[ "$apk" == *unsigned* ]]; then
-        printf '\n已拷贝 %s，但未生成 stable.json：APK 未签名。\n' "$PUBLISH_DIR/$apk_name" >&2
-        return 0
-    fi
 
     M_PACKAGE="$package" M_CHANNEL="$channel" M_VERSION_NAME="$version_name" \
         M_VERSION_CODE="$version_code" M_MIN_SDK="$min_sdk" M_TITLE="MeowvTune $version_name" \
-        M_NOTES="$notes" M_APK_URL="$apk_url" M_SIZE_BYTES="$size" M_SHA256="$sha256" \
-        M_RELEASE_DATE="$(date +%F)" \
-        python3 - > "$PUBLISH_DIR/stable.json" <<'PY'
-import json, os, re, sys
+        M_APK_URL="$apk_url" M_RELEASE_DATE="$(date +%F)" \
+        python3 - "$apk" "$apk_name" "$PUBLISH_DIR" "$STUDIO_DATA_DIR" "$RELEASE_NOTES_FILE" <<'PY'
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import sys
+import tempfile
 
+apk = Path(sys.argv[1])
+apk_name = sys.argv[2]
+publish, studio, notes_file = map(Path, sys.argv[3:])
+targets = [publish]
+if studio.is_dir():
+    targets.append(studio / "meowvtune")
+
+try:
+    notes_text = notes_file.read_text(encoding="utf-8")
+except FileNotFoundError:
+    notes_text = ""
+notes = notes_text.split("\n") if notes_text else []
+
+def apk_details(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(65536), b""):
+            digest.update(chunk)
+    return path.stat().st_size, digest.hexdigest()
+
+size, sha256 = apk_details(apk)
 manifest = {
     "schemaVersion": 1,
     "packageName": os.environ["M_PACKAGE"],
@@ -238,42 +255,65 @@ manifest = {
     "minSdkVersion": int(os.environ["M_MIN_SDK"]),
     "releaseDate": os.environ["M_RELEASE_DATE"],
     "title": os.environ["M_TITLE"],
-    "releaseNotes": [line.strip() for line in os.environ["M_NOTES"].splitlines() if line.strip()],
-    "apk": {
-        "url": os.environ["M_APK_URL"],
-        "sizeBytes": int(os.environ["M_SIZE_BYTES"]),
-        "sha256": os.environ["M_SHA256"],
-    },
+    "releaseNotes": notes,
+    "apk": {"url": os.environ["M_APK_URL"], "sizeBytes": size, "sha256": sha256},
 }
 if not manifest["apk"]["url"].startswith("https://"):
     sys.exit("apk.url 必须是 HTTPS")
-if not re.fullmatch(r"[0-9a-fA-F]{64}", manifest["apk"]["sha256"]):
-    sys.exit("sha256 必须是 64 位十六进制")
-if manifest["versionCode"] <= 0:
-    sys.exit("versionCode 必须大于 0")
-print(json.dumps(manifest, ensure_ascii=False, indent=2))
+if manifest["versionCode"] <= 0 or manifest["minSdkVersion"] <= 0 or size <= 0:
+    sys.exit("APK 大小、版本码和最低 Android API 必须大于 0")
+payload = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
+
+prepared = []
+installed = []
+committed = False
+try:
+    # 两处都准备好并校验后，再替换各自目录。
+    for target in targets:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        work = Path(tempfile.mkdtemp(prefix=".meowvtune-", dir=target.parent))
+        prepared.append((target, work))
+        staged = work / "new"
+        staged.mkdir()
+        copied = staged / apk_name
+        shutil.copyfile(apk, copied)
+        if apk_details(copied) != (size, sha256):
+            raise OSError("发布 APK 的大小或摘要不一致")
+        (staged / "stable.json").write_text(payload, encoding="utf-8")
+
+    for target, work in prepared:
+        if target.exists() or target.is_symlink():
+            target.rename(work / "old")
+        (work / "new").rename(target)
+        installed.append((target, work))
+    committed = True
+finally:
+    if not committed:
+        for target, work in reversed(installed):
+            # 保留刚换入的目录，给旧目录腾出原路径。
+            try:
+                target.rename(work / "new")
+            except OSError as error:
+                print(f"无法移走未完成的发布目录：{target}：{error}", file=sys.stderr)
+        for target, work in reversed(prepared):
+            backup = work / "old"
+            if backup.exists() or backup.is_symlink():
+                try:
+                    backup.rename(target)
+                except OSError as error:
+                    print(f"无法还原旧发布目录，备份保留在 {backup}：{error}", file=sys.stderr)
+    for _, work in prepared:
+        backup = work / "old"
+        if committed or not (backup.exists() or backup.is_symlink()):
+            shutil.rmtree(work, ignore_errors=True)
+
+print(f"\n发布产物（{publish}）")
+print(f"  {apk_name}\n  stable.json（{manifest['versionName']} · versionCode {manifest['versionCode']}）")
+if len(targets) > 1:
+    print(f"  已同步到 {targets[1]}")
+else:
+    print(f"\n未同步到 studio 产物目录（不存在）：{studio}")
 PY
-
-    printf '\n发布产物（%s）\n' "$PUBLISH_DIR"
-    printf '  %s\n  stable.json（%s · versionCode %s · %s 条更新日志）\n' \
-        "$apk_name" "$version_name" "$version_code" "$notes_count"
-
-    sync_to_studio "$apk_name"
-}
-
-# 把本次发布的 APK 与清单同步到 meowv.com 的 studio 产物目录；目录不存在时只提示。
-sync_to_studio() {
-    local apk_name="$1"
-    local target="$STUDIO_DATA_DIR/meowvtune"
-
-    if [[ ! -d "$STUDIO_DATA_DIR" ]]; then
-        printf '\n未同步到 studio 产物目录（不存在）：%s\n' "$STUDIO_DATA_DIR" >&2
-        return 0
-    fi
-    rm -rf "$target"
-    mkdir -p "$target"
-    cp "$PUBLISH_DIR/$apk_name" "$PUBLISH_DIR/stable.json" "$target/"
-    printf '  已同步到 %s\n' "$target"
 }
 
 if [[ "$MODE" == "release" ]]; then

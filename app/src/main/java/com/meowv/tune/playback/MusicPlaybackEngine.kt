@@ -51,6 +51,17 @@ internal class MusicPlaybackEngine(
     private var advancing = false
     private val nextPreparation = MusicNextPreparation(repository, scope, ::backgroundFailure)
     private var bufferTimeout: Job? = null
+    private val stallMonitor = PlaybackStallMonitor(
+        scope,
+        android.os.SystemClock::elapsedRealtime,
+        progress = {
+            PlaybackProgress(player.currentPosition, player.playbackState == Player.STATE_BUFFERING, player.playWhenReady)
+        },
+        onStalled = {
+            diagnostics?.stalled()
+            fail(MusicFailure.SOURCE_TIMEOUT)
+        }
+    )
     private var loading = false
     private var desiredPlay = false
     private var current: MusicSelection? = null
@@ -373,6 +384,8 @@ internal class MusicPlaybackEngine(
         if (active && itemMatches()) listening?.observe(player.isPlaying && player.playerError == null)
         if (!active || loading || state.phase == PlaybackPhase.ERROR || !itemMatches()) return
         val error = player.playerError
+        stallMonitor.sync(confirmed && desiredPlay && player.playWhenReady && error == null &&
+            player.playbackState == Player.STATE_BUFFERING)
         when {
             error != null -> {
                 val http = generateSequence<Throwable>(error) { it.cause }.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()
@@ -565,7 +578,7 @@ internal class MusicPlaybackEngine(
     private fun invalidate(keepRefill: Boolean = false): Long {
         generation++
         advancing = false
-        pending?.cancel(); bufferTimeout?.cancel(); queue.invalidate()
+        pending?.cancel(); bufferTimeout?.cancel(); stallMonitor.reset(); queue.invalidate()
         if (!keepRefill) {
             nextPreparation.cancel()
             refill?.cancel()
