@@ -361,7 +361,7 @@ private fun SettingsGroup(content: @Composable ColumnScope.() -> Unit) {
     Surface(
         color = TuneColors.Surface,
         shape = TuneShapes.SettingsGroup,
-        border = BorderStroke(1.dp, TuneColors.BorderStrong)
+        border = BorderStroke(1.dp, TuneColors.Border)
     ) {
         Column(Modifier.fillMaxWidth().background(TuneBrushes.Card), content = content)
     }

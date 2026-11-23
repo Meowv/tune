@@ -82,7 +82,7 @@ internal fun SleepTimerPanel(
                 modifier = Modifier.widthIn(max = 500.dp).fillMaxWidth(.94f),
                 shape = TuneShapes.Dialog,
                 color = TuneColors.Surface,
-                border = BorderStroke(1.dp, TuneColors.BorderStrong)
+                border = BorderStroke(1.dp, TuneColors.Border)
             ) { content() }
         }
     } else {
@@ -93,7 +93,7 @@ internal fun SleepTimerPanel(
             containerColor = TuneColors.Raised,
             contentColor = TuneColors.Text,
             scrimColor = TuneColors.Scrim,
-            dragHandle = { BottomSheetDefaults.DragHandle(color = TuneColors.BorderStrong) }
+            dragHandle = { BottomSheetDefaults.DragHandle(color = TuneColors.BorderSoft) }
         ) { content() }
     }
 }
@@ -356,7 +356,7 @@ internal fun CustomSleepTimerDialog(
                     shape = TuneShapes.Dialog,
                     color = TuneColors.Surface,
                     contentColor = TuneColors.Text,
-                    border = BorderStroke(1.dp, TuneColors.BorderStrong)
+                    border = BorderStroke(1.dp, TuneColors.Border)
                 ) {
                     Column(
                         Modifier.background(TuneBrushes.Dialog).verticalScroll(rememberScrollState())

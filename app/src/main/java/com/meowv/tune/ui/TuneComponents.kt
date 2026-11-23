@@ -533,7 +533,7 @@ internal fun mediaCardSize(viewport: Dp, availableHeight: Dp, isCar: Boolean): D
 internal fun Modifier.mediaCardSurface(focused: Boolean): Modifier {
     val cardBrush = TuneBrushes.Card
     val primary = TuneColors.Primary
-    val borderColor = TuneColors.BorderStrong
+    val borderColor = TuneColors.Border
     val shadowColor = TuneColors.Shadow
     return shadow(10.dp, TuneShapes.Card, ambientColor = shadowColor, spotColor = shadowColor)
         .clip(TuneShapes.Card)
@@ -562,7 +562,7 @@ internal fun MediaPagerPosition(page: Int, count: Int, visibleOnPage: Boolean) {
             val active = first + index == page
             Box(
                 Modifier.size(if (active) 18.dp else 5.dp, 5.dp)
-                    .background(if (active) TuneColors.Primary else TuneColors.BorderStrong, CircleShape)
+                    .background(if (active) TuneColors.Primary else TuneColors.Border, CircleShape)
             )
         }
     }

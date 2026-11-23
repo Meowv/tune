@@ -1073,7 +1073,7 @@ private fun NowPlayingTools(
     Row(
         modifier.height(height).clip(shape)
             .background(TuneColors.Player.copy(alpha = .88f))
-            .border(1.dp, TuneColors.BorderStrong, shape)
+            .border(1.dp, TuneColors.Border, shape)
             .focusGroup()
             .testTag("now_playing_tools"),
         verticalAlignment = Alignment.CenterVertically

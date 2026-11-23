@@ -238,7 +238,7 @@ private fun MusicSeek(
 
 @Composable
 private fun MusicProgressTrack(progress: Float, connected: Boolean, modifier: Modifier = Modifier) {
-    val trackColor = TuneColors.BorderStrong
+    val trackColor = TuneColors.BorderSoft
     val fillStartColor = TuneColors.Accent
     val fillEndColor = TuneColors.PrimaryLight
     val idleColor = TuneColors.Muted

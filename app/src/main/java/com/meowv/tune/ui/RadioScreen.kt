@@ -577,8 +577,8 @@ internal fun LayoutSwitcher(mode: RadioDisplayMode, onChange: (RadioDisplayMode)
     Row(
         Modifier.clip(TuneShapes.Navigation)
             .background(TuneColors.Raised, TuneShapes.Navigation)
-            // 未选中一侧只有图标，加一道极淡描边把控件边界交代清楚。
-            .border(1.dp, TuneColors.BorderStrong, TuneShapes.Navigation),
+            // 未选中一侧只有图标，加一道淡描边把控件边界交代清楚。
+            .border(1.dp, TuneColors.Border, TuneShapes.Navigation),
         verticalAlignment = Alignment.CenterVertically
     ) {
         listOf(RadioDisplayMode.LIST, RadioDisplayMode.CARD).forEach { value ->
@@ -718,7 +718,7 @@ internal fun ScopePicker(
             Box(
                 Modifier.widthIn(max = 580.dp).fillMaxWidth(.9f).height(height)
                     .clip(TuneShapes.Dialog).background(TuneBrushes.Dialog)
-                    .border(1.dp, TuneColors.BorderStrong, TuneShapes.Dialog)
+                    .border(1.dp, TuneColors.Border, TuneShapes.Dialog)
             ) {
                 ScopeOptions(isCar, scope, countries, onRetry, onDismiss, onSelect)
             }
@@ -729,7 +729,7 @@ internal fun ScopePicker(
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = TuneColors.Surface, contentColor = TuneColors.Text,
             scrimColor = TuneColors.Scrim,
-            dragHandle = { BottomSheetDefaults.DragHandle(color = TuneColors.BorderStrong) }
+            dragHandle = { BottomSheetDefaults.DragHandle(color = TuneColors.BorderSoft) }
         ) {
             Box(Modifier.fillMaxWidth().heightIn(max = height)) {
                 ScopeOptions(isCar, scope, countries, onRetry, onDismiss, onSelect)

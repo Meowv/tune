@@ -134,7 +134,7 @@ private fun UpdateTopBar(isCar: Boolean, onBack: () -> Unit) {
         Box(
             Modifier.size(if (isCar) TuneSizes.TouchCar else TuneSizes.Touch).clip(shape)
                 .background(TuneColors.Raised)
-                .border(if (focused) 2.dp else 1.dp, if (focused) TuneColors.Primary else TuneColors.Border, shape)
+                .border(if (focused) 2.dp else 1.dp, if (focused) TuneColors.Primary else TuneColors.BorderStrong, shape)
                 .onFocusChanged { focused = it.isFocused }
                 .clickable(role = Role.Button, onClick = onBack)
                 .testTag("update_back")
@@ -656,7 +656,7 @@ private fun UpdateCard(
         modifier = modifier,
         color = TuneColors.Surface,
         shape = TuneShapes.Dialog,
-        border = BorderStroke(1.dp, TuneColors.BorderStrong)
+        border = BorderStroke(1.dp, TuneColors.Border)
     ) {
         Column(
             Modifier.fillMaxWidth().then(if (highlighted) Modifier.background(TuneBrushes.Card) else Modifier)

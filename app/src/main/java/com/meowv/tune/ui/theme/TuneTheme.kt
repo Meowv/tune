@@ -70,7 +70,8 @@ internal val DarkTunePalette = TunePalette(
     text = Color(0xFFF5F6FF),
     muted = Color(0xFFABB5CA),
     iconIdle = Color(0xFFB0BAD0),
-    border = Color(0xFF34415E),
+    // BorderSoft=装饰/禁用/轨道，Border=容器，BorderStrong=可交互控件。
+    border = Color(0xFF3C4A6B),
     borderSoft = Color(0xFF2A3550),
     borderStrong = Color(0xFF5A6890),
     divider = Color(0xFF253049),
@@ -108,8 +109,9 @@ internal val LightTunePalette = TunePalette(
     text = Color(0xFF1B2133),
     muted = Color(0xFF5C6680),
     iconIdle = Color(0xFF5C6680),
-    border = Color(0xFF818EA8),
-    borderSoft = Color(0xFFBEC7D8),
+    // BorderSoft=装饰/禁用/轨道，Border=容器，BorderStrong=可交互控件。
+    border = Color(0xFFBEC7D8),
+    borderSoft = Color(0xFFD2D9E6),
     borderStrong = Color(0xFF818EA8),
     divider = Color(0xFFD2D9E6),
     selected = Color(0xFFE4DCF8),
@@ -147,8 +149,11 @@ object TuneColors {
     val Text: Color @Composable get() = LocalTunePalette.current.text
     val Muted: Color @Composable get() = LocalTunePalette.current.muted
     val IconIdle: Color @Composable get() = LocalTunePalette.current.iconIdle
+    /** 容器边界：分组卡、内容卡、弹窗。 */
     val Border: Color @Composable get() = LocalTunePalette.current.border
+    /** 装饰/禁用/进度轨道：drag handle、分隔线、禁用开关轮廓。 */
     val BorderSoft: Color @Composable get() = LocalTunePalette.current.borderSoft
+    /** 可交互控件边界：输入框、选项、按钮、焦点前描边。 */
     val BorderStrong: Color @Composable get() = LocalTunePalette.current.borderStrong
     val Divider: Color @Composable get() = LocalTunePalette.current.divider
     val Selected: Color @Composable get() = LocalTunePalette.current.selected
