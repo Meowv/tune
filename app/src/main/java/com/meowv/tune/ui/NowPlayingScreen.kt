@@ -441,7 +441,7 @@ private fun PhoneNowPlayingContent(
                 artworkSlot != null -> 1f
                 compact -> .12f
                 details == null -> .27f
-                else -> .40f
+                else -> .28f
             }
             Spacer(Modifier.weight(lowerSpacingWeight))
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {

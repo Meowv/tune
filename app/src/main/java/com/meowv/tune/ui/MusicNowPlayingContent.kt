@@ -170,6 +170,7 @@ private fun MusicSeek(
     var drag by remember(state.music?.id, duration, state.canSeek) { mutableStateOf<Float?>(null) }
     val position = (drag?.toLong() ?: state.positionMs ?: 0).coerceIn(0, duration)
     val progress = position.toFloat() / duration
+    val thumbSize = 20.dp
     val description = stringResource(R.string.music_seek_description,
         position / 60_000, position / 1000 % 60, duration / 60_000, duration / 1000 % 60)
     val seekTrack: @Composable (Modifier) -> Unit = { modifier ->
@@ -191,7 +192,7 @@ private fun MusicSeek(
                 interactionSource = interaction,
                 thumb = {
                     Box(
-                        Modifier.size(20.dp)
+                        Modifier.size(thumbSize)
                             .background(
                                 if (connected) TuneColors.Primary.copy(alpha = .16f) else Color.Transparent,
                                 CircleShape
@@ -226,9 +227,15 @@ private fun MusicSeek(
             PlaybackTime(duration, TuneColors.Muted, isCar)
         }
     } else {
-        Column(layout) {
+        // 时间标签靠近轨道，滑块仍保留完整的触控高度。
+        val timeSpacing = if (state.canSeek) -TuneSpacing.Small else 0.dp
+        val trackInset = if (state.canSeek) thumbSize / 2 else 0.dp
+        Column(layout, verticalArrangement = Arrangement.spacedBy(timeSpacing)) {
             seekTrack(Modifier.fillMaxWidth())
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = trackInset),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
                 PlaybackTime(position, TuneColors.Text, isCar)
                 PlaybackTime(duration, TuneColors.Muted, isCar)
             }

@@ -371,7 +371,7 @@ private fun InstallAction(
                 else -> R.string.update_check
             }),
             enabled = !checking,
-            primary = true,
+            primary = state !is UpdateUiState.UpToDate,
             isCar = isCar,
             tag = "update_check",
             icon = R.drawable.ic_ui_refresh,
@@ -620,20 +620,25 @@ private fun ReleaseNotesCard(isCar: Boolean, info: UpdateInfo?, expanded: Boolea
                 style = TuneTypography.secondary(isCar)
             )
         } else {
-            Column(if (rememberMotionEnabled()) Modifier.animateContentSize() else Modifier) {
+            Column(
+                modifier = if (rememberMotionEnabled()) Modifier.animateContentSize() else Modifier,
+                verticalArrangement = Arrangement.spacedBy(TuneSpacing.Medium)
+            ) {
                 (if (expanded) notes else notes.take(5)).forEach { note ->
                     Text(
-                        note, modifier = Modifier.fillMaxWidth().padding(vertical = TuneSpacing.Hairline),
+                        note, modifier = Modifier.fillMaxWidth(),
                         color = TuneColors.Text,
                         style = TuneTypography.rowTitle(isCar).copy(fontWeight = FontWeight.Normal)
                     )
                 }
             }
             if (notes.size > 5) {
+                Spacer(Modifier.height(TuneSpacing.Hairline))
                 TextButton(
                     onClick = onToggle,
                     modifier = Modifier.heightIn(min = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
-                        .testTag("update_notes_toggle")
+                        .testTag("update_notes_toggle"),
+                    contentPadding = PaddingValues(end = TuneSpacing.Medium)
                 ) {
                     Text(
                         stringResource(if (expanded) R.string.update_notes_collapse else R.string.update_notes_expand),

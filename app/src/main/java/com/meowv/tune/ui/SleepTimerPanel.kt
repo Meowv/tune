@@ -121,13 +121,15 @@ private fun SleepTimerOptions(
                 )
                 .testTag("sleep_timer_panel")
         ) {
+            val titleIconSize = 24.dp
+            val titleIconGap = 10.dp
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(titleIconGap)
             ) {
                 TuneIcon(
                     R.drawable.ic_sleep,
-                    Modifier.size(24.dp),
+                    Modifier.size(titleIconSize),
                     TuneColors.PrimaryLight
                 )
                 Text(
@@ -138,9 +140,10 @@ private fun SleepTimerOptions(
                 )
             }
             if (remaining != null) {
-                Spacer(Modifier.height(5.dp))
+                Spacer(Modifier.height(TuneSpacing.Hairline))
                 Text(
                     stringResource(R.string.sleep_timer_remaining_prefix, remaining),
+                    modifier = Modifier.padding(start = titleIconSize + titleIconGap),
                     color = TuneColors.PrimaryLight,
                     style = TuneTypography.secondary(isCar)
                 )
@@ -173,10 +176,7 @@ private fun SleepTimerOptions(
                 onClick = onCustom
             )
             if (timer.isActive) {
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = TuneSpacing.Hairline),
-                    color = TuneColors.Divider
-                )
+                Spacer(Modifier.height(TuneSpacing.Small))
                 SleepTimerMenuRow(
                     isCar = isCar,
                     label = stringResource(R.string.sleep_timer_cancel),

@@ -118,17 +118,14 @@ internal fun BrandLockup(
     modifier: Modifier = Modifier,
     logoTag: String
 ) {
-    // 按可见字形和 Logo 的中心校准，布局仍按原来的行高对齐。
-    val opticalOffset = with(LocalDensity.current) { 1.5.sp.toDp() }
     Row(
         modifier,
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Small)
     ) {
-        BrandLogo(Modifier.size(logoSize).offset(y = opticalOffset).testTag(logoTag))
+        BrandLogo(Modifier.size(logoSize).testTag(logoTag))
         Text(
             label, color = TuneColors.Text, style = style,
-            modifier = Modifier.offset(y = -opticalOffset),
             maxLines = 1, overflow = TextOverflow.Ellipsis
         )
     }
