@@ -4,7 +4,6 @@ import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,7 +24,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,19 +36,16 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.DialogWindowProvider
 import com.meowv.tune.R
 import com.meowv.tune.domain.ThemeMode
 import com.meowv.tune.domain.TuneSettings
 import com.meowv.tune.music.MusicDevicePhase
 import com.meowv.tune.music.MusicDeviceState
-import com.meowv.tune.ui.theme.TuneBrushes
 import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.ui.theme.TuneMotion
 import com.meowv.tune.ui.theme.TuneShapes
@@ -180,17 +175,19 @@ internal fun SettingsScreen(
     }
 }
 
+internal fun musicDeviceStatus(phase: MusicDevicePhase): Int = when (phase) {
+    MusicDevicePhase.CHECKING -> R.string.music_device_checking
+    MusicDevicePhase.OFFLINE -> R.string.music_device_offline
+    MusicDevicePhase.PENDING -> R.string.music_device_pending
+    MusicDevicePhase.ACTIVE -> R.string.music_device_active
+    MusicDevicePhase.REVOKED -> R.string.music_device_revoked
+    MusicDevicePhase.REAPPROVAL_REQUIRED -> R.string.music_device_reapproval
+    MusicDevicePhase.UNAVAILABLE -> R.string.music_device_unavailable
+}
+
 @Composable
 private fun MusicDeviceGroup(device: MusicDeviceState, isCar: Boolean) {
-    val status = stringResource(when (device.phase) {
-        MusicDevicePhase.CHECKING -> R.string.music_device_checking
-        MusicDevicePhase.OFFLINE -> R.string.music_device_offline
-        MusicDevicePhase.PENDING -> R.string.music_device_pending
-        MusicDevicePhase.ACTIVE -> R.string.music_device_active
-        MusicDevicePhase.REVOKED -> R.string.music_device_revoked
-        MusicDevicePhase.REAPPROVAL_REQUIRED -> R.string.music_device_reapproval
-        MusicDevicePhase.UNAVAILABLE -> R.string.music_device_unavailable
-    })
+    val status = stringResource(musicDeviceStatus(device.phase))
     val summary = device.deviceCode?.let { stringResource(R.string.music_device_summary, status, it) } ?: status
     val fingerprint = device.keyFingerprint?.takeIf { device.phase != MusicDevicePhase.ACTIVE }
         ?.let { stringResource(R.string.music_device_key_fingerprint, it) }
@@ -266,8 +263,8 @@ private fun ThemeOption(isCar: Boolean, mode: ThemeMode, selected: Boolean, onSe
             .clip(shape)
             .background(if (selected) TuneColors.Selected else TuneColors.OptionSurface)
             .border(
-                if (focused || selected) 2.dp else 1.dp,
-                if (focused || selected) TuneColors.Primary else TuneColors.BorderStrong,
+                if (focused) 2.dp else 1.dp,
+                if (focused) TuneColors.Primary else TuneColors.Border,
                 shape
             )
             .onFocusChanged { focused = it.isFocused }
@@ -292,15 +289,6 @@ private fun ThemeOption(isCar: Boolean, mode: ThemeMode, selected: Boolean, onSe
 private enum class SettingsDialog { NONE, THEME, SOURCE, LICENSES }
 
 @Composable
-private fun RememberDialogDim() {
-    val view = LocalView.current
-    DisposableEffect(view) {
-        (view.parent as? DialogWindowProvider)?.window?.setDimAmount(.72f)
-        onDispose { }
-    }
-}
-
-@Composable
 private fun SettingsDetailsDialog(
     isCar: Boolean,
     @StringRes title: Int,
@@ -323,7 +311,7 @@ private fun SettingsDetailsDialog(
             }
         },
         text = {
-            RememberDialogDim()
+            TuneDialogWindow(isCar)
             Column(
                 Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(TuneSpacing.Large),
@@ -336,7 +324,7 @@ private fun SettingsDetailsDialog(
             }
         },
         shape = TuneShapes.Dialog,
-        containerColor = TuneColors.Raised,
+        containerColor = TuneColors.Surface,
         textContentColor = TuneColors.Text
     )
 }
@@ -360,10 +348,9 @@ private fun DetailEntry(isCar: Boolean, @StringRes title: Int, @StringRes body: 
 private fun SettingsGroup(content: @Composable ColumnScope.() -> Unit) {
     Surface(
         color = TuneColors.Surface,
-        shape = TuneShapes.SettingsGroup,
-        border = BorderStroke(1.dp, TuneColors.Border)
+        shape = TuneShapes.SettingsGroup
     ) {
-        Column(Modifier.fillMaxWidth().background(TuneBrushes.Card), content = content)
+        Column(Modifier.fillMaxWidth(), content = content)
     }
 }
 

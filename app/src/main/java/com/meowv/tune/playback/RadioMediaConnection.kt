@@ -67,6 +67,14 @@ internal class RadioMediaConnection(
         }
     }
 
+    @MainThread
+    fun retryConnection() {
+        if (leases == 0 || pending != null) return
+        handler.removeCallbacks(reconnect)
+        retries = 0
+        connect()
+    }
+
     private fun connect() {
         val future = createController(app, token, object : MediaController.Listener {
             override fun onDisconnected(controller: MediaController) {

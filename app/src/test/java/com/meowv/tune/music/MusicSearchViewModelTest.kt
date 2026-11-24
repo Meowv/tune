@@ -34,7 +34,11 @@ class MusicSearchViewModelTest {
             assertTrue(selected.isEmpty())
             model.select(track)
             assertEquals(listOf(track), selected)
-            assertFalse(model.state.value.visible)
+            assertTrue(model.state.value.visible)
+            assertFalse(model.state.value.selecting)
+            assertEquals(" qix ", model.state.value.query)
+            assertEquals(track, model.state.value.items.first())
+            assertEquals(1, requests)
         } finally { scope.cancel() }
     }
 

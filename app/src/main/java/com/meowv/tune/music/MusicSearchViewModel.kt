@@ -173,6 +173,12 @@ internal class MusicSearchViewModel(
         return merged
     }
 
+    fun cancelSelection() {
+        if (!mutable.value.selecting) return
+        selection?.cancel()
+        mutable.value = mutable.value.copy(selecting = false, selectedId = null)
+    }
+
     fun select(track: MusicTrack) {
         if (!mutable.value.visible || mutable.value.selecting ||
             mutable.value.items.none { it.id == track.id && it.canStartPlayback }) return
@@ -181,9 +187,7 @@ internal class MusicSearchViewModel(
             try {
                 play(track)
                 ensureActive()
-                generation++
-                pending?.cancel()
-                mutable.value = mutable.value.copy(visible = false, request = null, selecting = false, selectedId = null)
+                mutable.value = mutable.value.copy(selecting = false, selectedId = null)
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: TuneFailure) {
                 ensureActive()

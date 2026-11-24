@@ -1,7 +1,6 @@
 package com.meowv.tune
 
 import android.graphics.Bitmap
-import android.view.KeyEvent
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
@@ -15,6 +14,7 @@ import org.junit.Assert.assertTrue
 import com.meowv.tune.domain.RadioScope
 import com.meowv.tune.domain.ScopeMode
 import com.meowv.tune.domain.TuneSettings
+import com.meowv.tune.domain.ThemeMode
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -29,7 +29,12 @@ class UpdatePageTest {
 
     @Before
     fun resetSettings() = runBlocking<Unit> {
-        app.userSettings.update { TuneSettings(scope = RadioScope(ScopeMode.GLOBAL)) }
+        val theme = when (InstrumentationRegistry.getArguments().getString("captureTheme")) {
+            "dark" -> ThemeMode.DARK
+            "light" -> ThemeMode.LIGHT
+            else -> ThemeMode.FOLLOW_SYSTEM
+        }
+        app.userSettings.update { TuneSettings(scope = RadioScope(ScopeMode.GLOBAL), themeMode = theme) }
     }
 
     @Test
@@ -72,8 +77,6 @@ class UpdatePageTest {
             } else {
                 assertTrue(status.bottom <= version.top)
             }
-            compose.waitUntil(5_000) { compose.activity.hasWindowFocus() }
-            InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_TAB)
             compose.onNodeWithTag("update_back")
                 .performSemanticsAction(SemanticsActions.RequestFocus) { it() }
                 .assertIsFocused()

@@ -17,7 +17,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -25,12 +24,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -53,9 +50,12 @@ import com.meowv.tune.domain.music.MusicFailure
 import com.meowv.tune.domain.music.MusicQueueSeed
 import com.meowv.tune.domain.music.MusicTrack
 import com.meowv.tune.domain.music.canStartPlayback
+import com.meowv.tune.music.MusicDevicePhase
+import com.meowv.tune.music.MusicDeviceState
 import com.meowv.tune.music.MusicFeed
 import com.meowv.tune.music.MusicUiState
 import com.meowv.tune.ui.theme.TuneColors
+import com.meowv.tune.ui.theme.TuneMotion
 import com.meowv.tune.ui.theme.TuneShapes
 import com.meowv.tune.ui.theme.TuneSizes
 import com.meowv.tune.ui.theme.TuneSpacing
@@ -65,7 +65,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 
 @Composable
 internal fun MusicScreen(
@@ -79,13 +78,18 @@ internal fun MusicScreen(
     displayMode: RadioDisplayMode,
     onDisplayModeChange: (RadioDisplayMode) -> Unit,
     animationsEnabled: Boolean = true,
-    activePage: Boolean = true
+    activePage: Boolean = true,
+    device: MusicDeviceState? = null,
+    onOpenDeviceSettings: () -> Unit = {},
+    onRetryDevice: () -> Unit = {}
 ) {
     val playback = (state as? MusicUiState.Active)?.playback
     val currentId = playback?.music?.id
     val visual = playback?.let { playbackVisual(it.phase, connected) } ?: StationPlaybackVisual.None
     val playbackError = playback?.let { musicPlaybackErrorText(it) }
-    val waitingForAccess = browse.failure == MusicFailure.NOT_CONFIGURED
+    val devicePhase = device?.phase
+    val blocked = devicePhase != null && devicePhase != MusicDevicePhase.ACTIVE ||
+        state == MusicUiState.NotConfigured || browse.failure in setOf(MusicFailure.NOT_CONFIGURED, MusicFailure.UNAUTHORIZED)
     val list = rememberLazyGridState()
     var previewId by rememberSaveable { mutableStateOf<String?>(null) }
     var listSelectionId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -102,7 +106,7 @@ internal fun MusicScreen(
 
     Surface(color = TuneColors.Background, modifier = Modifier.fillMaxSize().testTag("page_music")) {
         Column(Modifier.fillMaxSize()) {
-            if (state != MusicUiState.NotConfigured) {
+            if (!blocked) {
                 DirectoryToolbar(isCar) {
                     val search = stringResource(R.string.music_search)
                     DirectoryActionChip(search, search, R.drawable.ic_ui_search, isCar,
@@ -113,9 +117,39 @@ internal fun MusicScreen(
             }
 
             val statusModifier = Modifier.weight(1f).fillMaxWidth()
+            if (blocked) {
+                val message = devicePhase?.takeUnless { it == MusicDevicePhase.ACTIVE }?.let(::musicDeviceStatus)
+                    ?: if (browse.failure == MusicFailure.UNAUTHORIZED) R.string.music_unauthorized
+                    else R.string.music_not_configured
+                val retry = devicePhase == MusicDevicePhase.OFFLINE || devicePhase == MusicDevicePhase.UNAVAILABLE
+                val action = when {
+                    retry -> onRetryDevice
+                    device != null && devicePhase != MusicDevicePhase.CHECKING -> onOpenDeviceSettings
+                    else -> null
+                }
+                val actionLabel = if (retry) R.string.music_retry else R.string.music_device_open_settings
+                if (browse.tracks.isNotEmpty()) {
+                    DirectoryFeedback(message, action, actionLabel, isCar)
+                } else {
+                    if (devicePhase == MusicDevicePhase.CHECKING) {
+                        DirectoryLoading(statusModifier, tag = "music_device_loading", description = stringResource(message))
+                    } else {
+                        DirectoryMessage(R.drawable.ic_ui_info, TuneColors.Muted, message, statusModifier.testTag("music_access_status"),
+                            action = action?.let {
+                                {
+                                    TextButton(onClick = it, modifier = Modifier.heightIn(min = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
+                                        .testTag(if (retry) "music_retry_device" else "music_open_device_settings")) {
+                                        Text(stringResource(actionLabel))
+                                    }
+                                }
+                            }
+                        )
+                    }
+                    return@Column
+                }
+            }
             if (browse.tracks.isEmpty()) {
                 when {
-                    state == MusicUiState.NotConfigured || waitingForAccess -> Unit
                     browse.failure != null -> DirectoryMessage(
                         R.drawable.ic_ui_info, TuneColors.Error, musicPlaybackFailureMessage(browse.failure), statusModifier
                     ) {
@@ -139,12 +173,12 @@ internal fun MusicScreen(
                     onCommand(PlayerCommand.PlayMusic(song, browse.seed ?: MusicQueueSeed(browse.tracks, null)))
                 }
             }
-            if (browse.failure != null && !waitingForAccess) {
-                DirectoryFeedback(musicPlaybackFailureMessage(browse.failure), onLoad)
+            if (!blocked && browse.failure != null) {
+                DirectoryFeedback(musicPlaybackFailureMessage(browse.failure), onLoad, isCar = isCar)
             }
 
             if (displayMode == RadioDisplayMode.CARD) {
-                MusicCards(browse.tracks, currentId, visual, playbackError, connected,
+                MusicCards(browse.tracks, currentId, visual, playbackError, connected && !blocked,
                     activePage && playback != null && playback.phase in CardAutoplayPhases, isCar,
                     previewId, listTrackToCenter, { id ->
                         previewId = id
@@ -169,7 +203,7 @@ internal fun MusicScreen(
                             val rowVisual = if (current) visual else StationPlaybackVisual.None
                             Column {
                                 MusicTrackRow(track, isCar, current, rowVisual,
-                                    enabled = connected && !rowVisual.busy, error = playbackError.takeIf { current },
+                                    enabled = connected && !blocked && !rowVisual.busy, error = playbackError.takeIf { current },
                                     animationsEnabled = animationsEnabled,
                                     modifier = Modifier.testTag("music_feed_track_${track.id}")) {
                                     clickTrack(track)
@@ -188,7 +222,7 @@ internal fun MusicScreen(
     }
 }
 
-private val StationPlaybackVisual.busy: Boolean
+internal val StationPlaybackVisual.busy: Boolean
     get() = this == StationPlaybackVisual.Connecting || this == StationPlaybackVisual.Buffering ||
         this == StationPlaybackVisual.Retrying
 
@@ -223,34 +257,35 @@ private fun MusicCards(
     val currentTracks by rememberUpdatedState(tracks)
     val playTrack by rememberUpdatedState(onPlay)
     var observedPlaybackId by remember { mutableStateOf(currentId) }
-    var cardClickCount by remember { mutableIntStateOf(0) }
+    var userScrollStart by remember { mutableStateOf<String?>(null) }
 
-    // 播放来源变化或用户已点按卡片时，取消待执行的滑卡播放。
-    LaunchedEffect(pager, currentId, autoPlayOnSwipe, connected, cardClickCount) {
-        if (!autoPlayOnSwipe || !connected || currentId == null) return@LaunchedEffect
-        var dragStartId: String? = null
-        launch {
-            pager.interactionSource.interactions.collect { interaction ->
-                when (interaction) {
-                    is DragInteraction.Start -> dragStartId = currentTracks.getOrNull(pager.settledPage)?.id
-                    is DragInteraction.Cancel -> dragStartId = null
-                    else -> Unit
-                }
+    LaunchedEffect(pager) {
+        pager.interactionSource.interactions.collect { interaction ->
+            when (interaction) {
+                is DragInteraction.Start -> userScrollStart = currentTracks.getOrNull(pager.settledPage)?.id
+                is DragInteraction.Cancel -> userScrollStart = null
+                else -> Unit
             }
         }
-        // 只处理手指滑动。播放器带动卡片定位时，只更新预览。
-        snapshotFlow { if (pager.isScrollInProgress) null else currentTracks.getOrNull(pager.settledPage)?.id }
-            .collectLatest { settledId ->
-                if (settledId == null) return@collectLatest
-                val startId = dragStartId ?: return@collectLatest
-                // 松手到惯性滑动启动之间可能短暂空闲，等防抖结束后再清除滑动起点。
-                delay(CARD_AUTOPLAY_DEBOUNCE_MS)
-                if (pager.isScrollInProgress || dragStartId != startId) return@collectLatest
-                dragStartId = null
-                if (settledId == startId || settledId == currentId) return@collectLatest
-                val track = currentTracks.getOrNull(pager.settledPage) ?: return@collectLatest
-                if (track.id == settledId && track.canStartPlayback) playTrack(track)
+    }
+    LaunchedEffect(pager, currentId, autoPlayOnSwipe, connected) {
+        userScrollStart = null
+        if (!autoPlayOnSwipe || !connected || currentId == null) return@LaunchedEffect
+        snapshotFlow {
+            userScrollStart?.takeUnless { pager.isScrollInProgress }?.let { start ->
+                start to currentTracks.getOrNull(pager.settledPage)?.id
             }
+        }.collectLatest { pages ->
+            if (pages == null) return@collectLatest
+            val (startId, settledId) = pages
+            // 惯性滑动结束后才切歌，避免一次滑动多次起播。
+            delay(CARD_AUTOPLAY_DEBOUNCE_MS)
+            if (pager.isScrollInProgress || userScrollStart != startId) return@collectLatest
+            userScrollStart = null
+            if (settledId == null || settledId == startId || settledId == currentId) return@collectLatest
+            val track = currentTracks.getOrNull(pager.settledPage) ?: return@collectLatest
+            if (track.id == settledId && track.canStartPlayback) playTrack(track)
+        }
     }
 
     LaunchedEffect(pager, tracks, currentId, listTrackToCenter) {
@@ -264,7 +299,8 @@ private fun MusicCards(
                 else -> currentIndex.coerceAtLeast(0)
             }
             if (pager.settledPage != target) {
-                if (followsPlayback && animate && animationsEnabled) pager.animateScrollToPage(target)
+                userScrollStart = null
+                if (followsPlayback && animate && animationsEnabled) pager.animateScrollToPage(target, animationSpec = androidx.compose.animation.core.tween(TuneMotion.Card))
                 else pager.scrollToPage(target)
             }
         }
@@ -276,11 +312,11 @@ private fun MusicCards(
         val statusHeight = if (isCar) 28.dp else 22.dp
         val statusGap = TuneSpacing.Small
         val viewport = maxWidth
-        val pagerPositionHeight = if (tracks.size > 1) MediaPagerPositionHeight else 0.dp
-        val cardSpace = maxHeight - statusHeight - statusGap - pagerPositionHeight - TuneSpacing.Large
+        val cardSpace = maxHeight - statusHeight - statusGap - TuneSpacing.Large
         val (width, height) = mediaCardSize(viewport, cardSpace, isCar)
         HorizontalPager(
             state = pager,
+            flingBehavior = mediaPagerFlingBehavior(pager),
             pageSize = PageSize.Fixed(width),
             contentPadding = PaddingValues(horizontal = (viewport - width) / 2),
             pageSpacing = TuneSpacing.Medium,
@@ -300,7 +336,7 @@ private fun MusicCards(
             }
             val active = fullyVisible && index == pager.settledPage
             val showContent = active || pager.isScrollInProgress
-            Box(Modifier.fillMaxHeight().width(width), contentAlignment = BiasAlignment(0f, -.12f)) {
+            Box(Modifier.fillMaxHeight().width(width), contentAlignment = Alignment.Center) {
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(Modifier.fillMaxWidth().height(height)) {
                         val cardTag = if (showContent) Modifier.testTag("music_feed_card_${track.id}") else Modifier
@@ -314,7 +350,7 @@ private fun MusicCards(
                                     if (active) selected = true
                                 }
                         ) {
-                            cardClickCount++
+                            userScrollStart = null
                             onPlay(track)
                         }
                     }
@@ -332,9 +368,11 @@ private fun MusicCards(
                             modifier = Modifier.fillMaxWidth().height(statusHeight)
                         )
                     }
-                    MediaPagerPosition(index, tracks.size, visibleOnPage = active)
                 }
             }
+        }
+        if (isCar) MediaPagerControls(pager) {
+            userScrollStart = currentTracks.getOrNull(pager.settledPage)?.id
         }
     }
 }
@@ -360,17 +398,18 @@ private fun MusicCard(
     } else Modifier.clearAndSetSemantics { hideFromAccessibility() }
     Box(modifier.mediaCardSurface(interactive && focused).then(interaction)) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            val compact = maxHeight < 280.dp
-            val pad = if (compact) TuneSpacing.Large else TuneSpacing.Section
+            val compact = maxHeight < 200.dp
+            val pad = if (compact) TuneSpacing.Small else TuneSpacing.Large
             val titleLine = if (isCar) 25.sp else 23.sp
             val secondary = TuneTypography.secondary(isCar)
             val textHeight = with(LocalDensity.current) { titleLine.toDp() * 2 + secondary.lineHeight.toDp() }
             val cover = minOf(maxWidth * .68f, maxWidth - pad * 2,
                 maxHeight - pad * 2 - textHeight - TuneSpacing.Medium - TuneSpacing.Hairline)
+            val artworkLimit = maxWidth - pad * 2
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(pad),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                if (cover >= 32.dp) {
-                    MusicCover(track, Modifier.size(cover), TuneShapes.Station)
+                if (artworkLimit > 0.dp) {
+                    MusicCover(track, Modifier.size(cover.coerceAtLeast(24.dp).coerceAtMost(artworkLimit)), TuneShapes.Station)
                     Spacer(Modifier.height(TuneSpacing.Medium))
                 }
                 Text(track.title, color = if (current) TuneColors.PrimaryLight else TuneColors.Text,
@@ -395,7 +434,7 @@ private fun musicActionLabel(visual: StationPlaybackVisual): Int = when (visual)
 
 @Composable
 internal fun MusicCover(track: MusicTrack?, modifier: Modifier = Modifier, shape: Shape = TuneShapes.Control) {
-    MediaArtwork(track?.coverUrl, isMusic = true, modifier = modifier.clip(shape))
+    MediaArtwork(track?.coverUrl, isMusic = true, modifier = modifier.clip(shape), artworkKey = track?.id)
 }
 
 @Composable
@@ -420,7 +459,10 @@ internal fun MusicTrackRow(
             .then(if (focused) Modifier.border(2.dp, TuneColors.Primary, shape) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .clickable(enabled = enabled && track.canStartPlayback, onClickLabel = action, role = Role.Button, onClick = onClick)
-            .semantics { if (status != null) stateDescription = status }
+            .semantics {
+                selected = current
+                if (status != null) stateDescription = status
+            }
             .padding(start = mediaRowStartPadding(isCar), end = if (isCar) 8.dp else 4.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Medium)
@@ -440,8 +482,7 @@ internal fun MusicTrackRow(
         ) {
             when (visual) {
                 StationPlaybackVisual.Connecting, StationPlaybackVisual.Buffering, StationPlaybackVisual.Retrying ->
-                    CircularProgressIndicator(Modifier.size(TuneSizes.IconSm), color = TuneColors.Primary,
-                        strokeWidth = 2.dp, strokeCap = StrokeCap.Round, trackColor = TuneColors.TrackOff)
+                    TuneLoadingIndicator(Modifier.size(TuneSizes.IconSm), animationsEnabled = animationsEnabled)
                 StationPlaybackVisual.Playing -> PlayingWaveBars(
                     Modifier.size(TuneSizes.IconMd), TuneColors.Primary, animationsEnabled
                 )

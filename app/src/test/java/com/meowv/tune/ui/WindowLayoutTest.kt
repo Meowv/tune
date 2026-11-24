@@ -27,6 +27,14 @@ class WindowLayoutTest {
         assertEquals(true, isNowPlayingWide(600f, 360f))
     }
     @Test
+    fun carRailLeavesRoomForLowLandscapeAndRespectsTheLargeWindowCap() {
+        assertEquals(104f, carNavigationWidth(600f, 360f))
+        assertEquals(120f, carNavigationWidth(800f, 380f))
+        assertEquals(153.6f, carNavigationWidth(1024f, 600f), .01f)
+        assertEquals(156f, carNavigationWidth(1280f, 720f))
+    }
+
+    @Test
     fun directoryUsesAvailableContentSpaceAndFallsBackForShortWindows() {
         assertEquals(1, directoryColumnCount(false, 900f, 600f))
         assertEquals(1, directoryColumnCount(true, 620f, 340f))

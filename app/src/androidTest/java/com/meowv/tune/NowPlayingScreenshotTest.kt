@@ -24,6 +24,8 @@ import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.RadioScope
 import com.meowv.tune.domain.ScopeMode
 import com.meowv.tune.domain.TuneSettings
+import com.meowv.tune.domain.ThemeMode
+import java.io.File
 import com.meowv.tune.ui.isCarWindow
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
@@ -55,17 +57,20 @@ class NowPlayingScreenshotTest {
         app.userSettings.update {
             TuneSettings(
                 scope = RadioScope(ScopeMode.GLOBAL),
-                playbackOrder = PlaybackOrder.SHUFFLE
+                playbackOrder = PlaybackOrder.SHUFFLE,
+                themeMode = if (InstrumentationRegistry.getArguments().getString("captureTheme") == "light")
+                    ThemeMode.LIGHT else ThemeMode.DARK
             )
         }
     }
 
     @Test
     fun capture() {
-        assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
         compose.waitUntil(5000) { app.playerController.connected.value }
         val stationTag = "station_${UUID(0, 1)}"
+        compose.waitUntil(5000) { compose.onAllNodesWithTag(stationTag).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(stationTag))
+        saveCapture("radio-list")
         compose.onNodeWithTag(stationTag).performClick()
         compose.waitUntil(8000) {
             app.playerController.state.value.phase == PlaybackPhase.PLAYING
@@ -89,6 +94,10 @@ class NowPlayingScreenshotTest {
             "NOWPLAYING_LAYOUT title=${ratio(titleBounds.top)} " +
                 "controls=${ratio(controlBounds.top)} tools=${ratio(toolBounds.top)}"
         )
+        saveCapture("radio-player")
+    }
+
+    private fun saveCapture(page: String) {
         val bitmap = compose.onRoot().captureToImage().asAndroidBitmap()
         val config = compose.activity.resources.configuration
         val form = if (
@@ -99,7 +108,10 @@ class NowPlayingScreenshotTest {
             .orEmpty()
             .ifBlank { "phase-current" }
             .replace(Regex("[^a-zA-Z0-9_-]"), "-")
-        val name = "$phase-$form.png"
+        val name = "$phase-$form-$page.png"
+        val folder = File(compose.activity.cacheDir, "ui-refinement").apply { mkdirs() }
+        File(folder, name).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
         val resolver = compose.activity.contentResolver
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, name)

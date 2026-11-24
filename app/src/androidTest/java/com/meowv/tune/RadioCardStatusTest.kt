@@ -10,6 +10,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -27,11 +28,11 @@ import com.meowv.tune.domain.*
 import com.meowv.tune.domain.music.MusicTrack
 import com.meowv.tune.ui.RadioScreen
 import com.meowv.tune.ui.isCarWindow
+import com.meowv.tune.ui.rememberMotionEnabled
 import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.ui.theme.TuneTheme
 import java.io.File
 import java.util.UUID
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -51,8 +52,10 @@ class RadioCardStatusTest {
         val selected = mutableStateOf(first.uuid)
         val animations = mutableStateOf(true)
         val commands = mutableListOf<PlayerCommand>()
+        var motionEnabled = false
         compose.setContent {
             val config = LocalConfiguration.current
+            motionEnabled = rememberMotionEnabled()
             TuneTheme(ThemeMode.DARK) {
                 Box(Modifier.fillMaxSize().background(TuneColors.Background)) {
                     RadioScreen(
@@ -69,6 +72,11 @@ class RadioCardStatusTest {
         val card = compose.onNodeWithTag("station_card_${first.uuid}")
         val status = compose.onNodeWithTag("station_status_${first.uuid}")
         card.assertIsDisplayed()
+        val previous = compose.onNodeWithTag("media_card_previous")
+        val next = compose.onNodeWithTag("media_card_next")
+        val isCar = compose.onAllNodes(androidx.compose.ui.test.hasTestTag("media_card_next")).fetchSemanticsNodes().isNotEmpty()
+        if (isCar) previous.assertIsDisplayed().assertIsNotEnabled()
+        else previous.assertDoesNotExist()
         val original = card.getUnclippedBoundsInRoot()
         val root = compose.onRoot().getUnclippedBoundsInRoot()
         val statusBounds = status.getUnclippedBoundsInRoot()
@@ -102,7 +110,7 @@ class RadioCardStatusTest {
         val waveform = compose.onNodeWithTag("station_status_waveform", useUnmergedTree = true)
         val movingFrame = waveform.captureToImage().asAndroidBitmap()
         compose.mainClock.advanceTimeBy(240)
-        assertFalse("播放波形应持续变化", movingFrame.sameAs(waveform.captureToImage().asAndroidBitmap()))
+        assertEquals(!motionEnabled, movingFrame.sameAs(waveform.captureToImage().asAndroidBitmap()))
         compose.runOnIdle { animations.value = false }
         compose.mainClock.advanceTimeBy(32)
         val staticFrame = waveform.captureToImage().asAndroidBitmap()
@@ -114,9 +122,14 @@ class RadioCardStatusTest {
         File(target.cacheDir, "radio-card-status.png").outputStream().use {
             bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
         }
+        card.performClick()
+        compose.runOnIdle { assertEquals(listOf(PlayerCommand.TogglePause), commands) }
+        compose.runOnIdle { commands.clear() }
         // 暂停后浏览其他台只改变目标，状态不能跟随选中台移动，也不能自动起播。
         compose.runOnIdle { playback.value = PlayerUiState(PlaybackPhase.PAUSED, first) }
-        compose.onNodeWithTag("station_cards").performTouchInput { swipeLeft() }
+        if (isCar) next.performClick()
+        else compose.onNodeWithTag("station_cards").performTouchInput { swipeLeft() }
+        if (isCar) next.assertIsDisplayed().assertIsNotEnabled()
         compose.onNodeWithTag("station_status_${second.uuid}")
             .assertIsDisplayed().assert(SemanticsMatcher("未播放项没有播放状态") { it.config.getOrElse(SemanticsProperties.StateDescription) { "" }.isEmpty() })
         assertTrue(commands.isEmpty())

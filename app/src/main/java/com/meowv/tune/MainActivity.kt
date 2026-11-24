@@ -18,6 +18,9 @@ import kotlinx.coroutines.withContext
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.structuralEqualityPolicy
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlaybackSource
 import com.meowv.tune.domain.music.MusicException
@@ -35,6 +38,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.meowv.tune.music.MusicSearchViewModel
 import com.meowv.tune.ui.MusicSearchScreen
+import com.meowv.tune.music.MusicUiState
 import com.meowv.tune.music.MusicViewModel
 import com.meowv.tune.settings.SettingsViewModel
 import com.meowv.tune.settings.applyApplicationNightMode
@@ -44,6 +48,8 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.meowv.tune.ui.TuneApp
+import com.meowv.tune.ui.playbackVisual
+import com.meowv.tune.ui.StationPlaybackVisual
 import com.meowv.tune.ui.theme.TuneTheme
 import com.meowv.tune.domain.TuneError
 import com.meowv.tune.domain.TuneSettings
@@ -197,18 +203,38 @@ class MainActivity : ComponentActivity() {
         setContent {
             val musicDevice = activation?.state?.collectAsStateWithLifecycle()?.value
             val musicBrowse by musicModel.browse.collectAsStateWithLifecycle()
-            val musicState by musicModel.state.collectAsStateWithLifecycle()
+            val musicUi = musicModel.state.collectAsStateWithLifecycle()
+            val musicState by remember(musicUi) {
+                derivedStateOf(structuralEqualityPolicy()) {
+                    val state = musicUi.value
+                    if (state is MusicUiState.Active) state.copy(playback = state.playback.copy(positionMs = null))
+                    else state
+                }
+            }
             val musicSearch by musicSearchModel.state.collectAsStateWithLifecycle()
             val searchList = key(musicSearch.query, musicSearch.resultVersion) {
                 androidx.compose.foundation.lazy.grid.rememberLazyGridState()
             }
             val searchContent: @Composable (Boolean, @Composable () -> Unit) -> Unit = { isCar, playerEntry ->
+                val playback = tuneApp.playerController.state.collectAsStateWithLifecycle()
+                val connected by tuneApp.playerController.connected.collectAsStateWithLifecycle()
+                val currentMusic by remember(playback) {
+                    derivedStateOf(structuralEqualityPolicy()) {
+                        val state = playback.value
+                        (state.music?.id to state.phase).takeIf { state.source == PlaybackSource.MUSIC }
+                    }
+                }
                 MusicSearchScreen(
                     musicSearch, musicSearchModel::queryChanged, musicSearchModel::search,
                     musicSearchModel::more,
                     { track -> ensureNotificationPermission(); musicSearchModel.select(track) },
                     musicSearchModel::selectHistory, musicSearchModel::clearHistory,
-                    musicSearchModel::close, searchList, isCar = isCar, playerEntry = playerEntry
+                    musicSearchModel::close, searchList, isCar = isCar,
+                    currentTrackId = currentMusic?.first,
+                    currentVisual = currentMusic?.let { playbackVisual(it.second, connected) } ?: StationPlaybackVisual.None,
+                    connected = connected,
+                    onTogglePlayback = { dispatchPlayback(PlayerCommand.TogglePause) },
+                    playerEntry = playerEntry
                 )
             }
             val settings by settingsModel.settings.collectAsStateWithLifecycle()
@@ -227,6 +253,8 @@ class MainActivity : ComponentActivity() {
                     musicBrowse = musicBrowse,
                     musicDevice = musicDevice,
                     onMusicActivated = musicModel::onDeviceActivated,
+                    onRetryMusicDevice = { activation?.retryConnection() },
+                    onReconnectPlayback = tuneApp.playerController::retryConnection,
                     onEnterMusic = musicModel::enter,
                     onLoadMusic = musicModel::loadFeed,
                     onSearchMusic = musicSearchModel::open,
@@ -320,6 +348,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun dispatchPlayback(command: PlayerCommand) {
+        if (command == PlayerCommand.CancelMusic || command == PlayerCommand.Next || command == PlayerCommand.Previous) {
+            musicSearchModel.cancelSelection()
+        }
         if (command !is PlayerCommand.Resume) ensureNotificationPermission()
         lifecycleScope.launch {
             try {

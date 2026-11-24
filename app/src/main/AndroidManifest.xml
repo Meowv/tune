@@ -18,6 +18,7 @@
         android:theme="@style/Theme.MeowvTune">
         <activity
             android:name=".MainActivity"
+            android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.MeowvTune.Splash"
             android:exported="true">
             <intent-filter>

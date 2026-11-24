@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
@@ -20,7 +19,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -36,14 +34,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
 import com.meowv.tune.R
 import com.meowv.tune.playback.SleepTimerState
 import com.meowv.tune.playback.sleepTimerRemainingMinutes
-import com.meowv.tune.ui.theme.LocalTuneIsDark
-import com.meowv.tune.ui.theme.TuneBrushes
 import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.ui.theme.TuneShapes
 import com.meowv.tune.ui.theme.TuneSizes
@@ -77,7 +70,7 @@ internal fun SleepTimerPanel(
     }
     if (isCar) {
         Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            TimerDialogChrome(isCar = true)
+            TuneDialogWindow(isCar = true)
             Surface(
                 modifier = Modifier.widthIn(max = 500.dp).fillMaxWidth(.94f),
                 shape = TuneShapes.Dialog,
@@ -89,8 +82,8 @@ internal fun SleepTimerPanel(
         ModalBottomSheet(
             onDismissRequest = onDismiss,
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            shape = RoundedCornerShape(topStart = 27.dp, topEnd = 27.dp),
-            containerColor = TuneColors.Raised,
+            shape = TuneShapes.Dialog,
+            containerColor = TuneColors.Surface,
             contentColor = TuneColors.Text,
             scrimColor = TuneColors.Scrim,
             dragHandle = { BottomSheetDefaults.DragHandle(color = TuneColors.BorderSoft) }
@@ -108,7 +101,7 @@ private fun SleepTimerOptions(
 ) {
     val remaining = if (timer.isActive) sleepRemainingLabel(timer.remainingMillis) else null
     Box(
-        Modifier.fillMaxWidth().background(if (isCar) TuneBrushes.Dialog else TuneBrushes.Card),
+        Modifier.fillMaxWidth().background(TuneColors.Surface),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -342,7 +335,7 @@ internal fun CustomSleepTimerDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
     ) {
-        TimerDialogChrome(isCar)
+        TuneDialogWindow(isCar)
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Box(Modifier.matchParentSize().pointerInput(onDismiss) { detectTapGestures { onDismiss() } })
             BoxWithConstraints(
@@ -359,7 +352,7 @@ internal fun CustomSleepTimerDialog(
                     border = BorderStroke(1.dp, TuneColors.Border)
                 ) {
                     Column(
-                        Modifier.background(TuneBrushes.Dialog).verticalScroll(rememberScrollState())
+                        Modifier.background(TuneColors.Surface).verticalScroll(rememberScrollState())
                             .padding(
                                 horizontal = if (compact) TuneSpacing.Large else TuneSpacing.Section,
                                 vertical = if (compact) TuneSpacing.Small else TuneSpacing.Section
@@ -396,23 +389,5 @@ internal fun CustomSleepTimerDialog(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun TimerDialogChrome(isCar: Boolean) {
-    val view = LocalView.current
-    val themeIsDark = LocalTuneIsDark.current
-    DisposableEffect(view, isCar, themeIsDark) {
-        val window = (view.parent as DialogWindowProvider).window
-        window.setDimAmount(.72f)
-        if (isCar) {
-            WindowCompat.getInsetsController(window, view).apply {
-                isAppearanceLightStatusBars = !themeIsDark
-                show(WindowInsetsCompat.Type.statusBars())
-                hide(WindowInsetsCompat.Type.navigationBars())
-            }
-        }
-        onDispose { }
     }
 }

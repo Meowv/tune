@@ -4,16 +4,13 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.listSaver
@@ -21,14 +18,9 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
@@ -37,7 +29,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
-import coil3.compose.AsyncImage
 import com.meowv.tune.R
 import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlaybackSource
@@ -49,11 +40,10 @@ import com.meowv.tune.ui.theme.TuneMotion
 import com.meowv.tune.ui.theme.TuneShapes
 import com.meowv.tune.ui.theme.TuneSizes
 import com.meowv.tune.ui.theme.TuneTypography
-import java.util.Locale
 
 internal enum class CircularPlayerVisual { Default, Loading, Playing, Paused, Error, Disconnected }
 
-internal val PhoneMiniPlayerHeight = 56.dp
+internal val PhoneMiniPlayerHeight = 64.dp
 internal val CarMiniPlayerHeight = 77.dp
 
 internal fun circularPlayerVisual(state: PlayerUiState, connected: Boolean): CircularPlayerVisual = when {
@@ -101,22 +91,19 @@ internal fun CompactMediaBar(
     onToggle: () -> Unit,
     onOpen: () -> Unit,
     onNext: () -> Unit = {},
-    onPrevious: () -> Unit = {}
+    onPrevious: () -> Unit = {},
+    canReconnect: Boolean = false
 ) {
     val music = state.source == PlaybackSource.MUSIC
     val title = if (music) state.music?.title else station?.name
     val visual = circularPlayerVisual(state, connected)
-    val subtitle = when {
-        !isCar -> null
-        music -> state.music?.artists?.joinToString(" / ")
-        else -> station?.countryCode?.displayName(Locale.SIMPLIFIED_CHINESE)
-    }
-    val shape = if (isCar) RoundedCornerShape(0.dp) else TuneShapes.Navigation
+    val canCancel = pendingPlaybackCommand(state) != null
+    val subtitle = state.music?.artists?.joinToString(" / ").takeIf { music }
+    val shape = if (isCar) RoundedCornerShape(0.dp) else TuneShapes.SettingsGroup
     Row(
         Modifier.fillMaxWidth().heightIn(min = if (isCar) CarMiniPlayerHeight else PhoneMiniPlayerHeight)
             .clip(shape).background(if (isCar) TuneBrushes.CarPlayer else TuneBrushes.PhonePlayer)
-            .border(1.dp, TuneColors.PrimaryLight.copy(alpha = .14f), shape)
-            .padding(horizontal = if (isCar) 18.dp else 7.dp, vertical = 4.dp)
+            .padding(horizontal = if (isCar) 16.dp else 8.dp, vertical = 4.dp)
             .testTag("mini_player_bar"),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -132,19 +119,25 @@ internal fun CompactMediaBar(
         MiniPlayerToggle(
             icon = when (visual) {
                 CircularPlayerVisual.Playing -> R.drawable.ic_music_pause
-                CircularPlayerVisual.Error -> R.drawable.ic_refresh
+                CircularPlayerVisual.Error, CircularPlayerVisual.Disconnected -> R.drawable.ic_refresh
+                CircularPlayerVisual.Loading -> if (canCancel) R.drawable.ic_close else R.drawable.ic_buffering
                 else -> R.drawable.ic_radio_play
             },
             description = stringResource(when (visual) {
                 CircularPlayerVisual.Playing -> R.string.now_playing_pause_accessibility
                 CircularPlayerVisual.Error -> R.string.directory_retry
-                CircularPlayerVisual.Loading -> R.string.playback_buffering
+                CircularPlayerVisual.Loading -> if (canCancel) R.string.playback_cancel_loading else R.string.playback_buffering
+                CircularPlayerVisual.Disconnected -> if (canReconnect) R.string.playback_reconnect_service
+                    else R.string.playback_service_disconnected
                 else -> R.string.now_playing_resume_accessibility
             }),
             isCar = isCar,
             animationMillis = animationMillis,
-            enabled = enabled && connected && visual != CircularPlayerVisual.Loading &&
-                (if (music) state.music != null else station != null),
+            enabled = enabled && when (visual) {
+                CircularPlayerVisual.Disconnected -> canReconnect
+                CircularPlayerVisual.Loading -> canCancel
+                else -> if (music) state.music != null else station != null
+            },
             onClick = onToggle
         )
     }
@@ -175,7 +168,7 @@ private fun MiniPlayerToggle(
         Box(
             Modifier.size(if (isCar) 56.dp else 44.dp)
                 .background(TuneColors.Primary.copy(alpha = if (enabled) .19f else .07f), shape)
-                .border(1.dp, TuneColors.PrimaryLight.copy(alpha = .15f), shape),
+                ,
             contentAlignment = Alignment.Center
         ) {
             TuneIcon(
@@ -230,8 +223,11 @@ private fun CircularPlayerEntry(
         CircularPlayerVisual.Error -> R.string.playback_failed
         CircularPlayerVisual.Disconnected -> R.string.playback_service_disconnected
     })
-    val error = if (state.source == PlaybackSource.MUSIC && connected)
-        musicPlaybackErrorText(state) else null
+    val error = when {
+        !connected -> null
+        state.source == PlaybackSource.MUSIC -> musicPlaybackErrorText(state)
+        else -> playbackErrorText(state.error, state.statusCode)
+    }
     val status = error ?: label
     val openLabel = stringResource(R.string.now_playing_open)
     val currentTitle = state.music?.title
@@ -257,8 +253,8 @@ private fun CircularPlayerEntry(
         )
     } else Modifier
     val interaction = remember { MutableInteractionSource() }
-    val coverSize = if (isCar) 48.dp else 42.dp
-    val coverShape = RoundedCornerShape(if (isCar) 13.dp else 11.dp)
+    val coverSize = if (isCar) 50.dp else 44.dp
+    val coverShape = TuneShapes.Station
     val accent = when (visual) {
         CircularPlayerVisual.Error -> TuneColors.Error
         CircularPlayerVisual.Default, CircularPlayerVisual.Disconnected -> TuneColors.Muted
@@ -285,57 +281,31 @@ private fun CircularPlayerEntry(
                 .border(1.dp, accent.copy(alpha = .24f), coverShape),
             contentAlignment = Alignment.Center
         ) {
-            Box(
-                Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                val url = artworkUrl
-                var artworkFailed by remember(stationKey, url) { mutableStateOf(false) }
-                if (url.isNullOrBlank() || artworkFailed) {
+            MediaArtwork(
+                url = artworkUrl,
+                isMusic = state.source == PlaybackSource.MUSIC,
+                modifier = Modifier.matchParentSize(),
+                artworkKey = state.music?.id,
+                radioFallback = {
                     BrandLogo(
                         Modifier.fillMaxSize().padding(7.dp)
                             .graphicsLayer { rotationZ = if (rotation.stationKey == stationKey) rotation.angle else 0f }
                             .testTag("circular_player_logo"),
                         withPlate = true
                     )
-                } else {
-                    key(stationKey, url) {
-                        val fallback = painterResource(R.drawable.ic_meowvtune_logo)
-                        AsyncImage(
-                            model = url, contentDescription = null,
-                            modifier = Modifier.fillMaxSize().testTag("circular_player_artwork"),
-                            placeholder = fallback, error = fallback, fallback = fallback,
-                            onError = { artworkFailed = true },
-                            contentScale = if (state.source == PlaybackSource.MUSIC) ContentScale.Crop else BadgeContentScale
-                        )
-                    }
                 }
-            }
+            )
             if (visual == CircularPlayerVisual.Loading) {
-                if (animate) {
-                    CircularProgressIndicator(Modifier.fillMaxSize().padding(1.dp), color = TuneColors.Primary, strokeWidth = 2.dp)
-                } else {
-                    CircularProgressIndicator(progress = { .7f }, modifier = Modifier.fillMaxSize().padding(1.dp), color = TuneColors.Primary, strokeWidth = 2.dp)
-                }
+                TuneLoadingIndicator(Modifier.align(Alignment.BottomEnd).size(16.dp)
+                    .background(TuneColors.Surface, TuneShapes.Status).padding(2.dp), animationsEnabled = animate)
             }
-            if (visual in setOf(CircularPlayerVisual.Playing, CircularPlayerVisual.Paused, CircularPlayerVisual.Error, CircularPlayerVisual.Disconnected)) {
+            if (visual == CircularPlayerVisual.Error || visual == CircularPlayerVisual.Disconnected) {
                 Box(
                     Modifier.align(Alignment.BottomEnd).padding(3.dp).size(18.dp)
-                        .background(TuneColors.Surface, CircleShape).padding(3.dp),
+                        .background(TuneColors.Surface, TuneShapes.Status).padding(3.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    when (visual) {
-                        CircularPlayerVisual.Playing, CircularPlayerVisual.Paused -> Canvas(Modifier.fillMaxSize()) {
-                            val heights = if (visual == CircularPlayerVisual.Playing) listOf(.45f, 1f, .65f) else listOf(.85f, .85f)
-                            val step = size.width / heights.size
-                            heights.forEachIndexed { index, fraction ->
-                                val height = size.height * fraction
-                                drawRoundRect(accent, Offset(index * step + step * .2f, (size.height - height) / 2), Size(step * .6f, height), CornerRadius(1.dp.toPx()))
-                            }
-                        }
-                        CircularPlayerVisual.Disconnected -> TuneIcon(R.drawable.ic_close, Modifier.fillMaxSize(), accent)
-                        else -> TuneIcon(R.drawable.ic_ui_info, Modifier.fillMaxSize(), accent)
-                    }
+                    TuneIcon(R.drawable.ic_ui_info, Modifier.fillMaxSize(), accent)
                 }
             }
         }
@@ -344,7 +314,7 @@ private fun CircularPlayerEntry(
                 title, color = TuneColors.Text, style = TuneTypography.control(isCar),
                 fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis
             )
-            val detail = error ?: subtitle
+            val detail = if (visual == CircularPlayerVisual.Disconnected) label else error ?: subtitle
             if (!detail.isNullOrBlank()) {
                 Text(
                     detail, color = if (error != null) TuneColors.Error else TuneColors.Muted,

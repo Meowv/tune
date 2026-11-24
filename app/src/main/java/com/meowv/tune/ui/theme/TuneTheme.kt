@@ -20,6 +20,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.meowv.tune.domain.ThemeMode
 
+internal const val DialogDimAmount = .46f
+
 private const val DisabledContentAlpha = .38f
 
 internal data class TunePalette(
@@ -54,86 +56,80 @@ internal data class TunePalette(
     val shadowColor: Color,
     val phonePlayer: Brush,
     val carPlayer: Brush,
-    val rail: Brush,
-    val card: Brush,
-    val dialog: Brush
+    val card: Brush
 )
 
 internal val DarkTunePalette = TunePalette(
     isDark = true,
-    background = Color(0xFF0B1020),
-    surface = Color(0xFF151E33),
-    raised = Color(0xFF202A43),
-    primary = Color(0xFFB39AFF),
-    primaryLight = Color(0xFFDDCEFF),
-    accent = Color(0xFF9775FA),
+    background = Color(0xFF0D1221),
+    surface = Color(0xFF151C2E),
+    raised = Color(0xFF1D263B),
+    primary = Color(0xFFB9A3FA),
+    primaryLight = Color(0xFFE0D5FF),
+    accent = Color(0xFF9474E8),
     text = Color(0xFFF5F6FF),
     muted = Color(0xFFABB5CA),
     iconIdle = Color(0xFFB0BAD0),
     // BorderSoft=装饰/禁用/轨道，Border=容器，BorderStrong=可交互控件。
-    border = Color(0xFF3C4A6B),
+    border = Color(0xFF344059),
     borderSoft = Color(0xFF2A3550),
     borderStrong = Color(0xFF5A6890),
-    divider = Color(0xFF253049),
-    selected = Color(0xFF222844),
-    navSelected = Color(0xFF272346),
+    divider = Color(0xFF242E42),
+    selected = Color(0xFF24263C),
+    navSelected = Color(0xFF30284C),
     player = Color(0xFF182138),
     error = Color(0xFFF87171),
-    onPrimary = Color(0xFF0B1020),
-    inversePrimary = Color(0xFF5B3FA8),
+    onPrimary = Color(0xFF0D1221),
+    inversePrimary = Color(0xFF6448B1),
     disabledContent = Color(0xFFABB5CA).copy(alpha = DisabledContentAlpha),
-    disabledContainer = Color(0xFF202A43),
-    focusOnAccent = Color(0xFF0B1020),
-    optionSurface = Color(0xFF151E33),
-    pressedOverlay = Color(0xFFB39AFF).copy(alpha = .23f),
-    focusOverlay = Color(0xFFB39AFF).copy(alpha = .10f),
-    trackOff = Color(0xFF202A43),
-    scrim = Color(0xFF0B1020).copy(alpha = .72f),
+    disabledContainer = Color(0xFF1D263B),
+    focusOnAccent = Color(0xFF0D1221),
+    optionSurface = Color(0xFF151C2E),
+    pressedOverlay = Color(0xFFB9A3FA).copy(alpha = .23f),
+    focusOverlay = Color(0xFFB9A3FA).copy(alpha = .10f),
+    trackOff = Color(0xFF1D263B),
+    scrim = Color(0xFF0D1221).copy(alpha = DialogDimAmount),
     shadowColor = Color.Transparent,
     phonePlayer = Brush.linearGradient(listOf(Color(0xFF312E53), Color(0xFF1C253E))),
     carPlayer = Brush.horizontalGradient(listOf(Color(0xFF1D2742), Color(0xFF172037))),
-    rail = Brush.verticalGradient(listOf(Color(0xFF19223B), Color(0xFF141E34))),
-    card = Brush.verticalGradient(listOf(Color(0xFF202A43), Color(0xFF151E33))),
-    dialog = Brush.verticalGradient(listOf(Color(0xFF202D4B), Color(0xFF18243C)))
+    card = Brush.verticalGradient(listOf(Color(0xFF1D263B), Color(0xFF151C2E)))
 )
 
 internal val LightTunePalette = TunePalette(
     isDark = false,
-    background = Color(0xFFF7F8FC),
+    background = Color(0xFFF6F7FB),
     surface = Color(0xFFFFFFFF),
-    raised = Color(0xFFF1F2F9),
-    primary = Color(0xFF5B3FA8),
+    raised = Color(0xFFEDF0F7),
+    primary = Color(0xFF6448B1),
     // 浅色下 PrimaryLight 是「强调前景」，比 Primary 更深，保证在浅色选中底上可读。
-    primaryLight = Color(0xFF4A2F8A),
-    accent = Color(0xFF6D4AFF),
+    primaryLight = Color(0xFF50358D),
+    accent = Color(0xFF8665D7),
     text = Color(0xFF1B2133),
     muted = Color(0xFF5C6680),
     iconIdle = Color(0xFF5C6680),
     // BorderSoft=装饰/禁用/轨道，Border=容器，BorderStrong=可交互控件。
-    border = Color(0xFFBEC7D8),
-    borderSoft = Color(0xFFD2D9E6),
+    border = Color(0xFFDCE1EB),
+    borderSoft = Color(0xFFE2E5EE),
     borderStrong = Color(0xFF818EA8),
-    divider = Color(0xFFD2D9E6),
-    selected = Color(0xFFE4DCF8),
-    navSelected = Color(0xFFE4DCF8),
+    divider = Color(0xFFE2E5EE),
+    selected = Color(0xFFEDE7FA),
+    navSelected = Color(0xFFE8DFF9),
     player = Color(0xFFFFFFFF),
-    error = Color(0xFFC5372F),
+    error = Color(0xFFB82F29),
     onPrimary = Color(0xFFFFFFFF),
-    inversePrimary = Color(0xFFDDCEFF),
+    inversePrimary = Color(0xFFE0D5FF),
     disabledContent = Color(0xFF8C96AC),
     disabledContainer = Color(0xFFEDF0F7),
     focusOnAccent = Color(0xFFFFFFFF),
     optionSurface = Color(0xFFF0F2F9),
-    pressedOverlay = Color(0xFF5B3FA8).copy(alpha = .18f),
-    focusOverlay = Color(0xFF5B3FA8).copy(alpha = .12f),
-    trackOff = Color(0xFFBEC7D8),
-    scrim = Color(0xFF1B2133).copy(alpha = .72f),
+    pressedOverlay = Color(0xFF6448B1).copy(alpha = .18f),
+    focusOverlay = Color(0xFF6448B1).copy(alpha = .12f),
+    trackOff = Color(0xFFDCE1EB),
+    scrim = Color(0xFF1B2133).copy(alpha = DialogDimAmount),
     shadowColor = Color(0x1A000000),
     phonePlayer = Brush.linearGradient(listOf(Color(0xFFF1EBFF), Color(0xFFE9EFFB))),
     carPlayer = Brush.horizontalGradient(listOf(Color(0xFFF4F1FD), Color(0xFFEAF0FA))),
-    rail = Brush.verticalGradient(listOf(Color(0xFFF8F8FD), Color(0xFFF3F5FB))),
-    card = Brush.verticalGradient(listOf(Color(0xFFF1F2F9), Color(0xFFFFFFFF))),
-    dialog = Brush.verticalGradient(listOf(Color(0xFFFFFFFF), Color(0xFFF4F5FB)))
+    card = Brush.verticalGradient(listOf(Color(0xFFEDF0F7), Color(0xFFFFFFFF)))
 )
 
 internal val LocalTunePalette = compositionLocalOf { DarkTunePalette }
@@ -179,15 +175,17 @@ object TuneColors {
 internal object TuneBrushes {
     val PhonePlayer: Brush @Composable get() = LocalTunePalette.current.phonePlayer
     val CarPlayer: Brush @Composable get() = LocalTunePalette.current.carPlayer
-    val Rail: Brush @Composable get() = LocalTunePalette.current.rail
     val Card: Brush @Composable get() = LocalTunePalette.current.card
-    val Dialog: Brush @Composable get() = LocalTunePalette.current.dialog
 }
 
 internal object TuneMotion {
     const val Press = 100
     const val ColorChange = 180
-    const val Navigation = 260
+    const val Navigation = 220
+    const val Card = 220
+    const val Artwork = 180
+    const val Lyrics = 200
+    const val Fullscreen = 280
 }
 
 /**
@@ -213,7 +211,7 @@ private fun tuneColorScheme(palette: TunePalette, isDark: Boolean) = if (isDark)
         inversePrimary = palette.inversePrimary,
         primaryContainer = palette.selected,
         onPrimaryContainer = palette.text,
-        secondary = palette.accent,
+        secondary = palette.primary,
         onSecondary = palette.onPrimary,
         secondaryContainer = palette.selected,
         onSecondaryContainer = palette.text,
@@ -223,6 +221,9 @@ private fun tuneColorScheme(palette: TunePalette, isDark: Boolean) = if (isDark)
         onBackground = palette.text,
         surface = palette.surface,
         onSurface = palette.text,
+        surfaceTint = palette.primary,
+        surfaceDim = palette.background,
+        surfaceBright = palette.raised,
         surfaceVariant = palette.raised,
         onSurfaceVariant = palette.muted,
         surfaceContainerLowest = palette.background,
@@ -238,7 +239,7 @@ private fun tuneColorScheme(palette: TunePalette, isDark: Boolean) = if (isDark)
         onError = palette.background,
         errorContainer = palette.selected,
         onErrorContainer = palette.text,
-        scrim = palette.background.copy(alpha = .72f)
+        scrim = palette.background.copy(alpha = DialogDimAmount)
     )
 } else {
     lightColorScheme(
@@ -247,7 +248,7 @@ private fun tuneColorScheme(palette: TunePalette, isDark: Boolean) = if (isDark)
         inversePrimary = palette.inversePrimary,
         primaryContainer = palette.selected,
         onPrimaryContainer = palette.text,
-        secondary = palette.accent,
+        secondary = palette.primary,
         onSecondary = palette.onPrimary,
         secondaryContainer = palette.selected,
         onSecondaryContainer = palette.text,
@@ -257,6 +258,9 @@ private fun tuneColorScheme(palette: TunePalette, isDark: Boolean) = if (isDark)
         onBackground = palette.text,
         surface = palette.surface,
         onSurface = palette.text,
+        surfaceTint = palette.primary,
+        surfaceDim = palette.background,
+        surfaceBright = palette.raised,
         surfaceVariant = palette.raised,
         onSurfaceVariant = palette.muted,
         surfaceContainerLowest = Color.White,
@@ -272,7 +276,7 @@ private fun tuneColorScheme(palette: TunePalette, isDark: Boolean) = if (isDark)
         onError = Color.White,
         errorContainer = palette.selected,
         onErrorContainer = palette.text,
-        scrim = palette.text.copy(alpha = .72f)
+        scrim = palette.text.copy(alpha = DialogDimAmount)
     )
 }
 
@@ -304,23 +308,24 @@ object TuneSpacing {
     val Small = 8.dp
     val Medium = 12.dp
     val Large = 16.dp
+    val Panel = 20.dp
     val Section = 24.dp
     val Wide = 32.dp
 }
 
 /**
- * 圆角层级（由小到大）：图标底 < 列表行/控件 < 导航容器 < 设置容器 < 播放器 < 大卡片。
- * 子元素圆角始终小于父容器，避免出现「内圆角比外圆角更圆」的倒挂。
+ * 小状态、控件、普通容器和媒体卡片共用同一组圆角规格。
  */
 object TuneShapes {
+    val Status = RoundedCornerShape(8.dp)
     val Control = RoundedCornerShape(12.dp)
-    val Station = RoundedCornerShape(13.dp)
+    val Station = RoundedCornerShape(12.dp)
     val Navigation = RoundedCornerShape(16.dp)
-    val Chip = RoundedCornerShape(15.dp)
+    val Chip = RoundedCornerShape(12.dp)
     val Dialog = RoundedCornerShape(24.dp)
-    val SettingsGroup = RoundedCornerShape(19.dp)
+    val SettingsGroup = RoundedCornerShape(18.dp)
     val Player = RoundedCornerShape(24.dp)
-    val Card = RoundedCornerShape(28.dp)
+    val Card = RoundedCornerShape(24.dp)
 }
 
 val TuneTextStyle = TextStyle(fontFamily = FontFamily.SansSerif,
@@ -328,8 +333,8 @@ val TuneTextStyle = TextStyle(fontFamily = FontFamily.SansSerif,
 
 internal object TuneTypography {
     fun pageTitle(isCar: Boolean) = title(if (isCar) 24.sp else 20.sp)
-    fun playbackTitle(isCar: Boolean) = title(if (isCar) 26.sp else 22.sp)
-    fun rowTitle(isCar: Boolean) = text(if (isCar) 16.sp else 14.sp, FontWeight.Medium)
+    fun playbackTitle(isCar: Boolean) = title(if (isCar) 26.sp else 23.sp)
+    fun rowTitle(isCar: Boolean) = text(if (isCar) 16.sp else 15.sp, FontWeight.Medium)
     fun secondary(isCar: Boolean) = text(if (isCar) 13.sp else 12.sp)
     fun meta(isCar: Boolean) = text(if (isCar) 12.sp else 11.sp)
     fun control(isCar: Boolean) = text(if (isCar) 14.sp else 13.sp, FontWeight.Medium)

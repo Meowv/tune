@@ -59,12 +59,19 @@ class MusicSearchIntegrationTest {
                 capture("results")
                 compose.onNodeWithTag("music_search_result_original-001").performClick()
                 awaitTrack("original-001")
-                compose.onNodeWithTag("music_search_page").assertDoesNotExist()
+                compose.onNodeWithTag("music_search_page").assertIsDisplayed()
+                compose.onNodeWithTag("nav_music").performClick()
+                compose.onNodeWithTag("music_search_result_original-001").assertIsSelected()
+                compose.onNode(hasTestTag("circular_player_entry") and
+                    hasAnyAncestor(hasTestTag("music_search_player"))).performClick()
+                compose.onNodeWithTag("now_playing_screen").assertIsDisplayed()
+                compose.onNodeWithTag("now_playing_collapse").performClick()
+                compose.onNodeWithTag("music_search_result_original-001").assertIsSelected()
+                assertEquals(1, requests.get())
                 assertEquals(token, main { controller.connectedToken })
                 connection.dispatch(PlayerCommand.Seek(11000))
                 awaitTrack("original-002")
                 assertTrue(connection.state.value.canPrevious)
-                compose.onNodeWithTag("music_search_open").performClick()
                 val searchToggle = compose.onNode(hasTestTag("mini_player_toggle") and
                     hasAnyAncestor(hasTestTag("music_search_player")))
                 searchToggle.assertIsDisplayed().performClick()
@@ -145,6 +152,7 @@ class MusicSearchIntegrationTest {
                 }
                 compose.onNodeWithTag("music_search_query").performTextClearance()
                 compose.onNodeWithTag("music_search_history_clear").performClick()
+                compose.onNodeWithTag("music_search_history_confirm").assertIsDisplayed().performClick()
                 compose.waitUntil(5000) {
                     compose.onAllNodesWithTag("music_search_history").fetchSemanticsNodes().isEmpty()
                 }
@@ -204,7 +212,7 @@ class MusicSearchIntegrationTest {
                 compose.waitUntil(4000) { compose.onAllNodesWithTag("music_search_result_original-001").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("music_search_result_metadata").assertDoesNotExist()
                 compose.onNodeWithText("QQ 音乐 响应超时").assertDoesNotExist()
-                compose.onNodeWithText("部分来源未能提供结果，已显示可用内容").assertDoesNotExist()
+                compose.onNodeWithText("部分来源未能提供结果，已显示可用内容").assertExists()
                 compose.onNodeWithTag("music_search_result_original-001").assertIsEnabled().performClick()
                 awaitTrack("original-001")
                 Unit

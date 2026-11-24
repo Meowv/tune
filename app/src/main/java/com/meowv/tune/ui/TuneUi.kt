@@ -31,13 +31,11 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.DialogWindowProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.meowv.tune.R
 import com.meowv.tune.domain.PlaybackPhase
@@ -57,6 +55,7 @@ import com.meowv.tune.domain.TuneSettings
 import com.meowv.tune.radio.CountryOptions
 import com.meowv.tune.playback.SleepTimerState
 import com.meowv.tune.ui.theme.TuneColors
+import com.meowv.tune.ui.theme.TuneMotion
 import com.meowv.tune.update.LocalVersion
 import com.meowv.tune.update.UpdateUiState
 import com.meowv.tune.update.install.InstallState
@@ -102,10 +101,15 @@ internal fun TuneApp(
     onEnterMusic: () -> Unit = {},
     onLoadMusic: () -> Unit = {},
     musicDevice: MusicDeviceState? = null,
-    onMusicActivated: () -> Unit = {}
+    onMusicActivated: () -> Unit = {},
+    onRetryMusicDevice: () -> Unit = {},
+    onReconnectPlayback: (() -> Unit)? = null
 ) {
     val connected by playbackConnected.collectAsStateWithLifecycle()
-    val playbackState by playback.collectAsStateWithLifecycle()
+    val playbackUi = playback.collectAsStateWithLifecycle()
+    val playbackState by remember(playbackUi) {
+        derivedStateOf(structuralEqualityPolicy()) { playbackUi.value.copy(positionMs = null) }
+    }
     val radioState by radio.collectAsStateWithLifecycle()
     val sleepTimerState by sleepTimer.collectAsStateWithLifecycle()
     var page by rememberSaveable { mutableStateOf(TunePage.Radio) }
@@ -127,8 +131,11 @@ internal fun TuneApp(
     val pageStates = rememberSaveableStateHolder()
     val pagerState = rememberPagerState(initialPage = page.ordinal) { TunePage.entries.size }
     // 点菜单 → 滚到对应页；滑动停下 → 把页码写回 page，导航高亮与设置页副作用都跟着走。
+    val navigationMillis = if (rememberMotionEnabled()) TuneMotion.Navigation else 0
     LaunchedEffect(page) {
-        if (pagerState.currentPage != page.ordinal) pagerState.animateScrollToPage(page.ordinal)
+        if (pagerState.currentPage != page.ordinal) {
+            pagerState.animateScrollToPage(page.ordinal, animationSpec = tween(navigationMillis))
+        }
     }
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.settledPage }.collect { settled ->
@@ -158,6 +165,19 @@ internal fun TuneApp(
         selectedStationUuid = radioState.selectedStationUuid ?: settings.lastSuccessfulStation
     )
     val shuffle = settings.playbackOrder == PlaybackOrder.SHUFFLE
+    val toggleOrder: () -> Unit = {
+        onSettingsChange { current ->
+            current.copy(playbackOrder = if (current.playbackOrder == PlaybackOrder.SHUFFLE)
+                PlaybackOrder.SEQUENTIAL else PlaybackOrder.SHUFFLE)
+        }
+    }
+    val onNav: (TunePage) -> Unit = { targetPage ->
+        if (musicSearchOpen && targetPage != TunePage.Music) onCloseMusicSearch()
+        showUpdate = false
+        nowPlayingOpen = false
+        page = targetPage
+    }
+    val cancel = pendingPlaybackCommand(playbackState)
     // 全屏页、通知和媒体键都交给播放队列，暂停时换台也会继续起播。
     val next: () -> Unit = { onPlayback(PlayerCommand.Next) }
     val previous: () -> Unit = { onPlayback(PlayerCommand.Previous) }
@@ -165,6 +185,8 @@ internal fun TuneApp(
         // 全屏始终操作它展示的台；目录浏览选择由卡片点击显式起播。
         val station = target
         when {
+            !connected -> onReconnectPlayback?.invoke()
+            cancel != null -> onPlayback(cancel)
             playbackState.source == PlaybackSource.MUSIC -> onPlayback(PlayerCommand.TogglePause)
             station == null -> Unit
             // 失败态一律按目标台重新起播：引擎侧可能从未建立播放意图（例如离线起播），
@@ -189,17 +211,23 @@ internal fun TuneApp(
     }
     val rotation = rememberSaveable(saver = PlayerRotationState.Saver) { PlayerRotationState() }
     val shellEnabled = !fullscreenOccupied && !showScopePicker
-    BackHandler(enabled = nowPlayingOpen && !showUpdate && !showScopePicker) {
+    BackHandler(enabled = fullscreenOccupied && !showUpdate && !showScopePicker) {
         nowPlayingOpen = false
     }
     val motionEnabled = rememberMotionEnabled()
-    val fullscreenAnimMillis = if (motionEnabled) 280 else 0
+    val fullscreenAnimMillis = if (motionEnabled) TuneMotion.Fullscreen else 0
+    val searchVisible = musicSearchOpen && !fullscreenOccupied
+    LaunchedEffect(musicSearchOpen) {
+        if (!musicSearchOpen) pageStates.removeState("music_search")
+    }
 
     Surface(color = TuneColors.Background) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val windowWidth = maxWidth
-            val isCar = isCarWindow(windowWidth.value, maxHeight.value)
+            val windowHeight = maxHeight
+            val isCar = isCarWindow(windowWidth.value, windowHeight.value)
             LaunchedEffect(isCar) { onShellChanged(isCar) }
+            val carInsets = WindowInsets.statusBars.union(WindowInsets.displayCutout)
             val updateSubtitle = updateSubtitle(update, localVersion.versionName)
             val playerEntry: @Composable () -> Unit = {
                 CompactMediaBar(
@@ -211,13 +239,13 @@ internal fun TuneApp(
                     enabled = shellEnabled,
                     animationMillis = fullscreenAnimMillis,
                     onToggle = toggle,
+                    canReconnect = onReconnectPlayback != null,
                     onNext = next,
                     onPrevious = previous,
                     onOpen = {
                         if (playbackState.source == PlaybackSource.RADIO && playbackState.station == null && target != null) {
                             onSelectTarget(target)
                         }
-                        if (musicSearchOpen) onCloseMusicSearch()
                         showUpdate = false
                         nowPlayingOpen = true
                     }
@@ -243,31 +271,27 @@ internal fun TuneApp(
             }
             Row(
                 Modifier.fillMaxSize()
-                    .then(if (isCar) Modifier.windowInsetsPadding(WindowInsets.safeDrawing) else Modifier)
+                    .then(if (isCar) Modifier.windowInsetsPadding(carInsets) else Modifier)
             ) {
                 if (isCar) {
                     val density = LocalDensity.current
                     val direction = LocalLayoutDirection.current
-                    val insets = WindowInsets.safeDrawing
+                    val insets = carInsets
                     val horizontalInsets = with(density) {
                         (insets.getLeft(density, direction) + insets.getRight(density, direction)).toDp()
                     }
-                    val railWidth = ((windowWidth - horizontalInsets) * .16f).coerceIn(144.dp, 176.dp)
+                    val railWidth = carNavigationWidth((windowWidth - horizontalInsets).value, windowHeight.value).dp
                     MeowvNavigationRail(
                         page,
                         railWidth,
-                        if (musicSearchOpen) Modifier.imePadding() else Modifier
-                    ) {
-                        if (musicSearchOpen) onCloseMusicSearch()
-                        showUpdate = false
-                        nowPlayingOpen = false
-                        page = it
-                    }
+                        if (searchVisible) Modifier.imePadding() else Modifier,
+                        onPage = onNav
+                    )
                 }
                 Box(Modifier.weight(1f).fillMaxHeight()) {
                     Column(
                         Modifier.fillMaxSize()
-                            .windowInsetsPadding(WindowInsets.safeDrawing)
+                            .then(if (isCar) Modifier else Modifier.windowInsetsPadding(WindowInsets.safeDrawing))
                             .onGloballyPositioned { onFirstLayout() }
                             .testTag(if (isCar) "shell_car" else "shell_phone")
                             .focusProperties {
@@ -301,14 +325,16 @@ internal fun TuneApp(
                             onClearCache, { showUpdate = true }, { showScopePicker = true },
                             musicState = musicState, onSearchMusic = onSearchMusic,
                             musicBrowse = musicBrowse, onLoadMusic = onLoadMusic, musicDevice = musicDevice,
-                            directoryAnimationsEnabled = shellEnabled && !showUpdate && !musicSearchOpen
+                            directoryAnimationsEnabled = shellEnabled && !showUpdate && !musicSearchOpen,
+                            onOpenMusicDevice = { onNav(TunePage.Settings) },
+                            onRetryMusicDevice = onRetryMusicDevice
                         )
-                        if (isCar) {
-                            if (!fullscreenOccupied && !musicSearchOpen && !showUpdate) playerEntry()
-                        } else {
-                            MeowvBottomDock(page, {
-                                if (musicSearchOpen) Spacer(Modifier.height(PhoneMiniPlayerHeight)) else playerEntry()
-                            }) { page = it }
+                        if (!musicSearchOpen) {
+                            if (isCar) {
+                                if (!fullscreenOccupied && !showUpdate) playerEntry()
+                            } else {
+                                MeowvBottomDock(page, playerEntry, onNav)
+                            }
                         }
                     }
                     if (!shellEnabled || showUpdate || musicSearchOpen) {
@@ -323,8 +349,21 @@ internal fun TuneApp(
                             updateContent(Modifier.weight(1f).fillMaxWidth())
                             playerEntry()
                         }
-                    } else if (isCar && musicSearchOpen) {
-                        musicSearchContent(true, playerEntry)
+                    } else if (searchVisible) {
+                        pageStates.SaveableStateProvider("music_search") {
+                            val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+                            Column(
+                                Modifier.fillMaxSize().background(TuneColors.Background)
+                                    .windowInsetsPadding(if (isCar) WindowInsets.ime else WindowInsets.safeDrawing)
+                            ) {
+                                Box(Modifier.weight(1f).fillMaxWidth()) {
+                                    musicSearchContent(isCar, playerEntry)
+                                }
+                                if (!isCar && !imeVisible) {
+                                    MeowvNavigationBar(page, onPage = onNav)
+                                }
+                            }
+                        }
                     }
                     androidx.compose.animation.AnimatedVisibility(
                         visibleState = fullscreenTransition,
@@ -340,7 +379,7 @@ internal fun TuneApp(
                         NowPlayingScreen(
                             isCar = isCar,
                             connected = connected,
-                            state = playbackState,
+                            state = playbackUi.value,
                             station = visibleStation,
                             shuffle = shuffle,
                             sleepTimer = sleepTimerState,
@@ -348,39 +387,15 @@ internal fun TuneApp(
                             onToggle = toggle,
                             onNext = next,
                             onPrevious = previous,
-                            onToggleShuffle = {
-                                onSettingsChange { current ->
-                                    current.copy(
-                                        playbackOrder = if (current.playbackOrder == PlaybackOrder.SHUFFLE) {
-                                            PlaybackOrder.SEQUENTIAL
-                                        } else {
-                                            PlaybackOrder.SHUFFLE
-                                        }
-                                    )
-                                }
-                            },
+                            onToggleShuffle = toggleOrder,
+                            canReconnect = onReconnectPlayback != null,
                             onSetSleepTimer = onSetSleepTimer,
                             onSeek = { onPlayback(PlayerCommand.Seek(it)) },
-                            onSelectStation = { nowPlayingOpen = false; page = if (playbackState.source == PlaybackSource.MUSIC) TunePage.Music else TunePage.Radio },
+                            onSelectStation = { onNav(if (playbackState.source == PlaybackSource.MUSIC) TunePage.Music else TunePage.Radio) },
                             modifier = Modifier.fillMaxSize().testTag("now_playing_screen")
                                 .focusRequester(fullscreenFocus).focusGroup()
                         )
                     }
-                }
-            }
-            if (!isCar && musicSearchOpen) {
-                androidx.compose.ui.window.Dialog(
-                    onDismissRequest = onCloseMusicSearch,
-                    properties = androidx.compose.ui.window.DialogProperties(
-                        usePlatformDefaultWidth = false, decorFitsSystemWindows = false
-                    )
-                ) {
-                    val view = LocalView.current
-                    DisposableEffect(view) {
-                        (view.parent as? DialogWindowProvider)?.window?.setDimAmount(.72f)
-                        onDispose { }
-                    }
-                    musicSearchContent(false, playerEntry)
                 }
             }
             if (!isCar && showUpdate) {
@@ -393,7 +408,7 @@ internal fun TuneApp(
                 snackbar,
                 // 让出系统栏高度后再按播放器/导航栏厚度上移，避免提示压在播放器上。
                 Modifier.align(Alignment.BottomCenter)
-                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
+                    .windowInsetsPadding((if (isCar) carInsets else WindowInsets.safeDrawing).only(WindowInsetsSides.Bottom))
                     .padding(
                         bottom = when {
                             nowPlayingOpen -> 24.dp
@@ -475,7 +490,9 @@ private fun TunePager(
     musicDevice: MusicDeviceState?,
     onLoadMusic: () -> Unit,
     musicState: MusicUiState,
-    onSearchMusic: () -> Unit
+    onSearchMusic: () -> Unit,
+    onOpenMusicDevice: () -> Unit,
+    onRetryMusicDevice: () -> Unit
 ) {
     HorizontalPager(state = state, modifier = modifier, key = { TunePage.entries[it].name }) { index ->
         val target = TunePage.entries[index]
@@ -489,7 +506,9 @@ private fun TunePager(
                 onOpenUpdate, onScopeClick,
                 activePage && !state.isScrollInProgress,
                 musicBrowse, musicDevice, onLoadMusic, musicState, onSearchMusic,
-                activePage = activePage
+                activePage = activePage,
+                onOpenMusicDevice = onOpenMusicDevice,
+                onRetryMusicDevice = onRetryMusicDevice
             )
         }
     }
@@ -522,7 +541,9 @@ private fun pageContent(
     onLoadMusic: () -> Unit,
     musicState: MusicUiState,
     onSearchMusic: () -> Unit,
-    activePage: Boolean
+    activePage: Boolean,
+    onOpenMusicDevice: () -> Unit,
+    onRetryMusicDevice: () -> Unit
 ) {
     pageStates.SaveableStateProvider(page) {
         when (page) {
@@ -538,13 +559,17 @@ private fun pageContent(
                 onSelectTarget = onSelectTarget,
                 onRefresh = onRefreshRadio,
                 onScopeClick = onScopeClick,
-                animationsEnabled = directoryAnimationsEnabled
+                animationsEnabled = directoryAnimationsEnabled,
+                activePage = activePage
             )
             TunePage.Music -> MusicScreen(isCar, musicState, musicBrowse, connected, onPlayback, onSearchMusic, onLoadMusic,
                 displayMode = settings.musicDisplayMode,
                 onDisplayModeChange = { mode -> onSettingsChange { it.copy(musicDisplayMode = mode) } },
                 animationsEnabled = directoryAnimationsEnabled,
-                activePage = activePage)
+                activePage = activePage,
+                device = musicDevice,
+                onOpenDeviceSettings = onOpenMusicDevice,
+                onRetryDevice = onRetryMusicDevice)
             TunePage.Settings -> SettingsScreen(
                 isCar = isCar,
                 settings = settings,

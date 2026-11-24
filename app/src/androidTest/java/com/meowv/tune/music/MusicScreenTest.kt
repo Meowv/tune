@@ -45,31 +45,63 @@ class MusicScreenTest {
         isCarWindow(screenWidthDp.toFloat(), screenHeightDp.toFloat())
     }
 
-    @Test fun unconfiguredHidesTheNoticeAndRetry() {
+    @Test fun unconfiguredShowsTheRealServiceStatus() {
         compose.setContent { TuneTheme(ThemeMode.DARK) {
             TestMusicScreen(isCar, MusicUiState.NotConfigured, MusicFeed(), true, {}, {}, {})
         } }
-        compose.onNodeWithText("音乐服务暂未就绪").assertDoesNotExist()
+        compose.onNodeWithText("音乐服务暂未就绪").assertIsDisplayed()
         compose.onNodeWithText("重试").assertDoesNotExist()
         compose.onNodeWithTag("music_start").assertDoesNotExist()
         compose.onNodeWithTag("music_current").assertDoesNotExist()
         capture("unconfigured")
     }
 
-    @Test fun waitingForAccessHidesTheNoticeWithOrWithoutCachedTracks() {
+    @Test fun waitingForAccessShowsTheStatusWithOrWithoutCachedTracks() {
         val browse = mutableStateOf(MusicFeed(failure = MusicFailure.NOT_CONFIGURED))
         compose.setContent { TuneTheme(ThemeMode.DARK) {
             TestMusicScreen(isCar, MusicUiState.Idle, browse.value, true, {}, {}, {})
         } }
-        compose.onNodeWithText("音乐服务暂未就绪").assertDoesNotExist()
+        compose.onNodeWithText("音乐服务暂未就绪").assertIsDisplayed()
         compose.onNodeWithText("重试").assertDoesNotExist()
         compose.onNodeWithTag("music_feed_loading").assertDoesNotExist()
 
         val track = MusicTrack("cached", "Cached track", listOf("Test artist"))
         compose.runOnIdle { browse.value = browse.value.copy(tracks = listOf(track)) }
-        compose.onNodeWithTag("music_feed_track_cached").assertIsDisplayed()
-        compose.onNodeWithText("音乐服务暂未就绪").assertDoesNotExist()
+        compose.onNodeWithTag("music_feed_track_cached").assertIsNotEnabled()
+        compose.onNodeWithText("音乐服务暂未就绪").assertIsDisplayed()
         compose.onNodeWithText("重试").assertDoesNotExist()
+    }
+
+    @Test fun deviceStatusUsesTheAppropriateRecoveryAction() {
+        val phase = mutableStateOf(MusicDevicePhase.PENDING)
+        var settingsOpened = 0
+        var retries = 0
+        compose.setContent { TuneTheme(ThemeMode.DARK) {
+            MusicScreen(
+                isCar, MusicUiState.Idle, MusicFeed(), true, {}, {}, {},
+                RadioDisplayMode.LIST, {},
+                device = MusicDeviceState(phase.value),
+                onOpenDeviceSettings = { settingsOpened++ },
+                onRetryDevice = { retries++ }
+            )
+        } }
+        compose.onNodeWithText("待管理员激活").assertIsDisplayed()
+        capture("device-pending")
+        compose.onNodeWithTag("music_open_device_settings").performClick()
+        compose.runOnIdle {
+            assertEquals(1, settingsOpened)
+            phase.value = MusicDevicePhase.OFFLINE
+        }
+        compose.onNodeWithText("等待网络连接").assertIsDisplayed()
+        capture("device-offline")
+        compose.onNodeWithTag("music_retry_device").performClick()
+        compose.runOnIdle {
+            assertEquals(1, retries)
+            phase.value = MusicDevicePhase.REVOKED
+        }
+        compose.onNodeWithText("已撤销").assertIsDisplayed()
+        capture("device-revoked")
+        compose.onNodeWithTag("music_open_device_settings").assertIsDisplayed()
     }
 
     @Test fun listAndCardsDisplayTheSameTrack() {
@@ -78,8 +110,10 @@ class MusicScreenTest {
             TestMusicScreen(isCar, MusicUiState.Idle, MusicFeed(tracks = listOf(track)), true, {}, {}, {})
         } }
         compose.onNodeWithTag("music_feed_track_original-001").assertIsDisplayed()
+        capture("music-list")
         compose.onNodeWithTag("layout_card").performClick()
         compose.onNodeWithTag("music_feed_card_original-001").assertIsDisplayed()
+        capture("music-card")
         compose.onNodeWithTag("layout_list").performClick()
         compose.onNodeWithTag("music_feed_track_original-001").assertIsDisplayed()
     }
@@ -258,6 +292,7 @@ class MusicScreenTest {
         assertEquals(lyricsBounds, lyrics.assertIsDisplayed().getUnclippedBoundsInRoot())
         assertEquals(seekBounds, seek.assertIsDisplayed().getUnclippedBoundsInRoot())
         assertEquals(playBounds, play.assertIsDisplayed().getUnclippedBoundsInRoot())
+        capture("music-player-large-type")
     }
 
     @Test fun emptyMusicPlayerCanReturnToTheMusicPage() {
@@ -294,7 +329,7 @@ class MusicScreenTest {
 
     private fun capture(name: String) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val folder = File(context.getExternalFilesDir(null), "music-evidence").apply { mkdirs() }
+        val folder = File(context.cacheDir, "music-evidence").apply { mkdirs() }
         val file = File(folder, "${if (isCar) "car" else "phone"}-$name.png")
         file.outputStream().use { compose.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it) }
     }

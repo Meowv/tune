@@ -21,39 +21,46 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.progressSemantics
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -70,6 +77,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
@@ -78,6 +88,7 @@ import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.meowv.tune.R
 import com.meowv.tune.domain.Station
+import com.meowv.tune.ui.theme.DialogDimAmount
 import com.meowv.tune.ui.theme.LocalTuneIsDark
 import com.meowv.tune.ui.theme.TuneBrushes
 import com.meowv.tune.ui.theme.TuneColors
@@ -88,6 +99,7 @@ import com.meowv.tune.ui.theme.TuneSpacing
 import com.meowv.tune.ui.theme.TuneTextStyle
 import com.meowv.tune.ui.theme.TuneTypography
 import kotlin.math.abs
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun TuneIcon(@DrawableRes resource: Int, modifier: Modifier = Modifier, tint: Color = TuneColors.IconIdle) {
@@ -140,10 +152,11 @@ internal fun Modifier.controlFeedback(
 ): Modifier {
     val pressed by interaction.collectIsPressedAsState()
     val focused by interaction.collectIsFocusedAsState()
+    val hovered by interaction.collectIsHoveredAsState()
     val fill by animateColorAsState(
         targetValue = when {
             enabled && pressed -> TuneColors.PressedOverlay
-            enabled && focused -> TuneColors.FocusOverlay
+            enabled && (focused || hovered) -> TuneColors.FocusOverlay
             else -> Color.Transparent
         },
         animationSpec = tween(if (rememberMotionEnabled()) durationMillis else 0),
@@ -210,49 +223,100 @@ internal fun rememberMotionEnabled(): Boolean {
     }
 }
 
+@Composable
+internal fun TuneDialogWindow(isCar: Boolean) {
+    val view = LocalView.current
+    val dark = LocalTuneIsDark.current
+    DisposableEffect(view, isCar, dark) {
+        (view.parent as? DialogWindowProvider)?.window?.let { window ->
+            window.setDimAmount(DialogDimAmount)
+            if (isCar) WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !dark
+                show(WindowInsetsCompat.Type.statusBars())
+                hide(WindowInsetsCompat.Type.navigationBars())
+            }
+        }
+        onDispose { }
+    }
+}
+
+@Composable
+internal fun TuneLoadingIndicator(
+    modifier: Modifier,
+    tint: Color = TuneColors.Primary,
+    strokeWidth: Dp = 2.dp,
+    animationsEnabled: Boolean = true
+) {
+    val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
+    val motion = rememberMotionEnabled()
+    if (animationsEnabled && motion && lifecycle.isAtLeast(Lifecycle.State.RESUMED)) {
+        CircularProgressIndicator(modifier, color = tint, strokeWidth = strokeWidth,
+            trackColor = TuneColors.TrackOff, strokeCap = StrokeCap.Round)
+    } else {
+        TuneIcon(R.drawable.ic_buffering, modifier.progressSemantics(), tint)
+    }
+}
+
 private const val WAVE_BAR_COUNT = 4
 private val WAVE_STATIC_LEVELS = listOf(.42f, .78f, .55f, .9f)
 
 /** 台标保持图片原比例，避免裁掉贴近边缘的文字。 */
 @Composable
 internal fun StationBadge(station: Station?, size: Dp) {
-    // 圆角随尺寸缩放，但不超过大卡片的 28dp，保证子元素始终比父容器更方。
-    val radius = (size * .22f).coerceAtMost(24.dp)
     MediaArtwork(
         url = station?.iconUrl,
         isMusic = false,
-        modifier = Modifier.size(size).clip(RoundedCornerShape(radius))
+        modifier = Modifier.size(size).clip(TuneShapes.Station)
     )
 }
 
+private val artworkTints = listOf(Color(0xFF8771BC), Color(0xFF6988B0), Color(0xFF6C938F), Color(0xFFAD799C))
+
 @Composable
-internal fun MediaArtwork(url: String?, isMusic: Boolean, modifier: Modifier = Modifier) {
+internal fun MediaArtwork(
+    url: String?,
+    isMusic: Boolean,
+    modifier: Modifier = Modifier,
+    artworkKey: String? = null,
+    radioFallback: (@Composable () -> Unit)? = null
+) {
     val context = LocalContext.current
-    val duration = if (isMusic && rememberMotionEnabled()) 160 else 0
+    val duration = if (isMusic && rememberMotionEnabled()) TuneMotion.Artwork else 0
     val request = remember(context, url, duration) {
         ImageRequest.Builder(context).data(url?.takeIf(String::isNotBlank)).crossfade(duration).build()
     }
-    // 占位层由 Compose 绘制，避免 WebP 里写死的深色底在浅色主题下露出。
-    Box(modifier.background(TuneColors.Raised), contentAlignment = Alignment.Center) {
-        var showFallback by remember(url) { mutableStateOf(true) }
-        AsyncImage(
-            model = request,
-            contentDescription = null,
-            modifier = Modifier.matchParentSize(),
-            contentScale = if (isMusic) ContentScale.Crop else BadgeContentScale,
-            onLoading = { showFallback = true },
-            onSuccess = { showFallback = false },
-            onError = { showFallback = true }
-        )
-        if (showFallback) {
-            Box(Modifier.matchParentSize(), contentAlignment = Alignment.Center) {
-                val glyph = Modifier.fillMaxSize(if (isMusic) .50f else .46f).testTag("media_artwork_fallback")
-                TuneIcon(
+    var loaded by remember(request) { mutableStateOf(false) }
+    val tint = artworkTints[Math.floorMod(artworkKey.hashCode(), artworkTints.size)]
+    val raised = TuneColors.Raised
+    val surface = TuneColors.Surface
+    val fallbackBrush = remember(tint, raised, surface) {
+        Brush.linearGradient(listOf(androidx.compose.ui.graphics.lerp(raised, tint, .28f), surface))
+    }
+    Box(modifier.background(raised), contentAlignment = Alignment.Center) {
+        if (!loaded) {
+            Box(
+                Modifier.matchParentSize().then(if (isMusic) Modifier.background(fallbackBrush) else Modifier),
+                contentAlignment = Alignment.Center
+            ) {
+                if (!isMusic && radioFallback != null) radioFallback()
+                else TuneIcon(
                     if (isMusic) R.drawable.ic_music else R.drawable.ic_radio,
-                    glyph,
+                    Modifier.fillMaxSize(if (isMusic) .46f else .42f).testTag("media_artwork_fallback"),
                     TuneColors.PrimaryLight
                 )
             }
+        }
+        if (!url.isNullOrBlank()) {
+            AsyncImage(
+                model = request,
+                contentDescription = null,
+                modifier = Modifier.matchParentSize()
+                    .then(if (radioFallback != null) Modifier.testTag("circular_player_artwork") else Modifier)
+                    .then(if (isMusic) Modifier else Modifier.padding(TuneSpacing.Hairline)),
+                contentScale = if (isMusic) ContentScale.Crop else BadgeContentScale,
+                onSuccess = { loaded = true },
+                onError = { loaded = false }
+            )
         }
     }
 }
@@ -264,7 +328,7 @@ internal val BadgeContentScale = ContentScale.Fit
 internal fun MeowvTopBar(isCar: Boolean) {
     Column(Modifier.testTag("brand_header")) {
         Row(
-            Modifier.fillMaxWidth().height(if (isCar) 80.dp else 64.dp)
+            Modifier.fillMaxWidth().heightIn(min = if (isCar) 72.dp else 56.dp)
                 .background(if (isCar) TuneColors.Surface else TuneColors.Background)
                 .padding(horizontal = if (isCar) 24.dp else 16.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -292,13 +356,17 @@ internal fun MeowvNavigationBar(page: TunePage, modifier: Modifier = Modifier, o
     val index = items.indexOf(page).coerceAtLeast(0)
     // 手势块只在首次组合时启动，页码要用 rememberUpdatedState 读最新值，否则滑一次后方向会算错。
     val currentIndex by rememberUpdatedState(index)
-    val swipeThreshold = with(LocalDensity.current) { 40.dp.toPx() }
+    val currentOnPage by rememberUpdatedState(onPage)
+    val density = LocalDensity.current
+    val swipeThreshold = with(density) { 40.dp.toPx() }
+    val labelHeight = with(density) { TuneTypography.meta(false).lineHeight.toDp() }
+    val navHeight = maxOf(PhoneNavigationHeight, NavPillTop + NavPillHeight + labelHeight + TuneSpacing.Small)
     val duration = if (rememberMotionEnabled()) TuneMotion.Navigation else 0
     BoxWithConstraints(
-        modifier.fillMaxWidth().height(PhoneNavigationHeight).background(TuneColors.Background)
+        modifier.fillMaxWidth().height(navHeight).background(TuneColors.Background)
             .focusGroup().testTag("bottom_navigation")
             // 菜单条本身也能横滑：左滑下一个、右滑上一个，和内容区手势同向。
-            .pointerInput(Unit) {
+            .pointerInput(swipeThreshold) {
                 var drag = 0f
                 detectHorizontalDragGestures(
                     onDragStart = { drag = 0f },
@@ -312,7 +380,7 @@ internal fun MeowvNavigationBar(page: TunePage, modifier: Modifier = Modifier, o
                             drag >= swipeThreshold -> items.getOrNull(currentIndex - 1)
                             else -> null
                         }
-                        target?.let(onPage)
+                        target?.let(currentOnPage)
                         drag = 0f
                     },
                     onDragCancel = { drag = 0f }
@@ -348,20 +416,22 @@ internal fun MeowvNavigationRail(
     modifier: Modifier = Modifier,
     onPage: (TunePage) -> Unit
 ) {
-    BoxWithConstraints(modifier.width(width).fillMaxHeight().background(TuneBrushes.Rail).testTag("side_navigation")) {
+    BoxWithConstraints(modifier.width(width).fillMaxHeight().background(TuneColors.Surface).testTag("side_navigation")) {
         val compact = maxHeight < 440.dp
+        val narrow = width < 124.dp
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-                .padding(horizontal = 12.dp, vertical = if (compact) 12.dp else 24.dp)
+                .padding(horizontal = if (narrow) TuneSpacing.Small else TuneSpacing.Medium,
+                    vertical = if (compact) TuneSpacing.Small else TuneSpacing.Section)
                 .focusGroup(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             BrandLockup(
                 label = stringResource(R.string.app_name),
-                logoSize = 24.dp,
+                logoSize = if (narrow) 22.dp else 26.dp,
                 style = TuneTypography.control(true).copy(fontWeight = FontWeight.SemiBold),
                 modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp).testTag("car_rail_brand")
-                    .padding(start = 10.dp, bottom = if (compact) 4.dp else 10.dp),
+                    .padding(start = TuneSpacing.Hairline, bottom = if (compact) 0.dp else TuneSpacing.Small),
                 logoTag = "car_rail_brand_logo"
             )
             TunePage.entries.forEach { item ->
@@ -378,13 +448,13 @@ internal fun MeowvBottomDock(page: TunePage, playerEntry: @Composable () -> Unit
             .padding(horizontal = 12.dp).testTag("bottom_dock")
     ) {
         playerEntry()
-        Spacer(Modifier.height(3.dp))
+        Spacer(Modifier.height(TuneSpacing.Hairline))
         MeowvNavigationBar(page, onPage = onPage)
     }
 }
 
 /** 手机底栏共用的滑动选中背景，尺寸独立于条目的触控区域。 */
-internal val PhoneNavigationHeight = 62.dp
+internal val PhoneNavigationHeight = 58.dp
 private val NavPillWidth = 59.dp
 private val NavPillHeight = 30.dp
 private val NavPillTop = 6.dp
@@ -415,8 +485,8 @@ private fun NavigationItem(
         TunePage.Settings -> R.drawable.ic_settings
     }
     Box(
-        modifier.height(if (isCar) 62.dp else PhoneNavigationHeight)
-            .then(if (isCar) Modifier.fillMaxWidth() else Modifier.padding(horizontal = 6.dp))
+        modifier.heightIn(min = if (isCar) TuneSizes.TouchCar else PhoneNavigationHeight)
+            .then(if (isCar) Modifier.fillMaxWidth() else Modifier.fillMaxHeight().padding(horizontal = 6.dp))
             .background(background, shape)
             .controlFeedback(interaction, shape)
             .selectable(
@@ -431,9 +501,9 @@ private fun NavigationItem(
         contentAlignment = Alignment.Center
     ) {
         Box(
-            Modifier.then(if (isCar) Modifier.fillMaxWidth() else Modifier.fillMaxSize())
+            Modifier.then(if (isCar) Modifier.fillMaxWidth() else Modifier.fillMaxWidth())
                 .padding(
-                    horizontal = if (isCar) 16.dp else 0.dp,
+                    horizontal = if (isCar) TuneSpacing.Small else 0.dp,
                     vertical = if (isCar) 10.dp else 0.dp
                 ),
             contentAlignment = Alignment.Center
@@ -453,7 +523,7 @@ private fun NavigationItem(
                 }
             } else {
                 Column(
-                    Modifier.fillMaxSize().padding(top = NavPillTop),
+                    Modifier.fillMaxWidth().padding(top = NavPillTop, bottom = TuneSpacing.Hairline),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Box(Modifier.height(NavPillHeight), contentAlignment = Alignment.Center) { icon() }
@@ -472,13 +542,11 @@ internal fun Modifier.mediaRowHighlight(selected: Boolean, isCar: Boolean): Modi
         tween(if (rememberMotionEnabled()) TuneMotion.ColorChange else 0),
         label = "media_row_selection"
     )
-    val rowBrush = Brush.horizontalGradient(
-        listOf(TuneColors.PressedOverlay, TuneColors.FocusOverlay)
-    )
+    val selectedColor = TuneColors.Selected
     val primary = TuneColors.Primary
     return drawBehind {
         if (selection > 0f) {
-            drawRect(rowBrush, alpha = selection)
+            drawRect(selectedColor, alpha = selection)
             val width = 2.dp.toPx()
             val height = (if (isCar) 30.dp else 26.dp).toPx().coerceAtMost(size.height)
             drawRoundRect(
@@ -491,7 +559,7 @@ internal fun Modifier.mediaRowHighlight(selected: Boolean, isCar: Boolean): Modi
     }
 }
 
-internal fun mediaRowArtworkSize(isCar: Boolean): Dp = if (isCar) 49.dp else 46.dp
+internal fun mediaRowArtworkSize(isCar: Boolean): Dp = if (isCar) 50.dp else 44.dp
 
 internal fun mediaRowStartPadding(isCar: Boolean): Dp = if (isCar) 12.dp else 8.dp
 
@@ -508,20 +576,20 @@ internal fun Modifier.mediaCardDepth(isCar: Boolean, offset: () -> Float): Modif
     val position = offset()
     val distance = abs(position).coerceIn(0f, 1f)
     alpha = 1f - distance * (if (isCar) .57f else .6f)
-    scaleX = 1f - distance * (if (isCar) .37f else .1f)
-    scaleY = 1f - distance * (if (isCar) .24f else .1f)
+    scaleX = 1f - distance * .1f
+    scaleY = scaleX
     transformOrigin = TransformOrigin(if (position < 0f) 0f else 1f, .5f)
 }
 
 internal fun mediaCardSize(viewport: Dp, availableHeight: Dp, isCar: Boolean): DpSize {
-    val ratio = if (isCar) 1.08f else 1.36f
-    val preferredWidth = (viewport * if (isCar) .46f else .67f)
+    val ratio = if (isCar) 1.08f else 1.30f
+    val preferredWidth = (viewport * if (isCar) .46f else .72f)
         .coerceAtMost(if (isCar) 380.dp else 352.dp)
     val height = availableHeight.coerceAtLeast(1.dp)
     val width = minOf(
         preferredWidth,
         viewport - 48.dp,
-        (height / ratio).coerceAtLeast(if (isCar) 230.dp else 200.dp)
+        if (isCar) height * 1.35f else height / ratio
     ).coerceAtLeast(1.dp)
     return DpSize(width, minOf(height, width * ratio))
 }
@@ -530,10 +598,8 @@ internal fun mediaCardSize(viewport: Dp, availableHeight: Dp, isCar: Boolean): D
 internal fun Modifier.mediaCardSurface(focused: Boolean): Modifier {
     val cardBrush = TuneBrushes.Card
     val primary = TuneColors.Primary
-    val borderColor = TuneColors.Border
-    val shadowColor = TuneColors.Shadow
-    return shadow(10.dp, TuneShapes.Card, ambientColor = shadowColor, spotColor = shadowColor)
-        .clip(TuneShapes.Card)
+    val borderColor = TuneColors.Divider
+    return clip(TuneShapes.Card)
         .background(cardBrush)
         .border(
             if (focused) 2.dp else 1.dp,
@@ -542,24 +608,42 @@ internal fun Modifier.mediaCardSurface(focused: Boolean): Modifier {
         )
 }
 
-internal val MediaPagerPositionHeight = 12.dp
+@Composable
+internal fun mediaPagerFlingBehavior(pager: PagerState) =
+    PagerDefaults.flingBehavior(state = pager, snapPositionalThreshold = .30f)
 
 @Composable
-internal fun MediaPagerPosition(page: Int, count: Int, visibleOnPage: Boolean) {
-    if (count < 2) return
-    if (!visibleOnPage) {
-        Spacer(Modifier.height(MediaPagerPositionHeight))
-        return
-    }
-    val visible = minOf(3, count)
-    val first = (page - 1).coerceIn(0, count - visible)
-    Row(Modifier.height(MediaPagerPositionHeight), horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        repeat(visible) { index ->
-            val active = first + index == page
-            Box(
-                Modifier.size(if (active) 18.dp else 5.dp, 5.dp)
-                    .background(if (active) TuneColors.Primary else TuneColors.Border, CircleShape)
+internal fun BoxScope.MediaPagerControls(pager: PagerState, onNavigate: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    val animate = rememberMotionEnabled()
+    val currentPage = pager.settledPage
+    BoxWithConstraints(Modifier.matchParentSize()) {
+        val padding = if (maxWidth >= 360.dp) TuneSpacing.Medium else 0.dp
+        listOf(-1, 1).forEach { step ->
+            val previous = step < 0
+            val target = currentPage + step
+            PreviewControl(
+                icon = if (previous) R.drawable.ic_now_playing_previous else R.drawable.ic_now_playing_next,
+                description = stringResource(if (previous) R.string.card_previous else R.string.card_next),
+                targetSize = TuneSizes.TouchCar,
+                visualSize = 40.dp,
+                iconSize = TuneSizes.IconMd,
+                modifier = Modifier.align(if (previous) Alignment.CenterStart else Alignment.CenterEnd)
+                    .padding(horizontal = padding),
+                background = TuneColors.Surface,
+                tag = if (previous) "media_card_previous" else "media_card_next",
+                onClick = if (target !in 0 until pager.pageCount) null else {
+                    {
+                        scope.launch {
+                            if (!pager.isScrollInProgress && target in 0 until pager.pageCount) {
+                                onNavigate()
+                                if (animate) pager.animateScrollToPage(target, animationSpec = tween(TuneMotion.Card))
+                                else pager.scrollToPage(target)
+                            }
+                        }
+                        Unit
+                    }
+                }
             )
         }
     }
@@ -579,9 +663,12 @@ internal fun PreviewControl(
     tag: String = "",
     onClick: (() -> Unit)? = null
 ) {
+    val interaction = remember { MutableInteractionSource() }
     Box(
         modifier.size(targetSize).testTag(tag)
-            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
+            .controlFeedback(interaction, TuneShapes.Control, onClick != null)
+            .clickable(enabled = onClick != null, interactionSource = interaction, indication = null,
+                role = Role.Button, onClick = { onClick?.invoke() })
             .semantics {
                 role = Role.Button
                 contentDescription = description

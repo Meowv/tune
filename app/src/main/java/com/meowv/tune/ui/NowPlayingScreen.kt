@@ -40,7 +40,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -113,14 +112,15 @@ internal fun NowPlayingScreen(
     onSetSleepTimer: (Int?) -> Unit,
     modifier: Modifier = Modifier,
     onSelectStation: () -> Unit = {},
-    onSeek: (Long) -> Unit = {}
+    onSeek: (Long) -> Unit = {},
+    canReconnect: Boolean = false
 ) {
     val motionEnabled = rememberMotionEnabled()
     val animationMillis = if (motionEnabled) TuneMotion.ColorChange else 0
     val phase = state.phase
     val buffering = phase == PlaybackPhase.RESOLVING ||
         phase == PlaybackPhase.RETRYING || phase == PlaybackPhase.BUFFERING
-    val canChangeMedia = connected && !buffering
+    val canChangeMedia = connected
     val onNextCurrent by rememberUpdatedState(onNext)
     val onPreviousCurrent by rememberUpdatedState(onPrevious)
     var sleepPanelOpen by rememberSaveable { mutableStateOf(false) }
@@ -185,18 +185,28 @@ internal fun NowPlayingScreen(
                     ) {
                         BrandLogo(Modifier.size(if (isCar) 112.dp else 96.dp), withPlate = true)
                         Spacer(Modifier.height(24.dp))
+                        val emptyMessage = when {
+                            !connected -> R.string.playback_service_disconnected
+                            isMusic -> R.string.player_music_unselected
+                            else -> R.string.player_unselected
+                        }
+                        val reconnect = !connected && canReconnect
                         Text(
-                            stringResource(if (isMusic) R.string.player_music_unselected else R.string.player_unselected),
+                            stringResource(emptyMessage),
                             color = TuneColors.Text,
                             style = TuneTypography.control(isCar)
                         )
                         Spacer(Modifier.height(TuneSpacing.Large))
                         androidx.compose.material3.TextButton(
-                            onClick = onSelectStation,
+                            onClick = if (reconnect) onToggle else onSelectStation,
                             modifier = Modifier.heightIn(min = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
                                 .testTag("now_playing_select_station")
                         ) {
-                            Text(stringResource(if (isMusic) R.string.action_select_music else R.string.action_select_station))
+                            Text(stringResource(when {
+                                reconnect -> R.string.playback_reconnect_service
+                                isMusic -> R.string.action_select_music
+                                else -> R.string.action_select_station
+                            }))
                         }
                     }
                 } else if (wide) {
@@ -206,6 +216,7 @@ internal fun NowPlayingScreen(
                         media = media,
                         details = details,
                         connected = connected,
+                        canReconnect = canReconnect,
                         buffering = buffering,
                         animationMillis = animationMillis,
                         canNext = canChangeMedia && state.canNext,
@@ -228,6 +239,7 @@ internal fun NowPlayingScreen(
                             windowHeight * .53f - topInset - PhoneNowPlayingTopBarHeight
                         } else null,
                         connected = connected,
+                        canReconnect = canReconnect,
                         buffering = buffering,
                         animationMillis = animationMillis,
                         canNext = canChangeMedia && state.canNext,
@@ -280,8 +292,8 @@ internal fun NowPlayingScreen(
 @Composable
 private fun NowPlayingBackdrop(wide: Boolean, modifier: Modifier = Modifier) {
     val background = TuneColors.Background
-    val glow = TuneColors.Accent.copy(alpha = .16f)
-    val shade = TuneColors.Raised.copy(alpha = .56f)
+    val glow = TuneColors.Accent.copy(alpha = .10f)
+    val shade = TuneColors.Raised.copy(alpha = .32f)
     Canvas(modifier) {
         drawRect(background)
         drawRect(
@@ -342,7 +354,7 @@ private fun NowPlayingCollapseButton(
         animationMillis = animationMillis,
         iconSize = TuneSizes.IconLg,
         modifier = modifier,
-        surfaceSize = if (isCar) 44.dp else null,
+        surfaceSize = null,
         touchSize = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch,
         onClick = onCollapse
     )
@@ -355,6 +367,7 @@ private fun PhoneNowPlayingContent(
     details: (@Composable (Boolean, @Composable () -> Unit) -> Unit)?,
     radioTitleTop: Dp?,
     connected: Boolean,
+    canReconnect: Boolean,
     buffering: Boolean,
     animationMillis: Int,
     canNext: Boolean,
@@ -369,9 +382,10 @@ private fun PhoneNowPlayingContent(
     onCollapse: () -> Unit
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val compact = maxHeight < 560.dp
+        val availableHeight = maxHeight
+        val compact = availableHeight < 560.dp
         val compactDetails = maxHeight < 360.dp
-        val detailsHeight = maxHeight * .48f
+        val detailsHeight = maxHeight * if (compact) .43f else .40f
         val artworkGap = if (compact) 6.dp else 14.dp
         val artworkSlot = radioTitleTop
             ?.let { (it - artworkGap).coerceIn(0.dp, maxHeight * .60f) }
@@ -388,7 +402,7 @@ private fun PhoneNowPlayingContent(
                 val artworkSize = minOf(
                     maxWidth * .72f,
                     maxHeight * .94f,
-                    222.dp
+                    292.dp
                 ).coerceAtLeast(1.dp)
                 NowPlayingArtworkGesture(
                     media = media,
@@ -413,7 +427,7 @@ private fun PhoneNowPlayingContent(
             }
             val controlsGap = when {
                 details != null -> 8.dp
-                !compact -> 50.dp
+                !compact -> (availableHeight * .034f).coerceIn(TuneSpacing.Section, 48.dp)
                 artworkSlot != null -> 16.dp
                 else -> 8.dp
             }
@@ -421,6 +435,7 @@ private fun PhoneNowPlayingContent(
             TransportControls(
                 state = state,
                 connected = connected,
+                canReconnect = canReconnect,
                 buffering = buffering,
                 animationMillis = animationMillis,
                 isCar = false,
@@ -434,15 +449,11 @@ private fun PhoneNowPlayingContent(
             )
             NowPlayingNotice(
                 state,
+                connected = connected,
                 isCar = false,
                 compact = compactDetails
             )
-            val lowerSpacingWeight = when {
-                artworkSlot != null -> 1f
-                compact -> .12f
-                details == null -> .27f
-                else -> .28f
-            }
+            val lowerSpacingWeight = if (artworkSlot != null) .65f else .12f
             Spacer(Modifier.weight(lowerSpacingWeight))
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 NowPlayingTools(
@@ -468,6 +479,7 @@ private fun WideNowPlayingContent(
     media: NowPlayingMedia,
     details: (@Composable (Boolean, @Composable () -> Unit) -> Unit)?,
     connected: Boolean,
+    canReconnect: Boolean,
     buffering: Boolean,
     animationMillis: Int,
     canNext: Boolean,
@@ -482,9 +494,9 @@ private fun WideNowPlayingContent(
     onCollapse: () -> Unit
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val gap = if (isCar && maxWidth >= 600.dp) 38.dp else TuneSpacing.Large
+        val gap = if (isCar && maxWidth >= 600.dp) TuneSpacing.Wide else TuneSpacing.Large
         val columnsWidth = (maxWidth - gap).coerceAtLeast(0.dp)
-        val controlsWidth = (columnsWidth * .55f)
+        val controlsWidth = (columnsWidth * .60f)
             .coerceAtLeast(if (isCar) 220.dp else 208.dp)
             .coerceAtMost(columnsWidth)
         val compact = maxHeight < (if (isCar) 408.dp else 360.dp)
@@ -517,7 +529,8 @@ private fun WideNowPlayingContent(
                         onCollapse = onCollapse,
                         modifier = Modifier.align(Alignment.End)
                     )
-                } else if (details == null && !compact) {
+                }
+                if (details == null && (isCar || !compact)) {
                     Spacer(Modifier.weight(1f))
                 }
                 Column(
@@ -535,14 +548,15 @@ private fun WideNowPlayingContent(
                         details(compact) { NowPlayingTitle(media, isCar, Modifier.fillMaxWidth(), compact) }
                     }
                 }
-                if (isCar && details == null) {
-                    Spacer(Modifier.weight(1f))
-                } else {
-                    Spacer(Modifier.height(if (compact) TuneSpacing.Hairline else TuneSpacing.Medium))
-                }
+                Spacer(Modifier.height(when {
+                    compact -> TuneSpacing.Hairline
+                    isCar && details == null -> TuneSpacing.Section
+                    else -> TuneSpacing.Medium
+                }))
                 TransportControls(
                     state = state,
                     connected = connected,
+                    canReconnect = canReconnect,
                     buffering = buffering,
                     animationMillis = animationMillis,
                     isCar = isCar,
@@ -554,9 +568,9 @@ private fun WideNowPlayingContent(
                     modifier = Modifier.fillMaxWidth(),
                     compact = compact
                 )
-                NowPlayingNotice(state, isCar, compact)
-                if ((isCar && details == null) || !compact) {
-                    Spacer(Modifier.weight(if (details == null) 1f else .32f))
+                NowPlayingNotice(state, connected, isCar, compact)
+                if (!compact && details != null) {
+                    Spacer(Modifier.weight(.32f))
                 }
                 NowPlayingTools(
                     isCar = isCar,
@@ -568,6 +582,7 @@ private fun WideNowPlayingContent(
                     modifier = Modifier.widthIn(max = 370.dp).fillMaxWidth(),
                     compact = compact
                 )
+                if (details == null && (isCar || !compact)) Spacer(Modifier.weight(1f))
                 Spacer(Modifier.height(if (compact) TuneSpacing.Hairline else TuneSpacing.Medium))
             }
         }
@@ -593,7 +608,7 @@ private fun NowPlayingTitle(media: NowPlayingMedia, isCar: Boolean, modifier: Mo
                 color = TuneColors.Text,
                 maxLines = if (compact) 1 else 2,
                 overflow = TextOverflow.Ellipsis,
-                textAlign = if (isCar) TextAlign.Start else TextAlign.Center,
+                textAlign = TextAlign.Center,
                 style = TuneTypography.playbackTitle(isCar && !compact)
             )
         }
@@ -724,7 +739,7 @@ private fun NowPlayingArtworkGesture(
 private fun NowPlayingArtwork(media: NowPlayingMedia, modifier: Modifier) {
     val shape = TuneShapes.Card
     Box(modifier.shadow(18.dp, shape, clip = false, ambientColor = TuneColors.Shadow, spotColor = TuneColors.Shadow).clip(shape)) {
-        MediaArtwork(media.artworkUrl, media.isMusic, Modifier.matchParentSize())
+        MediaArtwork(media.artworkUrl, media.isMusic, artworkKey = media.key.toString(), modifier = Modifier.matchParentSize())
         Box(
             Modifier.matchParentSize()
                 .border(1.dp, TuneColors.PrimaryLight.copy(alpha = .16f), shape)
@@ -736,6 +751,7 @@ private fun NowPlayingArtwork(media: NowPlayingMedia, modifier: Modifier) {
 private fun TransportControls(
     state: PlayerUiState,
     connected: Boolean,
+    canReconnect: Boolean,
     buffering: Boolean,
     animationMillis: Int,
     isCar: Boolean,
@@ -756,7 +772,11 @@ private fun TransportControls(
     }
     Box(modifier, contentAlignment = Alignment.Center) {
         Row(
-            Modifier.widthIn(max = if (isCar) 272.dp else 248.dp).fillMaxWidth(),
+            Modifier.widthIn(max = when {
+                isCar && compact -> 216.dp
+                isCar -> 252.dp
+                else -> 224.dp
+            }).fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -773,6 +793,7 @@ private fun TransportControls(
             PrimaryPlaybackControl(
                 state = state,
                 connected = connected,
+                canReconnect = canReconnect,
                 buffering = buffering,
                 isCar = isCar,
                 animationMillis = animationMillis,
@@ -797,6 +818,7 @@ private fun TransportControls(
 private fun PrimaryPlaybackControl(
     state: PlayerUiState,
     connected: Boolean,
+    canReconnect: Boolean,
     buffering: Boolean,
     isCar: Boolean,
     animationMillis: Int,
@@ -819,11 +841,13 @@ private fun PrimaryPlaybackControl(
         state.phase == PlaybackPhase.PLAYING -> PlaybackControlVisual.Playing
         else -> PlaybackControlVisual.Paused
     }
-    val enabled = connected && !buffering
+    val canCancel = pendingPlaybackCommand(state) != null
+    val enabled = if (connected) !buffering || canCancel else canReconnect
     val label = stringResource(
         when (visual) {
-            PlaybackControlVisual.Disconnected -> R.string.playback_service_disconnected
-            PlaybackControlVisual.Loading -> R.string.playback_buffering
+            PlaybackControlVisual.Disconnected -> if (canReconnect) R.string.playback_reconnect_service
+                else R.string.playback_service_disconnected
+            PlaybackControlVisual.Loading -> if (canCancel) R.string.playback_cancel_loading else R.string.playback_buffering
             PlaybackControlVisual.Error -> R.string.directory_retry
             PlaybackControlVisual.Playing -> R.string.now_playing_pause_accessibility
             PlaybackControlVisual.Paused -> R.string.now_playing_resume_accessibility
@@ -831,13 +855,12 @@ private fun PrimaryPlaybackControl(
     )
     val diameter = when {
         compact -> if (isCar) TuneSizes.TouchCar else TuneSizes.Touch
-        isCar && isRadio -> 76.dp
-        isCar -> 70.dp
+        isCar -> 76.dp
         else -> 63.dp
     }
     val foreground = if (connected) TuneColors.OnPrimary else TuneColors.Muted
     val surface = Brush.linearGradient(
-        if (connected) listOf(TuneColors.PrimaryLight, TuneColors.Accent)
+        if (connected) listOf(TuneColors.Primary, androidx.compose.ui.graphics.lerp(TuneColors.Primary, TuneColors.Accent, .24f))
         else listOf(TuneColors.Raised, TuneColors.Surface)
     )
     Box(
@@ -861,7 +884,7 @@ private fun PrimaryPlaybackControl(
                     scaleY = scale
                 }
                 .shadow(
-                    if (connected) 8.dp else 0.dp, CircleShape, clip = false,
+                    if (connected) 3.dp else 0.dp, CircleShape, clip = false,
                     ambientColor = TuneColors.Shadow, spotColor = TuneColors.Shadow
                 )
                 .background(surface, CircleShape)
@@ -876,25 +899,16 @@ private fun PrimaryPlaybackControl(
                 val iconSize = if (diameter < 60.dp) TuneSizes.IconMd else TuneSizes.IconXl
                 when {
                     current == PlaybackControlVisual.Loading -> {
-                        val size = Modifier.size(iconSize).clearAndSetSemantics {}
-                        val trackColor = foreground.copy(alpha = .20f)
-                        if (animationMillis > 0) {
-                            CircularProgressIndicator(size, color = foreground, strokeWidth = 2.dp, trackColor = trackColor)
-                        } else {
-                            CircularProgressIndicator(
-                                progress = { .25f },
-                                modifier = size,
-                                color = foreground,
-                                strokeWidth = 2.dp,
-                                trackColor = trackColor
-                            )
+                        Box(contentAlignment = Alignment.Center) {
+                            TuneLoadingIndicator(Modifier.size(iconSize).clearAndSetSemantics {}, tint = foreground)
+                            if (canCancel) TuneIcon(R.drawable.ic_close, Modifier.size(iconSize * .48f), foreground)
                         }
                     }
                     current == PlaybackControlVisual.Playing && isRadio ->
                         PlayingWaveform(foreground, Modifier.size(iconSize + 4.dp, iconSize))
                     else -> {
                         val icon = when (current) {
-                            PlaybackControlVisual.Error -> R.drawable.ic_refresh
+                            PlaybackControlVisual.Error, PlaybackControlVisual.Disconnected -> R.drawable.ic_refresh
                             PlaybackControlVisual.Playing -> R.drawable.ic_music_pause
                             else -> R.drawable.ic_radio_play
                         }
@@ -1005,9 +1019,13 @@ private fun NowPlayingIconButton(
 }
 
 @Composable
-private fun NowPlayingNotice(state: PlayerUiState, isCar: Boolean, compact: Boolean) {
-    val text = if (state.source == PlaybackSource.MUSIC) musicPlaybackErrorText(state)
-        else playbackErrorText(state.error, state.statusCode)
+private fun NowPlayingNotice(state: PlayerUiState, connected: Boolean, isCar: Boolean, compact: Boolean) {
+    val text = when {
+        !connected -> stringResource(R.string.playback_service_disconnected)
+        state.source == PlaybackSource.MUSIC -> musicPlaybackErrorText(state)
+        else -> playbackErrorText(state.error, state.statusCode)
+    }
+    if (compact && text == null) return
     val motionEnabled = rememberMotionEnabled()
     val style = TuneTypography.secondary(isCar)
     val maxLines = if (compact) 1 else 2

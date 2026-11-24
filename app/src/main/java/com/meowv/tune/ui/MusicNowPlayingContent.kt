@@ -81,7 +81,7 @@ internal fun MusicNowPlayingDetails(
         // 先给进度条留出触控空间，标题和歌词共用剩余高度。
         Column(
             Modifier.fillMaxWidth().weight(1f, fill = false).clipToBounds(),
-            horizontalAlignment = if (isCar) Alignment.Start else Alignment.CenterHorizontally,
+            horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(TuneSpacing.Hairline)
         ) {
             title()
@@ -106,7 +106,7 @@ internal fun MusicNowPlayingDetails(
 private fun MusicLyricPreview(state: PlayerUiState, isCar: Boolean, compact: Boolean) {
     val lines = state.musicLyrics
     val index = MusicLyrics.activeLine(lines, state.positionMs ?: 0)
-    val animationMillis = if (rememberMotionEnabled()) TuneMotion.ColorChange else 0
+    val animationMillis = if (rememberMotionEnabled()) TuneMotion.Lyrics else 0
     val currentStyle = TuneTypography.rowTitle(isCar && !compact)
     val nextStyle = TuneTypography.secondary(isCar)
     val lineCount = if (compact) 1 else 2

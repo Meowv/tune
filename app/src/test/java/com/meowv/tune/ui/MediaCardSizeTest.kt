@@ -22,5 +22,8 @@ class MediaCardSizeTest {
         assertTrue(short.width >= 230.dp)
         assertTrue(tall.width > short.width)
         assertTrue(tall.height <= 390.dp)
+        val veryShort = mediaCardSize(700.dp, 105.dp, isCar = true)
+        assertTrue(veryShort.height <= 105.dp)
+        assertTrue(veryShort.width < short.width)
     }
 }

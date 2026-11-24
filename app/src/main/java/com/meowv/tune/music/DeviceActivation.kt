@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -45,6 +46,7 @@ internal class DeviceActivation(
     private val foreground = Mutex()
     private val storage = Mutex()
     private val rejected = Channel<Unit>(Channel.CONFLATED)
+    private val retry = Channel<Unit>(Channel.CONFLATED)
     private val credential = AtomicReference<Credential?>()
     private val serviceUrl = client.baseUrl.toString()
 
@@ -76,10 +78,15 @@ internal class DeviceActivation(
         }
     }
 
+    fun retryConnection() {
+        if (state.value.phase in setOf(MusicDevicePhase.OFFLINE, MusicDevicePhase.UNAVAILABLE)) retry.trySend(Unit)
+    }
+
     suspend fun runWhileForeground() = withContext(Dispatchers.IO) {
         foreground.withLock {
             var attempts = 0
             while (currentCoroutineContext().isActive) {
+                retry.tryReceive()
                 val previous = state.value.phase
                 val retryAfter = try {
                     synchronize()
@@ -111,7 +118,16 @@ internal class DeviceActivation(
                 if (attempts < Backoff.lastIndex) attempts++
                 // 合并请求失败，不让一批 401 打断服务器要求的退避。
                 withTimeoutOrNull(delaySeconds * 1_000 + Random.nextLong(1_001)) {
-                    while (true) rejected.receive()
+                    val canRetry = retryAfter == null &&
+                        state.value.phase in setOf(MusicDevicePhase.OFFLINE, MusicDevicePhase.UNAVAILABLE)
+                    if (canRetry) {
+                        while (!select<Boolean> {
+                            rejected.onReceive { false }
+                            retry.onReceive { true }
+                        }) { /* 等待用户重试或退避到期。 */ }
+                    } else {
+                        while (true) rejected.receive()
+                    }
                 }
             }
         }

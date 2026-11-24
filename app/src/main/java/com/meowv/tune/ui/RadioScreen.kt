@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.LazyGridState
@@ -31,7 +32,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -44,14 +44,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
 import com.meowv.tune.R
 import com.meowv.tune.domain.*
 import com.meowv.tune.radio.CountryOptions
-import com.meowv.tune.ui.theme.LocalTuneIsDark
-import com.meowv.tune.ui.theme.TuneBrushes
 import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.ui.theme.TuneMotion
 import com.meowv.tune.ui.theme.TuneShapes
@@ -77,12 +72,14 @@ internal fun RadioScreen(
     onSelectTarget: (Station) -> Unit,
     onRefresh: () -> Unit,
     onScopeClick: () -> Unit,
-    animationsEnabled: Boolean = true
+    animationsEnabled: Boolean = true,
+    activePage: Boolean = true
 ) {
     key(state.scope, state.resolvedCountryCode) {
         RadioDirectory(
             isCar, state, playback, connected, displayMode, onDisplayModeChange,
-            onLoadMore, if (connected) onPlayback else null, onSelectTarget, onRefresh, onScopeClick, animationsEnabled
+            onLoadMore, if (connected) onPlayback else null, onSelectTarget, onRefresh, onScopeClick, animationsEnabled,
+            activePage
         )
     }
 }
@@ -100,7 +97,8 @@ private fun RadioDirectory(
     onSelectTarget: (Station) -> Unit,
     onRefresh: () -> Unit,
     onScopeClick: () -> Unit,
-    animationsEnabled: Boolean
+    animationsEnabled: Boolean,
+    activePage: Boolean
 ) {
     val locale = CountryLocale
     val selectedId = state.selectedStationUuid ?: playback.station?.uuid
@@ -122,11 +120,13 @@ private fun RadioDirectory(
             Crossfade(targetState = displayMode, animationSpec = tween(duration), label = "display_mode") { mode ->
                 when (mode) {
                     RadioDisplayMode.LIST -> StationList(
-                        isCar, state, playback, selectedId, listState, onPlayback, onLoadMore, onSelectTarget, onRefresh
+                        isCar, state, playback, selectedId, listState, onPlayback, onLoadMore, onSelectTarget, onRefresh,
+                        connected, animationsEnabled && displayMode == RadioDisplayMode.LIST
                     )
                     RadioDisplayMode.CARD -> CardMode(
                         isCar, state, playback, selectedId, onPlayback, onLoadMore, onSelectTarget, onRefresh,
-                        connected, animationsEnabled && displayMode == RadioDisplayMode.CARD
+                        connected, animationsEnabled && displayMode == RadioDisplayMode.CARD,
+                        activePage && displayMode == RadioDisplayMode.CARD
                     )
                 }
             }
@@ -144,7 +144,9 @@ private fun StationList(
     onPlayback: ((PlayerCommand) -> Unit)?,
     onLoadMore: () -> Unit,
     onSelectTarget: (Station) -> Unit,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    connected: Boolean,
+    animationsEnabled: Boolean
 ) {
     val loadMore by rememberUpdatedState(onLoadMore)
     val stationsSize by rememberUpdatedState(state.stations.size)
@@ -174,7 +176,7 @@ private fun StationList(
         ) {
             // 已有缓存行时失败只做顶部提示，不能盖住还能播的台。
             if (state.error != null && state.stations.isNotEmpty()) item(key = "directory_error", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
-                DirectoryFeedback(R.string.directory_error, onRefresh)
+                DirectoryFeedback(R.string.directory_error, onRefresh, isCar = isCar)
             }
             items(state.stations.size, key = { state.stations[it].uuid.toString() }) { index ->
                 val station = state.stations[index]
@@ -185,7 +187,9 @@ private fun StationList(
                         selected = station.uuid == selectedId,
                         playback = playback,
                         onPlayback = onPlayback,
-                        onSelectTarget = onSelectTarget
+                        onSelectTarget = onSelectTarget,
+                        connected = connected,
+                        animationsEnabled = animationsEnabled
                     )
                     if (station.uuid != selectedId && index < state.stations.lastIndex) MediaRowDivider(isCar)
                 }
@@ -221,10 +225,12 @@ private fun StationRow(
     selected: Boolean,
     playback: PlayerUiState,
     onPlayback: ((PlayerCommand) -> Unit)?,
-    onSelectTarget: (Station) -> Unit
+    onSelectTarget: (Station) -> Unit,
+    connected: Boolean,
+    animationsEnabled: Boolean
 ) {
     val title = station.name.ifBlank { stringResource(R.string.station_unnamed) }
-    val isCurrent = playback.station?.uuid == station.uuid
+    val isCurrent = playback.source == PlaybackSource.RADIO && playback.station?.uuid == station.uuid
     val phase = playback.phase
     val buffering = isCurrent && phase in BufferingPhases
     val playing = isCurrent && phase == PlaybackPhase.PLAYING
@@ -233,18 +239,14 @@ private fun StationRow(
     val action: (() -> Unit)? = when {
         onPlayback == null || buffering -> null
         isCurrent && phase == PlaybackPhase.ERROR -> ({ onPlayback(PlayerCommand.Play(station)) })
-        isCurrent -> ({ onPlayback(PlayerCommand.TogglePause) })
+        isCurrent && phase in setOf(PlaybackPhase.PLAYING, PlaybackPhase.PAUSED) ->
+            ({ onPlayback(PlayerCommand.TogglePause) })
         else -> ({
             onSelectTarget(station)
             onPlayback(PlayerCommand.Play(station))
         })
     }
-    val stateDescription = when {
-        isCurrent && playing -> stringResource(R.string.playback_live)
-        isCurrent && phase == PlaybackPhase.PAUSED -> stringResource(R.string.playback_paused)
-        isCurrent && phase == PlaybackPhase.ERROR -> stringResource(R.string.directory_retry)
-        else -> null
-    }
+    val stateDescription = playbackVisualLabel(stationPlaybackVisual(station.uuid, playback, connected))
     val actionLabel = when {
         buffering -> stringResource(R.string.playback_buffering)
         isCurrent && phase == PlaybackPhase.ERROR -> stringResource(R.string.directory_retry)
@@ -275,7 +277,7 @@ private fun StationRow(
     ) {
         StationBadge(station, mediaRowArtworkSize(isCar))
         Text(
-            title, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+            title, modifier = Modifier.weight(1f), maxLines = if (isCar) 2 else 1, overflow = TextOverflow.Ellipsis,
             color = TuneColors.Text,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
             style = TuneTypography.rowTitle(isCar)
@@ -298,17 +300,15 @@ private fun StationRow(
             contentAlignment = Alignment.Center
         ) {
             when {
-                buffering -> CircularProgressIndicator(
-                    Modifier.size(if (isCar) 20.dp else 18.dp),
-                    color = TuneColors.Primary,
-                    strokeWidth = 2.dp,
-                    trackColor = TuneColors.TrackOff,
-                    strokeCap = StrokeCap.Round
+                buffering -> TuneLoadingIndicator(
+                    Modifier.size(if (isCar) TuneSizes.IconSm else TuneSizes.IconTiny),
+                    animationsEnabled = animationsEnabled
                 )
                 isCurrent && phase == PlaybackPhase.ERROR -> TuneIcon(
                     R.drawable.ic_refresh, Modifier.size(glyph), TuneColors.Error
                 )
-                isCurrent && playing -> PlayingWaveBars(Modifier.size(glyph), TuneColors.Primary)
+                isCurrent && playing -> PlayingWaveBars(Modifier.size(glyph), TuneColors.Primary, animationsEnabled)
+                isCurrent && phase == PlaybackPhase.PAUSED -> TuneIcon(R.drawable.ic_radio_play, Modifier.size(glyph), tint)
                 else -> TuneIcon(
                     R.drawable.ic_radio_play, Modifier.size(glyph),
                     if (action == null) TuneColors.DisabledContent else tint
@@ -329,7 +329,8 @@ private fun CardMode(
     onSelectTarget: (Station) -> Unit,
     onRefresh: () -> Unit,
     connected: Boolean,
-    animationsEnabled: Boolean
+    animationsEnabled: Boolean,
+    activePage: Boolean
 ) {
     if (state.stations.isEmpty()) {
         when {
@@ -352,35 +353,42 @@ private fun CardMode(
         initialPage = queue.indexOfFirst { it.uuid == selectedId }.coerceAtLeast(0),
         pageCount = { queue.size }
     )
-    var userScrollPending by remember { mutableStateOf(false) }
+    var userScrollStart by remember { mutableStateOf<java.util.UUID?>(null) }
+    val currentQueue by rememberUpdatedState(queue)
     LaunchedEffect(pagerState) {
         pagerState.interactionSource.interactions.collect { interaction ->
-            if (interaction is androidx.compose.foundation.interaction.DragInteraction.Start) {
-                userScrollPending = true
+            when (interaction) {
+                is DragInteraction.Start -> userScrollStart = currentQueue.getOrNull(pagerState.settledPage)?.uuid
+                is DragInteraction.Cancel -> userScrollStart = null
+                else -> Unit
             }
         }
     }
     LaunchedEffect(selectedId) {
         val index = queue.indexOfFirst { it.uuid == selectedId }
-        if (index >= 0 && index != pagerState.currentPage) pagerState.scrollToPage(index)
+        if (index >= 0 && index != pagerState.currentPage) {
+            userScrollStart = null
+            pagerState.scrollToPage(index)
+        }
     }
     val currentSelectedId by rememberUpdatedState(selectedId)
     val currentOnPlayback by rememberUpdatedState(onPlayback)
     val currentOnSelectTarget by rememberUpdatedState(onSelectTarget)
     // 播放中（含连接/缓冲/重试）滑动后自动续播；暂停或空闲只换目标，不主动起播。
     val currentPlaying by rememberUpdatedState(
-        playback.source == PlaybackSource.RADIO && playback.phase in CardAutoplayPhases
+        activePage && playback.source == PlaybackSource.RADIO && playback.phase in CardAutoplayPhases
     )
-    LaunchedEffect(pagerState.settledPage, pagerState.isScrollInProgress) {
-        if (pagerState.isScrollInProgress || !userScrollPending) return@LaunchedEffect
+    LaunchedEffect(pagerState.settledPage, pagerState.isScrollInProgress, userScrollStart) {
+        val start = userScrollStart ?: return@LaunchedEffect
+        if (pagerState.isScrollInProgress) return@LaunchedEffect
         val shouldPlay = currentPlaying
         // 松手和惯性滑动之间也会进入空闲态，保留滑动记录直到卡片真正停稳。
         delay(CARD_AUTOPLAY_DEBOUNCE_MS)
         if (pagerState.isScrollInProgress) return@LaunchedEffect
-        userScrollPending = false
+        userScrollStart = null
         val page = pagerState.settledPage
-        val station = queue.getOrNull(page) ?: return@LaunchedEffect
-        if (station.uuid != currentSelectedId) {
+        val station = currentQueue.getOrNull(page) ?: return@LaunchedEffect
+        if (station.uuid != start && station.uuid != currentSelectedId) {
             currentOnSelectTarget(station)
             if (shouldPlay && currentPlaying) currentOnPlayback?.invoke(PlayerCommand.Play(station))
         }
@@ -388,53 +396,75 @@ private fun CardMode(
     LaunchedEffect(pagerState.settledPage, queue.size) {
         if (pagerState.settledPage >= queue.lastIndex - 2) onLoadMore()
     }
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val statusGap = TuneSpacing.Small
-        val statusHeight = if (isCar) 28.dp else 22.dp
-        val pagerPositionHeight = if (queue.size > 1) MediaPagerPositionHeight else 0.dp
-        val cardSpace = maxHeight - statusHeight - statusGap - pagerPositionHeight - TuneSpacing.Large
-        val (width, height) = mediaCardSize(maxWidth, cardSpace, isCar)
-        val side = (maxWidth - width) / 2
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier.fillMaxSize().testTag("station_cards"),
-            pageSize = PageSize.Fixed(width),
-            contentPadding = PaddingValues(horizontal = side),
-            pageSpacing = 12.dp,
-            key = { index -> queue[index].uuid.toString() }
-        ) { page ->
-            Column(
-                Modifier.fillMaxHeight().width(width),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                val station = queue[page]
-                StationCard(
-                    station = station, isCar = isCar,
-                    // 电台所属国家与当前选择区域一致时不重复展示国家文字。
-                    showCountry = station.countryCode != null &&
-                        station.countryCode != state.resolvedCountryCode,
-                    onClick = {
-                        onSelectTarget(station)
-                        onPlayback?.invoke(PlayerCommand.Play(station))
-                    },
-                    interactive = page == pagerState.settledPage && !pagerState.isScrollInProgress,
-                    modifier = Modifier.fillMaxWidth().height(height).testTag("station_card_${station.uuid}")
-                        .mediaCardDepth(isCar) {
-                            (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
-                        }
-                )
-                MediaPagerPosition(page, queue.size, visibleOnPage = page == pagerState.settledPage)
-                Spacer(Modifier.height(statusGap))
-                StationPlaybackStatus(
-                    visual = stationPlaybackVisual(station.uuid, playback, connected),
-                    isCar = isCar,
-                    animationsEnabled = animationsEnabled && page == pagerState.settledPage &&
-                        !pagerState.isScrollInProgress,
-                    modifier = Modifier.fillMaxWidth().height(statusHeight)
-                        .testTag("station_status_${station.uuid}")
-                )
+    Column(Modifier.fillMaxSize()) {
+        if (state.error != null) DirectoryFeedback(R.string.directory_error, onRefresh, isCar = isCar)
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            val statusGap = TuneSpacing.Small
+            val statusHeight = if (isCar) 28.dp else 22.dp
+            val cardSpace = maxHeight - statusHeight - statusGap - TuneSpacing.Large
+            val (width, height) = mediaCardSize(maxWidth, cardSpace, isCar)
+            val side = (maxWidth - width) / 2
+            HorizontalPager(
+                state = pagerState,
+                flingBehavior = mediaPagerFlingBehavior(pagerState),
+                modifier = Modifier.fillMaxSize().testTag("station_cards"),
+                pageSize = PageSize.Fixed(width),
+                contentPadding = PaddingValues(horizontal = side),
+                pageSpacing = 12.dp,
+                key = { index -> queue[index].uuid.toString() }
+            ) { page ->
+                Column(
+                    Modifier.fillMaxHeight().width(width),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    val station = queue[page]
+                    val visual = stationPlaybackVisual(station.uuid, playback, connected)
+                    val current = playback.source == PlaybackSource.RADIO && playback.station?.uuid == station.uuid
+                    StationCard(
+                        station = station, isCar = isCar,
+                        // 电台所属国家与当前选择区域一致时不重复展示国家文字。
+                        showCountry = station.countryCode != null &&
+                            station.countryCode != state.resolvedCountryCode,
+                        enabled = onPlayback != null && !(current && playback.phase in BufferingPhases),
+                        actionLabel = when (visual) {
+                            StationPlaybackVisual.Playing -> R.string.action_pause
+                            StationPlaybackVisual.Paused -> R.string.now_playing_resume_accessibility
+                            StationPlaybackVisual.Error -> R.string.directory_retry
+                            else -> R.string.action_play
+                        },
+                        onClick = {
+                            userScrollStart = null
+                            onSelectTarget(station)
+                            if (current && playback.phase in setOf(PlaybackPhase.PLAYING, PlaybackPhase.PAUSED)) {
+                                onPlayback?.invoke(PlayerCommand.TogglePause)
+                            } else {
+                                onPlayback?.invoke(PlayerCommand.Play(station))
+                            }
+                        },
+                        interactive = page == pagerState.settledPage && !pagerState.isScrollInProgress,
+                        modifier = Modifier.fillMaxWidth().height(height).testTag("station_card_${station.uuid}")
+                            .mediaCardDepth(isCar) {
+                                (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
+                            }
+                    )
+                    Spacer(Modifier.height(statusGap))
+                    StationPlaybackStatus(
+                        visual = visual,
+                        isCar = isCar,
+                        animationsEnabled = animationsEnabled && page == pagerState.settledPage &&
+                            !pagerState.isScrollInProgress,
+                        modifier = Modifier.fillMaxWidth().height(statusHeight)
+                            .testTag("station_status_${station.uuid}")
+                    )
+                }
             }
+            if (isCar) MediaPagerControls(pagerState) {
+                userScrollStart = currentQueue.getOrNull(pagerState.settledPage)?.uuid
+            }
+        }
+        if (state.isLoading && state.error == null) {
+            DirectoryLoading(Modifier.fillMaxWidth().padding(bottom = TuneSpacing.Small), size = 22.dp)
         }
     }
 }
@@ -442,18 +472,19 @@ private fun CardMode(
 @Composable
 private fun StationCard(
     station: Station, isCar: Boolean, showCountry: Boolean,
-    onClick: () -> Unit, modifier: Modifier, interactive: Boolean
+    onClick: () -> Unit, modifier: Modifier, interactive: Boolean, enabled: Boolean, @StringRes actionLabel: Int
 ) {
     var focused by remember { mutableStateOf(false) }
+    val label = stringResource(actionLabel)
     BoxWithConstraints(
         modifier.mediaCardSurface(interactive && focused)
             .then(
                 if (interactive) Modifier.onFocusChanged { focused = it.isFocused }
-                    .clickable(role = Role.Button, onClick = onClick)
+                    .clickable(enabled = enabled, onClickLabel = label, role = Role.Button, onClick = onClick)
                 else Modifier.clearAndSetSemantics { hideFromAccessibility() }
             )
     ) {
-        val padding = if (maxHeight < 280.dp) TuneSpacing.Large else TuneSpacing.Section
+        val padding = if (maxHeight < 200.dp) TuneSpacing.Small else TuneSpacing.Large
         val nameLine = if (isCar) 25.sp else 23.sp
         val nameBlock = with(LocalDensity.current) { nameLine.toDp() * 2 }
         val countryHeight = if (showCountry && station.countryCode != null) {
@@ -462,13 +493,14 @@ private fun StationCard(
         val artworkGap = if (isCar) TuneSpacing.Large else TuneSpacing.Medium
         val artwork = minOf(maxWidth * .68f, maxWidth - padding * 2,
             maxHeight - padding * 2 - nameBlock - countryHeight - artworkGap)
+        val artworkLimit = maxWidth - padding * 2
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            if (artwork >= 32.dp) {
-                StationBadge(station, artwork)
+            if (artworkLimit > 0.dp) {
+                StationBadge(station, artwork.coerceAtLeast(24.dp).coerceAtMost(artworkLimit))
                 Spacer(Modifier.height(artworkGap))
             }
             // 名称固定占两行高度，状态切换不改变卡片内容位置。
@@ -502,10 +534,10 @@ private fun StationCard(
 internal fun DirectoryToolbar(isCar: Boolean, content: @Composable RowScope.() -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(
-            start = if (isCar) 24.dp else 16.dp,
-            end = if (isCar) 24.dp else 16.dp,
-            top = if (isCar) 16.dp else 12.dp,
-            bottom = 12.dp
+            start = if (isCar) TuneSpacing.Large else TuneSpacing.Medium,
+            end = if (isCar) TuneSpacing.Large else TuneSpacing.Medium,
+            top = TuneSpacing.Small,
+            bottom = TuneSpacing.Small
         ),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
@@ -543,7 +575,7 @@ internal fun DirectoryActionChip(
         shape = TuneShapes.Chip,
         border = BorderStroke(
             if (focused) 2.dp else 1.dp,
-            if (focused) TuneColors.Primary else TuneColors.BorderStrong
+            if (focused) TuneColors.Primary else TuneColors.Border
         ),
         modifier = modifier.heightIn(min = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)
             .onFocusChanged { focused = it.isFocused }
@@ -576,9 +608,7 @@ internal fun LayoutSwitcher(mode: RadioDisplayMode, onChange: (RadioDisplayMode)
     val icon = TuneSizes.IconMd
     Row(
         Modifier.clip(TuneShapes.Navigation)
-            .background(TuneColors.Raised, TuneShapes.Navigation)
-            // 未选中一侧只有图标，加一道淡描边把控件边界交代清楚。
-            .border(1.dp, TuneColors.Border, TuneShapes.Navigation),
+            .background(TuneColors.Surface, TuneShapes.Navigation),
         verticalAlignment = Alignment.CenterVertically
     ) {
         listOf(RadioDisplayMode.LIST, RadioDisplayMode.CARD).forEach { value ->
@@ -588,7 +618,7 @@ internal fun LayoutSwitcher(mode: RadioDisplayMode, onChange: (RadioDisplayMode)
                 if (value == RadioDisplayMode.LIST) R.string.layout_list else R.string.layout_card
             )
             val itemBackground by animateColorAsState(
-                if (selected) TuneColors.Segment else Color.Transparent,
+                if (selected) TuneColors.Selected else Color.Transparent,
                 animationSpec = tween(duration), label = "layout_item_background"
             )
             val iconColor by animateColorAsState(
@@ -625,15 +655,17 @@ internal fun LayoutSwitcher(mode: RadioDisplayMode, onChange: (RadioDisplayMode)
 
 /** 目录加载中：只给一个品牌紫加载环，由调用方决定铺满内容区还是作为列表底部的小环。 */
 @Composable
-internal fun DirectoryLoading(modifier: Modifier = Modifier, size: Dp = 28.dp, tag: String = "directory_loading") {
-    Box(modifier.testTag(tag), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator(
-            Modifier.size(size),
-            color = TuneColors.Primary,
-            strokeWidth = 2.5.dp,
-            trackColor = TuneColors.TrackOff,
-            strokeCap = StrokeCap.Round
-        )
+internal fun DirectoryLoading(
+    modifier: Modifier = Modifier,
+    size: Dp = 28.dp,
+    tag: String = "directory_loading",
+    description: String? = null
+) {
+    Box(
+        modifier.testTag(tag).semantics { if (description != null) stateDescription = description },
+        contentAlignment = Alignment.Center
+    ) {
+        TuneLoadingIndicator(Modifier.size(size), strokeWidth = 2.5.dp)
     }
 }
 
@@ -647,7 +679,7 @@ internal fun DirectoryMessage(
     action: (@Composable () -> Unit)? = null
 ) {
     Column(
-        modifier.padding(horizontal = 32.dp),
+        modifier.padding(horizontal = TuneSpacing.Section).verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
@@ -665,7 +697,12 @@ internal fun DirectoryMessage(
 }
 
 @Composable
-internal fun DirectoryFeedback(@StringRes message: Int, onRetry: (() -> Unit)? = null) {
+internal fun DirectoryFeedback(
+    @StringRes message: Int,
+    onRetry: (() -> Unit)? = null,
+    @StringRes actionLabel: Int = R.string.directory_retry,
+    isCar: Boolean = false
+) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp)
             .semantics { liveRegion = LiveRegionMode.Polite },
@@ -675,8 +712,9 @@ internal fun DirectoryFeedback(@StringRes message: Int, onRetry: (() -> Unit)? =
             stringResource(message), color = TuneColors.Muted,
             modifier = Modifier.weight(1f), style = TuneTextStyle, fontSize = 14.sp
         )
-        if (onRetry != null) TextButton(onClick = onRetry) {
-            Text(stringResource(R.string.directory_retry), color = TuneColors.Primary)
+        if (onRetry != null) TextButton(onClick = onRetry,
+            modifier = Modifier.heightIn(min = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch)) {
+            Text(stringResource(actionLabel), color = TuneColors.Primary)
         }
     }
 }
@@ -703,21 +741,10 @@ internal fun ScopePicker(
     val height = (windowHeight - 48.dp).coerceIn(0.dp, if (isCar) 490.dp else 520.dp)
     if (isCar) {
         Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            val view = androidx.compose.ui.platform.LocalView.current
-            val themeIsDark = LocalTuneIsDark.current
-            DisposableEffect(view, themeIsDark) {
-                val window = (view.parent as DialogWindowProvider).window
-                window.setDimAmount(.72f)
-                WindowCompat.getInsetsController(window, view).apply {
-                    isAppearanceLightStatusBars = !themeIsDark
-                    show(WindowInsetsCompat.Type.statusBars())
-                    hide(WindowInsetsCompat.Type.navigationBars())
-                }
-                onDispose { }
-            }
+            TuneDialogWindow(isCar)
             Box(
                 Modifier.widthIn(max = 580.dp).fillMaxWidth(.9f).height(height)
-                    .clip(TuneShapes.Dialog).background(TuneBrushes.Dialog)
+                    .clip(TuneShapes.Dialog).background(TuneColors.Surface)
                     .border(1.dp, TuneColors.Border, TuneShapes.Dialog)
             ) {
                 ScopeOptions(isCar, scope, countries, onRetry, onDismiss, onSelect)
@@ -727,6 +754,7 @@ internal fun ScopePicker(
         ModalBottomSheet(
             onDismissRequest = onDismiss,
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            shape = TuneShapes.Dialog,
             containerColor = TuneColors.Surface, contentColor = TuneColors.Text,
             scrimColor = TuneColors.Scrim,
             dragHandle = { BottomSheetDefaults.DragHandle(color = TuneColors.BorderSoft) }
@@ -795,10 +823,10 @@ private fun ScopeOptions(
                 }
             }
             if (countries.isLoading) item(span = { GridItemSpan(maxLineSpan) }) { DirectoryFeedback(R.string.directory_loading) }
-            if (countries.failed) item(span = { GridItemSpan(maxLineSpan) }) { DirectoryFeedback(R.string.directory_error, onRetry) }
+            if (countries.failed) item(span = { GridItemSpan(maxLineSpan) }) { DirectoryFeedback(R.string.directory_error, onRetry, isCar = isCar) }
             if (countries.stale) item(span = { GridItemSpan(maxLineSpan) }) { DirectoryFeedback(R.string.directory_stale) }
             if (sorted.isEmpty() && !countries.isLoading && !countries.failed) {
-                item(span = { GridItemSpan(maxLineSpan) }) { DirectoryFeedback(R.string.scope_empty, onRetry) }
+                item(span = { GridItemSpan(maxLineSpan) }) { DirectoryFeedback(R.string.scope_empty, onRetry, isCar = isCar) }
             }
             items(sorted.size, key = { sorted[it].first.value }) { index ->
                 val (code, label) = sorted[index]
@@ -818,8 +846,8 @@ private fun ScopeOption(isCar: Boolean, tag: String, label: String, selected: Bo
             .clip(shape)
             .background(if (selected) TuneColors.Selected else TuneColors.OptionSurface)
             .border(
-                if (focused || selected) 2.dp else 1.dp,
-                if (focused || selected) TuneColors.Primary else TuneColors.BorderStrong,
+                if (focused) 2.dp else 1.dp,
+                if (focused) TuneColors.Primary else TuneColors.Border,
                 shape
             )
             .onFocusChanged { focused = it.isFocused }

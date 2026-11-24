@@ -42,6 +42,13 @@
   <string name="music_search_invalid">请输入 1–100 个字符的歌名或歌手</string>
   <string name="music_search_failed">搜索失败</string>
   <string name="music_search_history">最近搜索</string>
+  <string name="music_search_history_confirm">清空搜索历史？</string>
+  <string name="music_search_partial">部分来源未能提供结果，已显示可用内容</string>
+  <string name="music_device_open_settings">查看设备设置</string>
+  <string name="card_previous">上一张卡片</string>
+  <string name="card_next">下一张卡片</string>
+  <string name="playback_cancel_loading">取消本次播放</string>
+  <string name="playback_reconnect_service">重新连接播放服务</string>
   <string name="music_search_history_clear">清空</string>
   <string name="setting_autoplay_summary">启动后继续上次收听</string>
   <string name="setting_autoplay">自动播放</string>

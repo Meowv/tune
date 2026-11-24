@@ -7,7 +7,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -30,6 +29,7 @@ import com.meowv.tune.domain.PlaybackPhase
 import com.meowv.tune.domain.PlaybackSource
 import com.meowv.tune.domain.PlayerUiState
 import com.meowv.tune.ui.theme.TuneColors
+import com.meowv.tune.ui.theme.TuneMotion
 import java.util.UUID
 import kotlin.math.PI
 import kotlin.math.sin
@@ -106,14 +106,7 @@ internal fun StationPlaybackStatus(
                     )
                     StationPlaybackVisual.Connecting, StationPlaybackVisual.Buffering,
                     StationPlaybackVisual.Retrying -> {
-                        if (animate) {
-                            CircularProgressIndicator(Modifier.size(glyphHeight), color = tint, strokeWidth = 2.dp)
-                        } else {
-                            CircularProgressIndicator(
-                                progress = { .7f }, modifier = Modifier.size(glyphHeight),
-                                color = tint, strokeWidth = 2.dp
-                            )
-                        }
+                        TuneLoadingIndicator(Modifier.size(glyphHeight), tint, animationsEnabled = animate)
                     }
                     else -> TuneIcon(R.drawable.ic_ui_info, Modifier.size(glyphHeight), tint)
                 }
@@ -135,7 +128,11 @@ private fun StationPlaybackWaveform(playing: Boolean, animating: Boolean, modifi
             )
         }
     }
-    val amplitude = animateFloatAsState(if (playing) 1f else .18f, tween(180), label = "station_wave_amplitude")
+    val amplitude = animateFloatAsState(
+        if (playing) 1f else .18f,
+        tween(if (rememberMotionEnabled()) TuneMotion.ColorChange else 0),
+        label = "station_wave_amplitude"
+    )
     val tint = if (playing) TuneColors.Primary else TuneColors.Muted
     Canvas(modifier) {
         val count = 16

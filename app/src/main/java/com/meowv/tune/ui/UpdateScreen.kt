@@ -9,7 +9,6 @@ import androidx.activity.compose.BackHandler
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -40,7 +39,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -59,7 +57,6 @@ import com.meowv.tune.update.UpdateInfo
 import com.meowv.tune.update.UpdateUiState
 import com.meowv.tune.update.install.InstallFailure
 import com.meowv.tune.update.install.InstallState
-import com.meowv.tune.ui.theme.TuneBrushes
 import com.meowv.tune.ui.theme.TuneColors
 import com.meowv.tune.ui.theme.TuneShapes
 import com.meowv.tune.ui.theme.TuneSizes
@@ -125,24 +122,16 @@ internal fun UpdateScreen(
 @Composable
 private fun UpdateTopBar(isCar: Boolean, onBack: () -> Unit) {
     val backLabel = stringResource(R.string.update_back)
-    var focused by remember { mutableStateOf(false) }
-    val shape = TuneShapes.Chip
     Row(
         Modifier.fillMaxWidth().heightIn(min = if (isCar) 64.dp else 56.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            Modifier.size(if (isCar) TuneSizes.TouchCar else TuneSizes.Touch).clip(shape)
-                .background(TuneColors.Raised)
-                .border(if (focused) 2.dp else 1.dp, if (focused) TuneColors.Primary else TuneColors.BorderStrong, shape)
-                .onFocusChanged { focused = it.isFocused }
-                .clickable(role = Role.Button, onClick = onBack)
-                .testTag("update_back")
-                .semantics { contentDescription = backLabel },
-            contentAlignment = Alignment.Center
-        ) {
-            TuneIcon(R.drawable.ic_arrow_back, Modifier.size(TuneSizes.IconMd), TuneColors.Text)
-        }
+        PreviewControl(
+            R.drawable.ic_arrow_back, backLabel,
+            targetSize = if (isCar) TuneSizes.TouchCar else TuneSizes.Touch,
+            visualSize = 0.dp, iconSize = TuneSizes.IconMd,
+            tag = "update_back", onClick = onBack
+        )
         Spacer(Modifier.width(TuneSpacing.Medium))
         Text(
             stringResource(R.string.update_title),
@@ -157,14 +146,10 @@ private fun UpdateTopBar(isCar: Boolean, onBack: () -> Unit) {
 private fun BrandHeader(isCar: Boolean, local: LocalVersion) {
     Row(
         Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Hairline),
+        horizontalArrangement = Arrangement.spacedBy(TuneSpacing.Medium),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Image(
-            painterResource(R.drawable.ic_meowvtune_splash),
-            contentDescription = null,
-            modifier = Modifier.size(if (isCar) 96.dp else 84.dp)
-        )
+        BrandLogo(Modifier.size(if (isCar) 56.dp else 48.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(TuneSpacing.Hairline)) {
             Text(
                 stringResource(R.string.brand_full),
@@ -246,6 +231,7 @@ private fun StatusCard(
 @Composable
 private fun DownloadProgress(isCar: Boolean, download: InstallState.Downloading) {
     val context = LocalContext.current
+    val formats = remember { java.text.NumberFormat.getPercentInstance() }
     val total = download.totalBytes
     val downloaded = download.downloadedBytes
     if (download.indeterminate) {
@@ -271,13 +257,13 @@ private fun DownloadProgress(isCar: Boolean, download: InstallState.Downloading)
         )
     }
     Spacer(Modifier.height(TuneSpacing.Small))
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            if (total > 0) "${download.percent}%" else "",
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween) {
+        if (total > 0) Text(
+            formats.format(download.percent / 100.0),
             color = TuneColors.Primary,
             style = TuneTypography.control(isCar).copy(fontWeight = FontWeight.SemiBold)
         )
-        Spacer(Modifier.weight(1f))
         Text(
             if (total > 0) {
                 stringResource(
@@ -289,7 +275,9 @@ private fun DownloadProgress(isCar: Boolean, download: InstallState.Downloading)
                 Formatter.formatShortFileSize(context, downloaded)
             },
             color = TuneColors.Muted,
-            style = TuneTypography.secondary(isCar)
+            style = TuneTypography.secondary(isCar),
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(1f, fill = false)
         )
     }
 }
@@ -659,13 +647,11 @@ private fun UpdateCard(
 ) {
     Surface(
         modifier = modifier,
-        color = TuneColors.Surface,
-        shape = TuneShapes.Dialog,
-        border = BorderStroke(1.dp, TuneColors.Border)
+        color = if (highlighted) TuneColors.Raised else TuneColors.Surface,
+        shape = TuneShapes.SettingsGroup
     ) {
         Column(
-            Modifier.fillMaxWidth().then(if (highlighted) Modifier.background(TuneBrushes.Card) else Modifier)
-                .padding(if (isCar) TuneSpacing.Section else TuneSpacing.Large),
+            Modifier.fillMaxWidth().padding(if (isCar) TuneSpacing.Panel else TuneSpacing.Large),
             content = content
         )
     }

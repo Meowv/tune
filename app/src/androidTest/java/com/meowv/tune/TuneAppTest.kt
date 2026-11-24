@@ -323,7 +323,7 @@ class TuneAppTest {
         selectPage("nav_music")
         compose.onNodeWithTag("page_music").assertIsDisplayed()
         compose.onNodeWithText(compose.activity.getString(R.string.music_not_configured))
-            .assertDoesNotExist()
+            .assertIsDisplayed()
         selectPage("nav_settings")
         compose.onNodeWithTag("page_settings").assertIsDisplayed()
         compose.onNodeWithText("自动播放").performScrollTo().assertIsDisplayed()
@@ -335,6 +335,7 @@ class TuneAppTest {
 
     @Test
     fun swipingOnTheBottomBarSwitchesPages() {
+        org.junit.Assume.assumeTrue(compose.onAllNodesWithTag("shell_phone").fetchSemanticsNodes().isNotEmpty())
         compose.onNodeWithTag("nav_radio").assertIsSelected()
         // 菜单条本身也能横滑：左滑下一个、右滑上一个。
         compose.onNodeWithTag("bottom_navigation").performTouchInput { swipeLeft() }
@@ -374,7 +375,7 @@ class TuneAppTest {
         } else {
             assertTrue(global.top >= auto.bottom)
         }
-        capturePanel("region-picker")
+        capturePanel("region-picker", "scope_picker")
         compose.onNodeWithTag("scope_options").performScrollToNode(hasTestTag("scope_JP"))
         compose.onNodeWithTag("scope_JP").performClick()
         awaitScope(label)
@@ -795,7 +796,7 @@ class TuneAppTest {
         }
         compose.onNodeWithTag("now_playing_sleep").performClick()
         compose.onNodeWithTag("sleep_timer_15").assertIsSelected()
-        capturePanel("sleep-timer")
+        capturePanel("sleep-timer", "sleep_timer_panel")
         compose.onNodeWithTag("sleep_timer_cancel").performClick()
         compose.waitUntil(3000) { !app.sleepTimer.state.value.isActive }
         runBlocking { app.playerController.dispatch(com.meowv.tune.domain.PlayerCommand.Stop) }
@@ -906,6 +907,7 @@ class TuneAppTest {
     private fun playFirstStation() {
         compose.waitUntil(5000) { app.playerController.connected.value }
         val first = "station_${UUID(0, 1)}"
+        compose.waitUntil(5000) { compose.onAllNodesWithTag(first).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("station_list").performScrollToNode(hasTestTag(first))
         compose.onNodeWithTag(first).performClick()
         compose.waitUntil(8000) {
@@ -941,12 +943,12 @@ class TuneAppTest {
             .assertTextEquals(label)
     }
 
-    private fun capturePanel(name: String) {
+    private fun capturePanel(name: String, tag: String? = null) {
         val args = InstrumentationRegistry.getArguments()
         if (args.getString("captureV5Panels") != "true") return
         compose.waitForIdle()
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
-        val bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+        val node = if (tag != null) compose.onNodeWithTag(tag) else compose.onRoot()
+        val bitmap = node.captureToImage().asAndroidBitmap()
         val file = java.io.File(compose.activity.cacheDir, "v5-$name.png")
         file.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
     }
