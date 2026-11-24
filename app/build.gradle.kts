@@ -44,8 +44,8 @@ android {
         applicationId = "com.meowv.tune"
         minSdk = 28
         targetSdk = 35
-        versionCode = 18
-        versionName = "1.4.1"
+        versionCode = 19
+        versionName = "1.4.2"
         testInstrumentationRunner = "com.meowv.tune.TuneTestRunner"
 
 
