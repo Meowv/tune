@@ -2,6 +2,7 @@ package com.meowv.tune.playback
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.media.session.MediaSessionManager
 import android.os.Process
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
@@ -18,6 +19,7 @@ import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.SessionCommands
 import com.google.common.collect.ImmutableList
 import com.meowv.tune.BuildConfig
 import com.meowv.tune.MainActivity
@@ -162,25 +164,17 @@ class RadioPlaybackService : MediaSessionService() {
             publishedButtons = buttons
             mediaSession.setMediaButtonPreferences(buttons)
         }
-        val commands = mediaSession.player.availableCommands.buildUpon()
-            .remove(Player.COMMAND_SET_MEDIA_ITEM)
-            .remove(Player.COMMAND_CHANGE_MEDIA_ITEMS)
-            .build()
+        val commands = mediaSession.player.availableCommands
         if (commands != publishedCommands) {
             publishedCommands = commands
-            mediaSession.connectedControllers.forEach { controller ->
+            // 通知控制器的可用命令也决定 framework PlaybackState 的标准动作。
+            mediaSession.connectedControllers.filter(::canControlPlayback).forEach { controller ->
                 mediaSession.setAvailableCommands(controller, MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS, commands)
             }
         }
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
-        if (!canConnect(controllerInfo)) {
-            diagnostics?.controller("serviceRejected", controllerInfo)
-            return null
-        }
-        return session
-    }
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         (application as TuneApplication).playerController.coordinator?.stopAfterTaskRemoval()
@@ -240,19 +234,33 @@ class RadioPlaybackService : MediaSessionService() {
 
     private inner class SessionCallback : MediaSession.Callback {
         override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
-            if (!canConnect(controller)) {
+            // Media3 1.7.1 以包名和连接提示识别通知控制器，额外校验其 Binder UID。
+            if (session.isMediaNotificationController(controller) && controller.uid != Process.myUid()) {
                 diagnostics?.controller("controllerRejected", controller)
                 return MediaSession.ConnectionResult.reject()
             }
+            val result = MediaSession.ConnectionResult.AcceptedResultBuilder(session)
             diagnostics?.controller("controllerAccepted", controller)
-            val commands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
-                .remove(Player.COMMAND_SET_MEDIA_ITEM)
-                .remove(Player.COMMAND_CHANGE_MEDIA_ITEMS)
-                .build()
-            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
-                .setAvailablePlayerCommands(commands)
-                .setMediaButtonPreferences(mediaButtons())
-                .build()
+            return if (canControlPlayback(controller)) {
+                result.setAvailablePlayerCommands(session.player.availableCommands)
+                    .setMediaButtonPreferences(mediaButtons())
+                    .build()
+            } else {
+                result.setAvailableSessionCommands(SessionCommands.EMPTY)
+                    .setAvailablePlayerCommands(READ_ONLY_COMMANDS)
+                    .build()
+            }
+        }
+
+        override fun onMediaButtonEvent(
+            session: MediaSession,
+            controllerInfo: MediaSession.ControllerInfo,
+            intent: Intent
+        ): Boolean {
+            if (canControlPlayback(controllerInfo)) return false
+            // 旧版媒体键会借通知控制器执行，且 Media3 传给此回调的 isTrusted 恒为 false。
+            val caller = MediaSessionManager.RemoteUserInfo(controllerInfo.packageName, -1, controllerInfo.uid)
+            return !getSystemService(MediaSessionManager::class.java).isTrustedForMediaControl(caller)
         }
 
         override fun onPlayerInteractionFinished(
@@ -270,8 +278,13 @@ class RadioPlaybackService : MediaSessionService() {
     }
     private companion object {
         const val CHANNEL_ID = "meowv_tune_playback"
+        val READ_ONLY_COMMANDS = Player.Commands.Builder().addAll(
+            Player.COMMAND_GET_CURRENT_MEDIA_ITEM,
+            Player.COMMAND_GET_METADATA,
+            Player.COMMAND_GET_TIMELINE
+        ).build()
 
-        fun canConnect(controller: MediaSession.ControllerInfo): Boolean =
+        fun canControlPlayback(controller: MediaSession.ControllerInfo): Boolean =
             controller.uid == Process.myUid() || controller.isTrusted
     }
 }

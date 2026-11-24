@@ -2,6 +2,7 @@ package com.meowv.tune.music
 
 import com.meowv.tune.domain.music.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -47,24 +48,25 @@ class MusicViewModelTest {
         try {
             val model = MusicViewModel(repo, scope = scope)
             model.enter()
-            val feed = model.browse.value
+            val feed = model.awaitLoadedFeed()
             assertEquals((1..75).map(Int::toString), feed.tracks.map { it.id })
-            assertTrue(feed.loaded)
-            assertFalse(feed.loading)
             assertEquals(1, requests)
         } finally { scope.cancel() }
     }
 
     @Test fun activationReloadsTheMusicPageAfterItsPendingRequestFinishes() = runBlocking {
-        val initial = CompletableDeferred<Unit>()
+        val initialRequestStarted = CompletableDeferred<Unit>()
+        val finishInitialRequest = CompletableDeferred<Unit>()
         val track = MusicTrack("a", "A", listOf("Singer"))
         var requests = 0
         val repository = object : MusicRepository by FakeMusicRepository(emptyList()) {
             override suspend fun recommendations(limit: Int, cursor: String?): MusicPage {
                 if (++requests == 1) {
-                    initial.await()
+                    initialRequestStarted.complete(Unit)
+                    finishInitialRequest.await()
                     throw MusicException(MusicFailure.NOT_CONFIGURED)
                 }
+                assertTrue(finishInitialRequest.isCompleted)
                 return MusicPage(listOf(track))
             }
         }
@@ -72,12 +74,14 @@ class MusicViewModelTest {
         try {
             val model = MusicViewModel(repository, scope = scope)
             model.enter()
+            withTimeout(5_000) { initialRequestStarted.await() }
             model.onDeviceActivated()
             assertEquals(1, requests)
-            initial.complete(Unit)
+            finishInitialRequest.complete(Unit)
+            val feed = model.awaitLoadedFeed()
             assertEquals(2, requests)
-            assertEquals(listOf(track), model.browse.value.tracks)
-            assertNull(model.browse.value.failure)
+            assertEquals(listOf(track), feed.tracks)
+            assertNull(feed.failure)
         } finally {
             scope.cancel()
         }
@@ -92,8 +96,13 @@ class MusicViewModelTest {
         try {
             val model = MusicViewModel(repo, scope = scope)
             model.enter()
-            assertTrue(model.browse.value.tracks.isEmpty())
-            assertEquals(MusicFailure.RATE_LIMITED, model.browse.value.failure)
+            val feed = model.awaitLoadedFeed()
+            assertTrue(feed.tracks.isEmpty())
+            assertEquals(MusicFailure.RATE_LIMITED, feed.failure)
         } finally { scope.cancel() }
+    }
+
+    private suspend fun MusicViewModel.awaitLoadedFeed() = withTimeout(5_000) {
+        browse.first { it.loaded && !it.loading }
     }
 }

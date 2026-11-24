@@ -29,6 +29,7 @@
             android:exported="true" android:foregroundServiceType="mediaPlayback">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />
+                <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
         <!-- 仅用于 OEM 不支持 PackageInstaller 会话时，把已校验的 APK 交给系统安装界面。 -->
